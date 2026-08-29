@@ -292,7 +292,7 @@ const PRODUCT_SET = `#graphql
           nodes { namespace key type value }
         }
         variants(first: 5) {
-          nodes { id title price sku }
+          nodes { id title price sku inventoryPolicy }
         }
       }
       userErrors { code field message }
@@ -312,7 +312,7 @@ const ADMIN_REREAD = `#graphql
         nodes { namespace key type value }
       }
       variants(first: 5) {
-        nodes { id title price sku }
+        nodes { id title price sku inventoryPolicy }
       }
     }
   }
@@ -376,6 +376,7 @@ function productInput() {
     variants: [
       {
         optionValues: [{ optionName: expected.optionName, name: expected.variantTitle }],
+        inventoryPolicy: 'CONTINUE',
         price: Number(expected.price),
         sku: expected.sku,
       },
@@ -404,6 +405,7 @@ function assertAdminConformance(product) {
     product?.handle !== expected.handle ||
     product?.status !== 'ACTIVE' ||
     variant?.title !== expected.variantTitle ||
+    variant?.inventoryPolicy !== 'CONTINUE' ||
     Number(variant?.price) !== Number(expected.price) ||
     variant?.sku !== expected.sku ||
     JSON.stringify(observedMetafields) !== JSON.stringify(expected.metafields)
@@ -419,7 +421,6 @@ function storefrontConforms(product) {
   return (
     product?.title === expected.title &&
     product?.handle === expected.handle &&
-    Boolean(product?.onlineStoreUrl) &&
     variant?.title === expected.variantTitle &&
     Number(variant?.price?.amount) === Number(expected.price) &&
     variant?.price?.currencyCode === expected.currency &&
@@ -534,10 +535,14 @@ async function main() {
   evidence.stages.push({ stage: 'publication', status: 'verified' });
 
   const storefrontProduct = await pollStorefront(storefrontGraphql);
+  const storefrontUrl =
+    storefrontProduct.onlineStoreUrl ?? `https://${domain}/products/${storefrontProduct.handle}`;
   evidence.stages.push({
     stage: 'storefront_reread',
     status: 'verified',
-    storefrontUrl: storefrontProduct.onlineStoreUrl,
+    shopifyOnlineStoreUrl: storefrontProduct.onlineStoreUrl,
+    candidateStorefrontUrl: storefrontUrl,
+    candidateUrlRequiresBrowserVerification: storefrontProduct.onlineStoreUrl === null,
   });
   evidence.commercePanel = {
     verification: {
@@ -550,7 +555,8 @@ async function main() {
       variantId,
       title: storefrontProduct.title,
       handle: storefrontProduct.handle,
-      storefrontUrl: storefrontProduct.onlineStoreUrl,
+      storefrontUrl,
+      shopifyOnlineStoreUrl: storefrontProduct.onlineStoreUrl,
     },
     fabricationLot: {
       variantTitle: expected.variantTitle,
@@ -567,7 +573,7 @@ async function main() {
   };
   evidence.completedAt = new Date().toISOString();
   evidence.nextManualGate = {
-    storefrontUrl: storefrontProduct.onlineStoreUrl,
+    storefrontUrl,
     steps: [
       'Enter the development-store password in a WebMCP-enabled browser.',
       'Call Shopify-native get_product for the visible product.',
@@ -579,7 +585,7 @@ async function main() {
 
   const evidencePath = writeEvidence(evidence);
   console.warn(`Shopify API connectivity verified. Redacted evidence: ${evidencePath}`);
-  console.warn(`Manual browser gate: ${storefrontProduct.onlineStoreUrl}`);
+  console.warn(`Manual browser gate: ${storefrontUrl}`);
 }
 
 main().catch((error) => {

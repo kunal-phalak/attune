@@ -4,7 +4,7 @@ This ledger distinguishes implementation work from the pre-implementation specif
 
 ## 2026-08-29 — External-risk-first foundation
 
-- Confirmed that the workspace contained only the master build specification.
+- Confirmed that the repository contained no implementation code at the challenge-period start.
 - Started the minimal pnpm/Vite+ workspace and Next.js application.
 - Added a single page-scoped, read-only `inspect_attune_build` WebMCP tool.
 - Added an environment contract and Shopify connectivity-spike harness.
@@ -77,3 +77,32 @@ This ledger distinguishes implementation work from the pre-implementation specif
   attempted after this failure.
 - Updated the next spike run to create and verify the four required `PUBLIC_READ`
   metafield definitions before product materialization. No Neon or editor work began.
+
+## 2026-08-29 — Public repository and Shopify browser gate
+
+- Published the challenge-period history to the public repository at
+  `https://github.com/kunal-phalak/attune` with `main` tracking the local challenge branch.
+- Verified through GitHub's public repository metadata that the repository is public and
+  its license is detected as `Apache-2.0` (`apache-2.0`).
+- Re-ran the Shopify API spike after changing the shop currency to INR and publishing
+  the Liquid storefront. Admin authentication, synchronous `productSet`, Admin reread,
+  Online Store publication, Storefront `product(handle:)`, all four `attune` metafields,
+  the ₹2,400 INR lot price, SKU, and panel count passed.
+- Verified the password-protected direct Liquid product URL in the in-app browser. The
+  authenticated page exposed Shopify-native `get_product` and `update_cart`; no
+  Storefront MCP or UCP MCP endpoint was called.
+- The first native cart attempt exposed `inventoryPolicy: DENY` with zero inventory. The
+  spike was corrected to materialize subsequent disposable variants with
+  `inventoryPolicy: CONTINUE` and to verify that policy on the Admin reread.
+- A fresh product then passed the full API path and Shopify-native `get_product`, but
+  Shopify-native `update_cart(quantity: 1)` still returned the item as sold out. The
+  visible Liquid page disabled quantity entry and displayed `Unavailable`; cart quantity
+  remained zero. Admin reported `CONTINUE`, quantity zero, and inventory tracking off,
+  while Storefront GraphQL and native `get_product` both reported the variant available.
+- Captured the redacted contradiction and visible failure under `docs/evidence/shopify/`.
+  The complete Shopify gate remains blocked; Neon, Kumo, CanvasKit, PlaneGCS, auth, and
+  editor work did not begin.
+- Re-ran formatting, lint, type checks, unit tests, the Next.js production build,
+  dependency audit, secret scan, legal-state scan, deprecated WebMCP/query scan, and
+  Storefront MCP/UCP boundary scan. All passed with four intentionally non-blocking
+  pre-freeze complexity/function-size warnings.

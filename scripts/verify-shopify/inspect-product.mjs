@@ -77,7 +77,17 @@ const adminQuery = `#graphql
           id
           inventoryPolicy
           inventoryQuantity
-          inventoryItem { tracked }
+          inventoryItem {
+            id
+            tracked
+            inventoryLevels(first: 20) {
+              nodes {
+                id
+                location { id name isActive fulfillsOnlineOrders shipsInventory }
+                quantities(names: ["available", "on_hand"]) { name quantity }
+              }
+            }
+          }
         }
       }
       resourcePublicationsV2(first: 20, onlyPublished: false) {

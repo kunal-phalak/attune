@@ -7,9 +7,10 @@ the final development store.
 - [x] Liquid storefront is active and password protected.
 - [x] Client-credentials grant succeeds.
 - [x] App has the required product and publication scopes.
+- [ ] App has `read_locations` for deterministic inventory-location discovery.
 - [x] Online Store publication ID is confirmed.
 - [x] Attune metafield definitions are Storefront-readable.
-- [x] `pnpm shopify:spike` completes and writes redacted evidence.
+- [ ] Current inventory-aware `pnpm shopify:spike` completes and writes redacted evidence.
 - [x] Storefront password works in a WebMCP-enabled browser.
 - [x] The generated product is visible after password entry.
 - [x] Shopify-native `get_product` returns the visible product.

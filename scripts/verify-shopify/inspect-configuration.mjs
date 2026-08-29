@@ -40,6 +40,10 @@ if (!tokenResponse.ok || typeof tokenBody.access_token !== 'string') {
 
 const query = `#graphql
   query InspectAttuneShopifyConfiguration {
+    currentAppInstallation {
+      id
+      accessScopes { handle }
+    }
     shop {
       id
       name
@@ -105,6 +109,9 @@ console.warn(
       publications,
       attuneMetafieldDefinitions: body.data.metafieldDefinitions.nodes,
       storefrontAccessTokens: body.data.shop.storefrontAccessTokens.nodes,
+      grantedAccessScopes: body.data.currentAppInstallation.accessScopes.map(
+        (scope) => scope.handle,
+      ),
     },
     null,
     2,

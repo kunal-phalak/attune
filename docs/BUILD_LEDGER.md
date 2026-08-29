@@ -106,3 +106,24 @@ This ledger distinguishes implementation work from the pre-implementation specif
   dependency audit, secret scan, legal-state scan, deprecated WebMCP/query scan, and
   Storefront MCP/UCP boundary scan. All passed with four intentionally non-blocking
   pre-freeze complexity/function-size warnings.
+
+## 2026-08-29 — Inventory-aware Shopify contract
+
+- Replaced the implicit zero-inventory variant model with an explicit fabrication-lot
+  inventory contract. `panel_count = 4` remains the physical contents of one lot;
+  Shopify inventory is separately modeled as ten orderable `FABRICATION_LOT` units.
+- Updated synchronous `productSet` to write `inventoryQuantities` at a discovered active
+  location that fulfills online orders. Admin conformance now verifies tracking,
+  location, available quantity, aggregate quantity, and `DENY` oversell policy before
+  publication or Storefront verification.
+- Added a redacted inventory-level diagnostic and exposed the eventual Commerce-panel
+  inventory shape without starting database or product implementation.
+- The first inventory-aware preflight stopped before product creation because the
+  installed app cannot query `locations`. The granted scope set contains product and
+  publication access but lacks `read_locations`.
+- Added an explicit Admin-scope preflight and updated the setup guide. The single next
+  external gate is releasing and approving an app version that adds `read_locations`.
+  No Neon, auth, Kumo, CanvasKit, PlaneGCS, or editor work began.
+- Formatting, lint, type checks, 2/2 unit tests, and the Next.js production build passed.
+  Five complexity/function-size findings remain warnings under the approved pre-freeze
+  policy.

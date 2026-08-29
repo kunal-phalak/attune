@@ -1,0 +1,23 @@
+{
+  "status": "blocked",
+  "recorded_at": "2026-08-29T14:52:52Z",
+  "stage": "inventory_location_preflight",
+  "mutation_started": false,
+  "missing_admin_access_scopes": ["read_locations"],
+  "granted_admin_access_scopes": [
+    "read_products",
+    "write_products",
+    "read_publications",
+    "write_publications",
+    "unauthenticated_read_product_listings"
+  ],
+  "inventory_contract": {
+    "stock_unit": "FABRICATION_LOT",
+    "available_lots": 10,
+    "panels_per_lot": 4,
+    "shopify_cart_quantity": 1,
+    "inventory_policy": "DENY",
+    "location_selection": "active and fulfillsOnlineOrders"
+  },
+  "next_gate": "Release and approve an Attune Commerce Bridge app version with read_locations, preserving all existing scopes."
+}

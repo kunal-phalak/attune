@@ -41,12 +41,14 @@ token value into logs or evidence.
 The script performs:
 
 1. same-organization client-credentials authentication;
-2. synchronous `productSet`;
-3. Admin product reread and conformance comparison;
-4. `publishablePublish` and `publishedOnPublication` verification;
-5. Storefront API `product(handle:)` polling with 1, 2, 4, 8, and 15 second waits;
-6. variant, SKU, price, availability, and metafield comparison;
-7. creation of a local redacted evidence file.
+2. resolution of an active Shopify location that fulfills online orders;
+3. synchronous `productSet`, including an explicit positive inventory quantity at that
+   location;
+4. Admin product and inventory reread with conformance comparison;
+5. `publishablePublish` and `publishedOnPublication` verification;
+6. Storefront API `product(handle:)` polling with 1, 2, 4, 8, and 15 second waits;
+7. variant, SKU, price, availability, and metafield comparison;
+8. creation of a local redacted evidence file.
 
 The script intentionally does not automate the storefront password or browser-native
 WebMCP steps. Those must be tested in the judge-equivalent visible browser session.
@@ -62,6 +64,31 @@ Physical panels represented: 4
 ```
 
 Adding four Shopify units would represent sixteen panels and is a test failure.
+
+## Inventory contract
+
+Shopify inventory and fabrication quantity are different facts:
+
+```text
+panel_count:              4 panels inside one fabrication lot
+cart quantity:            1 fabrication lot
+inventory stock unit:     FABRICATION_LOT
+spike available quantity: 10 orderable fabrication lots
+inventory policy:         DENY after those ten lots are exhausted
+```
+
+The spike discovers an active location with `fulfillsOnlineOrders = true`; no location ID
+is copied into source or required as a secret. `productSet` writes the variant's
+`inventoryQuantities` for that location and the Admin reread must prove all of:
+
+- inventory tracking is enabled;
+- the selected location is active and fulfills online orders;
+- the available quantity is ten fabrication lots;
+- the aggregate variant inventory quantity is ten;
+- inventory policy is `DENY`.
+
+If any inventory fact is absent or inconsistent, the product is not eligible for browser
+WebMCP verification.
 
 ## Storefront metafields
 

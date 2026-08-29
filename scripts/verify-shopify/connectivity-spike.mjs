@@ -11,6 +11,7 @@ const REQUIRED_ENVIRONMENT = [
   'SHOPIFY_STOREFRONT_API_VERSION',
 ];
 const STOREFRONT_ACCESS_TOKEN_KEY = 'SHOPIFY_STOREFRONT_ACCESS_TOKEN';
+const REQUIRED_ADMIN_ACCESS_SCOPES = ['write_products', 'write_publications', 'read_locations'];
 
 const STOREFRONT_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 const runId = new Date()
@@ -26,6 +27,12 @@ const expected = {
   price: '2400.00',
   currency: 'INR',
   sku: `ATTUNE-SPIKE-${runId}-LOT4`,
+  inventory: {
+    availableLots: 10,
+    policy: 'DENY',
+    quantityName: 'available',
+    stockUnit: 'FABRICATION_LOT',
+  },
   metafields: {
     commitment_id: `SPIKE-${runId}`,
     revision_id: 'connectivity-r0',
@@ -292,7 +299,25 @@ const PRODUCT_SET = `#graphql
           nodes { namespace key type value }
         }
         variants(first: 5) {
-          nodes { id title price sku inventoryPolicy }
+          nodes {
+            id
+            title
+            price
+            sku
+            inventoryPolicy
+            inventoryQuantity
+            inventoryItem {
+              id
+              tracked
+              inventoryLevels(first: 5) {
+                nodes {
+                  id
+                  location { id name isActive fulfillsOnlineOrders }
+                  quantities(names: ["available"]) { name quantity }
+                }
+              }
+            }
+          }
         }
       }
       userErrors { code field message }
@@ -312,8 +337,48 @@ const ADMIN_REREAD = `#graphql
         nodes { namespace key type value }
       }
       variants(first: 5) {
-        nodes { id title price sku inventoryPolicy }
+        nodes {
+          id
+          title
+          price
+          sku
+          inventoryPolicy
+          inventoryQuantity
+          inventoryItem {
+            id
+            tracked
+            inventoryLevels(first: 5) {
+              nodes {
+                id
+                location { id name isActive fulfillsOnlineOrders }
+                quantities(names: ["available"]) { name quantity }
+              }
+            }
+          }
+        }
       }
+    }
+  }
+`;
+
+const INVENTORY_LOCATIONS = `#graphql
+  query ResolveAttuneInventoryLocation {
+    locations(first: 20) {
+      nodes {
+        id
+        name
+        isActive
+        fulfillsOnlineOrders
+        shipsInventory
+      }
+    }
+  }
+`;
+
+const CURRENT_APP_ACCESS_SCOPES = `#graphql
+  query VerifyAttuneAdminAccessScopes {
+    currentAppInstallation {
+      accessScopes { handle }
     }
   }
 `;
@@ -359,7 +424,7 @@ const STOREFRONT_REREAD = `#graphql
   }
 `;
 
-function productInput() {
+function productInput(inventoryLocationId) {
   return {
     title: expected.title,
     handle: expected.handle,
@@ -376,7 +441,14 @@ function productInput() {
     variants: [
       {
         optionValues: [{ optionName: expected.optionName, name: expected.variantTitle }],
-        inventoryPolicy: 'CONTINUE',
+        inventoryPolicy: expected.inventory.policy,
+        inventoryQuantities: [
+          {
+            locationId: inventoryLocationId,
+            name: expected.inventory.quantityName,
+            quantity: expected.inventory.availableLots,
+          },
+        ],
         price: Number(expected.price),
         sku: expected.sku,
       },
@@ -390,13 +462,67 @@ function productInput() {
   };
 }
 
+async function resolveInventoryLocation(adminGraphql) {
+  const data = await adminGraphql(INVENTORY_LOCATIONS, {}, 'Resolve inventory location');
+  const activeLocations = data.locations.nodes.filter((location) => location.isActive);
+  const location = activeLocations.find((candidate) => candidate.fulfillsOnlineOrders);
+
+  if (!location) {
+    throw new Error(
+      `No active Shopify location can fulfill online orders: ${JSON.stringify(activeLocations)}`,
+    );
+  }
+
+  return location;
+}
+
+async function verifyAdminAccessScopes(adminGraphql) {
+  const data = await adminGraphql(
+    CURRENT_APP_ACCESS_SCOPES,
+    {},
+    'Verify Shopify Admin access scopes',
+  );
+  const granted = new Set(data.currentAppInstallation.accessScopes.map((scope) => scope.handle));
+  const missing = REQUIRED_ADMIN_ACCESS_SCOPES.filter((scope) => !granted.has(scope));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required Shopify Admin access scopes: ${missing.join(', ')}. Release and approve an updated app version before retrying.`,
+    );
+  }
+
+  return REQUIRED_ADMIN_ACCESS_SCOPES;
+}
+
 function metafieldMap(metafields) {
   return Object.fromEntries(
     (metafields ?? []).filter(Boolean).map((metafield) => [metafield.key, metafield.value]),
   );
 }
 
-function assertAdminConformance(product) {
+function inventoryLevelAt(variant, inventoryLocationId) {
+  return variant?.inventoryItem?.inventoryLevels?.nodes?.find(
+    (level) => level.location.id === inventoryLocationId,
+  );
+}
+
+function inventoryConforms(variant, inventoryLocationId) {
+  const level = inventoryLevelAt(variant, inventoryLocationId);
+  const available = level?.quantities?.find(
+    (quantity) => quantity.name === expected.inventory.quantityName,
+  );
+
+  return (
+    variant?.inventoryPolicy === expected.inventory.policy &&
+    variant?.inventoryItem?.tracked === true &&
+    variant?.inventoryQuantity === expected.inventory.availableLots &&
+    level?.location?.isActive === true &&
+    level?.location?.fulfillsOnlineOrders === true &&
+    available?.quantity === expected.inventory.availableLots
+  );
+}
+
+function assertAdminConformance(product, inventoryLocationId) {
   const variant = product?.variants?.nodes?.[0];
   const observedMetafields = metafieldMap(product?.metafields?.nodes);
 
@@ -405,7 +531,7 @@ function assertAdminConformance(product) {
     product?.handle !== expected.handle ||
     product?.status !== 'ACTIVE' ||
     variant?.title !== expected.variantTitle ||
-    variant?.inventoryPolicy !== 'CONTINUE' ||
+    !inventoryConforms(variant, inventoryLocationId) ||
     Number(variant?.price) !== Number(expected.price) ||
     variant?.sku !== expected.sku ||
     JSON.stringify(observedMetafields) !== JSON.stringify(expected.metafields)
@@ -486,6 +612,20 @@ async function main() {
   evidence.stages.push({ stage: 'admin_auth', status: 'verified' });
 
   const adminGraphql = createAdminClient(configuration, domain, accessToken);
+  const verifiedAdminScopes = await verifyAdminAccessScopes(adminGraphql);
+  evidence.stages.push({
+    stage: 'admin_access_scopes',
+    status: 'verified',
+    required: verifiedAdminScopes,
+  });
+  const inventoryLocation = await resolveInventoryLocation(adminGraphql);
+  evidence.stages.push({
+    stage: 'inventory_location',
+    status: 'verified',
+    location: inventoryLocation,
+    stockUnit: expected.inventory.stockUnit,
+    availableLots: expected.inventory.availableLots,
+  });
   const storefrontToken = await resolveStorefrontAccessToken(configuration, adminGraphql);
   evidence.stages.push({
     stage: 'storefront_access_token',
@@ -501,9 +641,13 @@ async function main() {
     definitions: verifiedDefinitions,
   });
   const storefrontGraphql = createStorefrontClient(configuration, domain);
-  const created = await adminGraphql(PRODUCT_SET, { input: productInput() }, 'productSet');
+  const created = await adminGraphql(
+    PRODUCT_SET,
+    { input: productInput(inventoryLocation.id) },
+    'productSet',
+  );
   assertUserErrors(created.productSet.userErrors, 'productSet');
-  assertAdminConformance(created.productSet.product);
+  assertAdminConformance(created.productSet.product, inventoryLocation.id);
   const productId = created.productSet.product.id;
   const variantId = created.productSet.product.variants.nodes[0].id;
   evidence.stages.push({ stage: 'product_set', status: 'verified', productId, variantId });
@@ -516,7 +660,7 @@ async function main() {
     },
     'Admin product reread',
   );
-  assertAdminConformance(reread.product);
+  assertAdminConformance(reread.product, inventoryLocation.id);
   evidence.stages.push({ stage: 'admin_reread', status: 'verified' });
 
   const published = await adminGraphql(
@@ -564,6 +708,14 @@ async function main() {
       price: { amount: expected.price, currencyCode: expected.currency },
       cartQuantity: 1,
       panelCount: Number(expected.metafields.panel_count),
+    },
+    inventory: {
+      locationId: inventoryLocation.id,
+      locationName: inventoryLocation.name,
+      stockUnit: expected.inventory.stockUnit,
+      availableLots: expected.inventory.availableLots,
+      policy: expected.inventory.policy,
+      tracked: true,
     },
     revisionLinkage: {
       commitmentId: expected.metafields.commitment_id,

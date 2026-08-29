@@ -1,7 +1,8 @@
 # P0 Capability Frontier
 
-This contract applies after the Shopify connectivity gate passes. It does not authorize
-product implementation during Phase A.
+This contract governs the AT-1042 vertical slice. The August 29 bounded Shopify retry isolated
+`read_inventory` as an external permission edge; product work now proceeds without weakening this
+contract while the integration is resolved independently.
 
 ## Shared command path
 

@@ -30,6 +30,7 @@ export default defineConfig({
         files: [
           'packages/domain/**/*.ts',
           'packages/capabilities/**/*.ts',
+          'packages/command-bus/**/*.ts',
           'packages/shopify/**/*.ts',
           'packages/webmcp/**/*.ts',
         ],

@@ -140,3 +140,41 @@ This ledger distinguishes implementation work from the pre-implementation specif
   `attune-connectivity-spike-` handle prefix and the exact spike title.
 - A dry run identified five disposable fixtures. All five were permanently deleted, and
   a post-cleanup dry run verified zero matches. No non-spike product was targeted.
+
+## 2026-08-30 — AT-1042 authoritative vertical slice
+
+- Ran the single bounded Shopify retry. The scope preflight stopped before mutation because
+  `read_inventory` is still absent; no disposable product was created and cleanup was therefore
+  unnecessary. `write_inventory` remains deliberately absent.
+- Started product work under the revised policy without weakening or redesigning the Shopify
+  spike. Added a deterministic AT-1042 domain model with a 218 × 120 × 3 mm acrylic panel, four
+  locked mounts, two equal/symmetric auxiliary holes, one slot, fabrication quantity four, and
+  analytic `8.1 mm < 12 mm` clearance evidence.
+- Added two exact valid repairs with predicted specification hashes and lock-preservation evidence.
+- Added one semantic command bus for human and WebMCP operations. Server execution paths assign
+  `human_ui`, `webmcp`, `provider`, and `shopify_verification` provenance; commands cannot submit
+  their own authoritative origin.
+- Every transition now produces a deeply immutable receipt with before/after hashes, affected
+  entities, preserved locks, validation evidence, workspace sequence, draft version, capability
+  epoch, principal, role, and origin.
+- Added a pure capability compiler and execution-time revalidation. Tests prove optimistic
+  concurrency, idempotency, role/path enforcement, stale-epoch rejection, and rejection after a
+  once-valid capability disappears.
+- Implemented and tested the complete in-process golden authority path: deterministic repair to
+  valid r7, quote request, provider freeze/₹2,400 one-lot quote, exact-r7 acceptance, verified
+  commerce linkage, human edit to r8, immutable/materialized r7 preservation, and removal of r8
+  commerce authority.
+- Replaced the Phase-A page tool with contextual native `document.modelContext` tools:
+  `inspect_attune_workspace`, `compare_valid_changes`, and conditionally
+  `apply_attune_repair`. The UI repair control and WebMCP endpoint call the same command bus through
+  separate server-assigned provenance routes.
+- Browser verification discovered all three native tools, applied the move-slot repair through
+  WebMCP, observed clearance move from 8.1 to 12 mm, preserved 4/4 locks, emitted an origin=`webmcp`
+  receipt, and observed the consequential tools disappear. A fresh run applied the same repair
+  through the human UI; the next agent inspection automatically returned the unseen
+  origin=`human_ui` receipt without user explanation.
+- The current process-local runtime is a vertical-slice adapter, not durable production storage.
+  Durable persistence and the remaining quote/acceptance UI/WebMCP bindings are the next product
+  milestone before the reduced CanvasKit/PlaneGCS editor.
+- Vite+ check passes with zero errors and only the four existing Shopify spike warnings. Nine of
+  nine unit tests and the Next.js production build pass.

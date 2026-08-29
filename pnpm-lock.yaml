@@ -12,6 +12,9 @@ importers:
 
   .:
     devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
       '@voidzero-dev/vite-plus-core':
         specifier: 0.2.7
         version: 0.2.7(@types/node@24.10.1)(typescript@5.9.2)
@@ -24,6 +27,12 @@ importers:
 
   apps/web:
     dependencies:
+      '@attune/command-bus':
+        specifier: workspace:*
+        version: link:../../packages/command-bus
+      '@attune/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       next:
         specifier: 16.3.3
         version: 16.3.3(@types/node@24.10.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -43,6 +52,38 @@ importers:
       '@types/react-dom':
         specifier: 19.2.2
         version: 19.2.2(@types/react@19.2.2)
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/capabilities:
+    dependencies:
+      '@attune/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/command-bus:
+    dependencies:
+      '@attune/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
+      '@attune/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/domain:
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
       typescript:
         specifier: 5.9.2
         version: 5.9.2

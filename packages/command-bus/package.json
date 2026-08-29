@@ -1,0 +1,16 @@
+{
+  "name": "@attune/command-bus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@attune/capabilities": "workspace:*",
+    "@attune/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
+}

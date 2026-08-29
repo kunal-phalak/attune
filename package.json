@@ -12,6 +12,7 @@
     "test": "vp test --run"
   },
   "devDependencies": {
+    "@types/node": "24.10.1",
     "@voidzero-dev/vite-plus-core": "0.2.7",
     "vite-plus": "0.2.7",
     "vitest": "4.1.10"

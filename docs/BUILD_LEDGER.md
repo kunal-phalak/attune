@@ -47,9 +47,33 @@ This ledger distinguishes implementation work from the pre-implementation specif
   prohibited legal-state, deprecated WebMCP, deprecated Storefront query, and Shopify
   server-MCP boundary scans were clean.
 - Cloudflare account access was verified through a successful account-details API call.
-- GitHub and Vercel could not be used for external writes: GitHub identified the expected
-  user but exposed no installed repository access and the local CLI token was invalid;
-  Vercel's persisted browser/CLI sessions were logged out. No repository URL or
-  deployment URL was manufactured.
+- GitHub identified the expected user but exposed no installed repository or repository
+  creation action during that run. No connected Vercel deployment action was callable.
+  CLI state was not treated as evidence about connected-plugin availability.
 - Added a current step-by-step Shopify setup guide. The live spike stopped at the eight
   missing environment inputs before making a Shopify request.
+
+## 2026-08-29 — Production deployment and first Shopify run
+
+- Created and linked the authenticated Vercel project `attune`, preserving the monorepo
+  by configuring `apps/web` as the project root.
+- The first deployment exposed a real packaging failure because a subdirectory-only
+  upload omitted the root TypeScript configuration. The corrected monorepo deployment
+  completed successfully and was promoted to `https://attune-beta-five.vercel.app`.
+- Verified public HTTPS and `/api/build-status` with HTTP 200 responses. The deployed
+  browser origin discovered and executed `inspect_attune_build` through native
+  `document.modelContext`; its result identified production commit `09e9f38adf74` and
+  retained the `phase-a-only` boundary.
+- Captured the production page and a redacted machine-readable verification record under
+  `docs/evidence/phase-a/`.
+- Generated the missing Shopify Storefront access token through Admin GraphQL and stored
+  it only in the ignored local environment file. Evidence records its ID and read scope,
+  never its token value.
+- Shopify Admin authentication, `productSet`, Admin reread, `publishablePublish`, and the
+  configured Online Store publication check passed for the disposable one-lot product.
+- Storefront conformance correctly failed: the shop currency is USD rather than INR, the
+  Storefront product returned no Online Store URL, and the four `attune` metafields were
+  unreadable because their definitions do not yet exist. Browser-native cart work was not
+  attempted after this failure.
+- Updated the next spike run to create and verify the four required `PUBLIC_READ`
+  metafield definitions before product materialization. No Neon or editor work began.

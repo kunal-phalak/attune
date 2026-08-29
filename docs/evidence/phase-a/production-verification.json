@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "verifiedAt": "2026-08-29T13:24:28Z",
+  "sourceCommit": "09e9f38adf7442d6770028c358dca68ebd1fe31e",
+  "deployment": {
+    "id": "dpl_7QUTEY7DqLL6te8J9tsGuiHKFnbL",
+    "productionUrl": "https://attune-beta-five.vercel.app",
+    "readyState": "READY",
+    "httpsStatus": 200,
+    "buildStatusEndpoint": "https://attune-beta-five.vercel.app/api/build-status"
+  },
+  "screenshot": "docs/evidence/phase-a/attune-production.jpg",
+  "webmcp": {
+    "origin": "https://attune-beta-five.vercel.app",
+    "runtime": "document.modelContext",
+    "tool": "inspect_attune_build",
+    "scope": "phase-a-only",
+    "discovered": true,
+    "invoked": true,
+    "resultDeploymentEnvironment": "production",
+    "resultRevision": "09e9f38adf74"
+  },
+  "secretsIncluded": false
+}

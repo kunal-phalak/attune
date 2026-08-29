@@ -1,0 +1,55 @@
+{
+  "status": "BLOCKED",
+  "runId": "20260829132805",
+  "failureStage": "storefront_verification",
+  "verification": {
+    "adminAuthentication": "verified",
+    "storefrontAccessToken": {
+      "status": "created",
+      "id": "gid://shopify/StorefrontAccessToken/114826412068",
+      "scopes": ["unauthenticated_read_product_listings"]
+    },
+    "productSet": "verified",
+    "adminReread": "verified",
+    "publication": {
+      "status": "verified",
+      "id": "gid://shopify/Publication/257324056612",
+      "name": "Online Store"
+    },
+    "storefront": "failed_conformance"
+  },
+  "observedProduct": {
+    "id": "gid://shopify/Product/11165761634340",
+    "variantId": "gid://shopify/ProductVariant/51320092590116",
+    "handle": "attune-connectivity-spike-20260829132805",
+    "title": "Attune connectivity spike — fabrication lot",
+    "storefrontUrl": null,
+    "metafields": [null, null, null, null],
+    "variant": {
+      "title": "Fabrication lot — 4 panels",
+      "sku": "ATTUNE-SPIKE-20260829132805-LOT4",
+      "availableForSale": true,
+      "price": {
+        "amount": "2400.0",
+        "currencyCode": "USD"
+      }
+    }
+  },
+  "requiredConformance": {
+    "price": {
+      "amount": "2400.00",
+      "currencyCode": "INR"
+    },
+    "panelCount": 4,
+    "cartQuantity": 1,
+    "storefrontUrlRequired": true,
+    "metafieldAccess": "PUBLIC_READ"
+  },
+  "browserHandoff": {
+    "passwordAuthenticatedLiquid": "not_run",
+    "nativeGetProduct": "not_run",
+    "nativeUpdateCartQuantityOne": "not_run",
+    "visibleCartVerification": "not_run"
+  },
+  "secretsIncluded": false
+}

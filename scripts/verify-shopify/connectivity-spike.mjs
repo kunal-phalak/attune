@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadEnvFile } from 'node:process';
 
 const REQUIRED_ENVIRONMENT = [
@@ -7,10 +7,10 @@ const REQUIRED_ENVIRONMENT = [
   'SHOPIFY_CLIENT_ID',
   'SHOPIFY_CLIENT_SECRET',
   'SHOPIFY_ONLINE_STORE_PUBLICATION_ID',
-  'SHOPIFY_STOREFRONT_ACCESS_TOKEN',
   'SHOPIFY_ADMIN_API_VERSION',
   'SHOPIFY_STOREFRONT_API_VERSION',
 ];
+const STOREFRONT_ACCESS_TOKEN_KEY = 'SHOPIFY_STOREFRONT_ACCESS_TOKEN';
 
 const STOREFRONT_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 const runId = new Date()
@@ -33,6 +33,12 @@ const expected = {
     panel_count: '4',
   },
 };
+const metafieldDefinitions = [
+  { key: 'commitment_id', name: 'Attune commitment ID', type: 'single_line_text_field' },
+  { key: 'revision_id', name: 'Attune revision ID', type: 'single_line_text_field' },
+  { key: 'spec_hash', name: 'Attune specification hash', type: 'single_line_text_field' },
+  { key: 'panel_count', name: 'Attune panel count', type: 'number_integer' },
+];
 
 function loadLocalEnvironment() {
   for (const path of ['.env.local', '.env']) {
@@ -51,7 +57,10 @@ function requireEnvironment() {
     );
   }
 
-  return Object.fromEntries(REQUIRED_ENVIRONMENT.map((key) => [key, process.env[key].trim()]));
+  return {
+    ...Object.fromEntries(REQUIRED_ENVIRONMENT.map((key) => [key, process.env[key].trim()])),
+    [STOREFRONT_ACCESS_TOKEN_KEY]: process.env[STOREFRONT_ACCESS_TOKEN_KEY]?.trim() ?? '',
+  };
 }
 
 function normalizeDomain(value) {
@@ -146,6 +155,129 @@ function createStorefrontClient(configuration, domain) {
 
     return assertGraphqlResult(body, operationName);
   };
+}
+
+const CREATE_STOREFRONT_ACCESS_TOKEN = `#graphql
+  mutation CreateAttuneStorefrontAccessToken($input: StorefrontAccessTokenInput!) {
+    storefrontAccessTokenCreate(input: $input) {
+      storefrontAccessToken {
+        id
+        accessToken
+        accessScopes { handle }
+        createdAt
+        title
+      }
+      userErrors { field message }
+    }
+  }
+`;
+
+function persistLocalEnvironmentValue(key, value) {
+  const path = '.env.local';
+  const source = existsSync(path) ? readFileSync(path, 'utf8') : '';
+  const lines = source.split(/\r?\n/);
+  const prefix = `${key}=`;
+  const index = lines.findIndex((line) => line.startsWith(prefix));
+
+  if (index >= 0) {
+    lines[index] = `${prefix}${value}`;
+  } else {
+    lines.push(`${prefix}${value}`);
+  }
+
+  writeFileSync(path, lines.join('\n'), { mode: 0o600 });
+}
+
+async function resolveStorefrontAccessToken(configuration, adminGraphql) {
+  if (configuration.SHOPIFY_STOREFRONT_ACCESS_TOKEN) {
+    return { created: false, id: null, scopes: [] };
+  }
+
+  const data = await adminGraphql(
+    CREATE_STOREFRONT_ACCESS_TOKEN,
+    { input: { title: `Attune connectivity spike ${runId}` } },
+    'storefrontAccessTokenCreate',
+  );
+  const result = data.storefrontAccessTokenCreate;
+  assertUserErrors(result.userErrors, 'storefrontAccessTokenCreate');
+  const token = result.storefrontAccessToken;
+
+  if (typeof token?.accessToken !== 'string' || token.accessToken.length === 0) {
+    throw new Error('storefrontAccessTokenCreate returned no access token.');
+  }
+
+  configuration.SHOPIFY_STOREFRONT_ACCESS_TOKEN = token.accessToken;
+  persistLocalEnvironmentValue(STOREFRONT_ACCESS_TOKEN_KEY, token.accessToken);
+
+  return {
+    created: true,
+    id: token.id,
+    scopes: token.accessScopes.map((scope) => scope.handle),
+  };
+}
+
+const LIST_ATTUNE_METAFIELD_DEFINITIONS = `#graphql
+  query ListAttuneMetafieldDefinitions {
+    metafieldDefinitions(ownerType: PRODUCT, namespace: "attune", first: 20) {
+      nodes { id namespace key type { name } access { storefront } }
+    }
+  }
+`;
+
+const CREATE_ATTUNE_METAFIELD_DEFINITION = `#graphql
+  mutation CreateAttuneMetafieldDefinition($definition: MetafieldDefinitionInput!) {
+    metafieldDefinitionCreate(definition: $definition) {
+      createdDefinition { id namespace key type { name } access { storefront } }
+      userErrors { code field message }
+    }
+  }
+`;
+
+async function ensureStorefrontMetafieldDefinitions(adminGraphql) {
+  const listed = await adminGraphql(
+    LIST_ATTUNE_METAFIELD_DEFINITIONS,
+    {},
+    'List Attune metafield definitions',
+  );
+  const existing = new Map(
+    listed.metafieldDefinitions.nodes.map((definition) => [definition.key, definition]),
+  );
+  const verified = [];
+
+  for (const definition of metafieldDefinitions) {
+    const current = existing.get(definition.key);
+
+    if (current) {
+      if (current.type.name !== definition.type || current.access.storefront !== 'PUBLIC_READ') {
+        throw new Error(
+          `Attune metafield definition ${definition.key} has incompatible type or Storefront access.`,
+        );
+      }
+
+      verified.push({ id: current.id, key: current.key, created: false });
+      continue;
+    }
+
+    const created = await adminGraphql(
+      CREATE_ATTUNE_METAFIELD_DEFINITION,
+      {
+        definition: {
+          namespace: 'attune',
+          key: definition.key,
+          name: definition.name,
+          type: definition.type,
+          ownerType: 'PRODUCT',
+          access: { storefront: 'PUBLIC_READ' },
+        },
+      },
+      `Create Attune metafield definition ${definition.key}`,
+    );
+    assertUserErrors(created.metafieldDefinitionCreate.userErrors, 'metafieldDefinitionCreate');
+    const createdDefinition = created.metafieldDefinitionCreate.createdDefinition;
+    verified.push({ id: createdDefinition.id, key: createdDefinition.key, created: true });
+  }
+
+  return verified;
 }
 
 const PRODUCT_SET = `#graphql
@@ -353,6 +485,20 @@ async function main() {
   evidence.stages.push({ stage: 'admin_auth', status: 'verified' });
 
   const adminGraphql = createAdminClient(configuration, domain, accessToken);
+  const storefrontToken = await resolveStorefrontAccessToken(configuration, adminGraphql);
+  evidence.stages.push({
+    stage: 'storefront_access_token',
+    status: 'verified',
+    created: storefrontToken.created,
+    tokenId: storefrontToken.id,
+    scopes: storefrontToken.scopes,
+  });
+  const verifiedDefinitions = await ensureStorefrontMetafieldDefinitions(adminGraphql);
+  evidence.stages.push({
+    stage: 'storefront_metafield_definitions',
+    status: 'verified',
+    definitions: verifiedDefinitions,
+  });
   const storefrontGraphql = createStorefrontClient(configuration, domain);
   const created = await adminGraphql(PRODUCT_SET, { input: productInput() }, 'productSet');
   assertUserErrors(created.productSet.userErrors, 'productSet');
@@ -393,6 +539,32 @@ async function main() {
     status: 'verified',
     storefrontUrl: storefrontProduct.onlineStoreUrl,
   });
+  evidence.commercePanel = {
+    verification: {
+      admin: 'verified',
+      publication: 'verified',
+      storefront: 'verified',
+    },
+    product: {
+      id: productId,
+      variantId,
+      title: storefrontProduct.title,
+      handle: storefrontProduct.handle,
+      storefrontUrl: storefrontProduct.onlineStoreUrl,
+    },
+    fabricationLot: {
+      variantTitle: expected.variantTitle,
+      sku: expected.sku,
+      price: { amount: expected.price, currencyCode: expected.currency },
+      cartQuantity: 1,
+      panelCount: Number(expected.metafields.panel_count),
+    },
+    revisionLinkage: {
+      commitmentId: expected.metafields.commitment_id,
+      revisionId: expected.metafields.revision_id,
+      specHash: expected.metafields.spec_hash,
+    },
+  };
   evidence.completedAt = new Date().toISOString();
   evidence.nextManualGate = {
     storefrontUrl: storefrontProduct.onlineStoreUrl,

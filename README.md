@@ -16,6 +16,10 @@ External-risk-first foundation:
 - Shopify Admin and Storefront connectivity-spike harness;
 - no Neon, Kumo, judge access, or editor implementation before Shopify passes.
 
+Phase-A deployment: [attune-beta-five.vercel.app](https://attune-beta-five.vercel.app)
+
+Public repository: [github.com/kunal-phalak/attune](https://github.com/kunal-phalak/attune)
+
 ## Local development
 
 ```bash
@@ -29,6 +33,9 @@ Use `vp run build` for the Next.js production build. Do not use Vite+'s built-in
 `vp build`, which targets Vite applications rather than Next.js package scripts.
 
 Copy `.env.example` to `.env.local` only when connecting Shopify. Never commit secrets.
+If `SHOPIFY_STOREFRONT_ACCESS_TOKEN` is blank, the connectivity spike creates one through
+Admin GraphQL, stores it only in the ignored local environment file, and records no token
+value in its evidence.
 
 ## Shopify gate
 

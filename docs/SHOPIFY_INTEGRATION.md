@@ -33,6 +33,11 @@ Run from the repository root after putting real credentials in `.env.local`:
 pnpm shopify:spike
 ```
 
+`SHOPIFY_STOREFRONT_ACCESS_TOKEN` may initially be blank. After Admin authentication, the
+spike creates a scoped Storefront access token, saves it only to the ignored local
+environment file, and records its non-secret ID and scope metadata. It never writes the
+token value into logs or evidence.
+
 The script performs:
 
 1. same-organization client-credentials authentication;

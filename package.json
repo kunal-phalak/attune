@@ -1,0 +1,22 @@
+{
+  "name": "attune",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter @attune/web build",
+    "check": "vp check",
+    "dev": "pnpm --filter @attune/web dev",
+    "shopify:spike": "node scripts/verify-shopify/connectivity-spike.mjs",
+    "start": "pnpm --filter @attune/web start",
+    "test": "vp test --run"
+  },
+  "devDependencies": {
+    "@voidzero-dev/vite-plus-core": "0.2.7",
+    "vite-plus": "0.2.7",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=24.20.0 <25"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

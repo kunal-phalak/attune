@@ -70,6 +70,7 @@ Dev stores remain password-protected. See Shopify's
    - `write_products`
    - `write_publications`
    - `read_locations`
+   - `read_inventory`
    - `unauthenticated_read_product_listings`
 7. Release the version.
 8. From the app's **Home** page, select **Install app** and install it on the final Attune
@@ -77,9 +78,10 @@ Dev stores remain password-protected. See Shopify's
 
 `write_products` covers `productSet`, including variant `inventoryQuantities`;
 `write_publications` covers `publishablePublish`; and `read_locations` lets the spike
-discover an active location that fulfills online orders. The unauthenticated
-product-listing scope allows a Storefront API token to query the product. Shopify
-documents the required behavior on
+discover an active location that fulfills online orders. `read_inventory` lets Attune
+reread and prove the exact location-level quantity instead of trusting its mutation
+input. The unauthenticated product-listing scope allows a Storefront API token to query
+the product. Shopify documents the required behavior on
 [`productSet`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/productSet),
 [`publishablePublish`](https://shopify.dev/docs/api/admin-graphql/latest/mutations/publishablePublish),
 [`locations`](https://shopify.dev/docs/api/admin-graphql/latest/queries/locations),
@@ -89,7 +91,7 @@ When adding a scope to an already installed app:
 
 1. Open **Dev Dashboard → Apps → Attune Commerce Bridge → Versions**.
 2. Create a version from the current released version.
-3. Add `read_locations` without removing the existing scopes.
+3. Add `read_locations` and `read_inventory` without removing the existing scopes.
 4. Release the new version.
 5. Open the app's **Home** page and approve the permission update for the Attune
    development store. If Shopify shows **Install app** instead, install the released

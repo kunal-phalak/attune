@@ -11,7 +11,12 @@ const REQUIRED_ENVIRONMENT = [
   'SHOPIFY_STOREFRONT_API_VERSION',
 ];
 const STOREFRONT_ACCESS_TOKEN_KEY = 'SHOPIFY_STOREFRONT_ACCESS_TOKEN';
-const REQUIRED_ADMIN_ACCESS_SCOPES = ['write_products', 'write_publications', 'read_locations'];
+const REQUIRED_ADMIN_ACCESS_SCOPES = [
+  'write_products',
+  'write_publications',
+  'read_locations',
+  'read_inventory',
+];
 
 const STOREFRONT_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 const runId = new Date()

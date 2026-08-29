@@ -90,6 +90,10 @@ is copied into source or required as a secret. `productSet` writes the variant's
 If any inventory fact is absent or inconsistent, the product is not eligible for browser
 WebMCP verification.
 
+The app therefore needs `read_locations` to resolve the location and `read_inventory` to
+verify `InventoryLevel` state. Inventory mutation remains part of `productSet` under the
+existing `write_products` scope; Attune does not require a separate inventory mutation.
+
 ## Storefront metafields
 
 The `attune` metafield definitions used by the spike must be readable through Storefront

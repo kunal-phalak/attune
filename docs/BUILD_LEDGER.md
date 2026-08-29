@@ -127,3 +127,16 @@ This ledger distinguishes implementation work from the pre-implementation specif
 - Formatting, lint, type checks, 2/2 unit tests, and the Next.js production build passed.
   Five complexity/function-size findings remain warnings under the approved pre-freeze
   policy.
+
+## 2026-08-29 — Inventory readback scope and fixture cleanup
+
+- Confirmed that the released app now grants `read_locations`. The first bounded
+  inventory-aware retry reached `productSet`, then Shopify denied the nested
+  `inventoryLevels` readback because `read_inventory` is not yet granted.
+- Added `read_inventory` to the preflight and setup guide. `write_inventory` remains
+  intentionally absent because Attune writes the initial quantity through `productSet`,
+  whose required mutation scope is `write_products`.
+- Added an exact-match cleanup command constrained by both the
+  `attune-connectivity-spike-` handle prefix and the exact spike title.
+- A dry run identified five disposable fixtures. All five were permanently deleted, and
+  a post-cleanup dry run verified zero matches. No non-spike product was targeted.

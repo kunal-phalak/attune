@@ -1,0 +1,23 @@
+{
+  "status": "verified",
+  "completed_at": "2026-08-29T15:04:18.018Z",
+  "target_rule": {
+    "handle_prefix": "attune-connectivity-spike-",
+    "exact_title": "Attune connectivity spike — fabrication lot"
+  },
+  "matched_count": 5,
+  "deleted_count": 5,
+  "deleted_product_ids": [
+    "gid://shopify/Product/11165783130148",
+    "gid://shopify/Product/11165773594660",
+    "gid://shopify/Product/11165769203748",
+    "gid://shopify/Product/11165768089636",
+    "gid://shopify/Product/11165761634340"
+  ],
+  "post_cleanup": {
+    "verified_at": "2026-08-29T18:13:31.126Z",
+    "matched_count": 0
+  },
+  "recoverable": false,
+  "scope": "Disposable connectivity fixtures only"
+}

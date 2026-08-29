@@ -178,3 +178,7 @@ This ledger distinguishes implementation work from the pre-implementation specif
   milestone before the reduced CanvasKit/PlaneGCS editor.
 - Vite+ check passes with zero errors and only the four existing Shopify spike warnings. Nine of
   nine unit tests and the Next.js production build pass.
+- Published the committed vertical slice to the existing Vercel production project and canonical
+  `attune-beta-five.vercel.app` alias. Aligned the declared Node 24 floor with Vercel's compatible
+  `24.19.0` production runtime after the first successful build surfaced the overly narrow local
+  `24.20.0` floor.

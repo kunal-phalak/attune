@@ -40,7 +40,8 @@ export default async function WorkspacePage({
   const user = await currentAttuneUser();
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
-  const { workspaceId } = await params;
+  const { workspaceId: encodedWorkspaceId } = await params;
+  const workspaceId = decodeURIComponent(encodedWorkspaceId);
   const identity = await identityForWorkspace(workspaceId, user.userId, user.principalId);
   if (!identity) notFound();
   const bundle = await readWorkspaceBundle(workspaceId);

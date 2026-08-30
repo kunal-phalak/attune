@@ -43,13 +43,29 @@ export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborat
   };
 }
 
+function versionIdFromSnapshot(snapshot: unknown): string {
+  if (typeof snapshot !== 'object' || snapshot === null) {
+    throw new Error('LIVEBLOCKS_VERSION_MISSING');
+  }
+  const data = Reflect.get(snapshot, 'data');
+  const versionId =
+    typeof data === 'object' && data !== null
+      ? Reflect.get(data, 'id')
+      : Reflect.get(snapshot, 'id');
+  if (typeof versionId !== 'string' || versionId.length === 0) {
+    throw new Error('LIVEBLOCKS_VERSION_MISSING');
+  }
+  return versionId;
+}
+
 export async function snapshotCollaborativeDraft(
   roomId: string,
   authoritativeWorkspace: AttuneWorkspace,
 ): Promise<{ readonly versionId: string; readonly draft: AttuneCollaborativeDraft }> {
   const client = getLiveblocks();
   const snapshot = await client.createVersionHistorySnapshot(roomId);
-  const update = await client.getYjsVersion({ roomId, versionId: snapshot.data.id });
+  const versionId = versionIdFromSnapshot(snapshot);
+  const update = await client.getYjsVersion({ roomId, versionId });
   const document = new Y.Doc();
   try {
     Y.applyUpdate(document, new Uint8Array(update));
@@ -60,7 +76,7 @@ export async function snapshotCollaborativeDraft(
     if (hashSpecification(value) !== hashSpecification(authoritativeWorkspace)) {
       throw new Error('COLLABORATIVE_DRAFT_DRIFT');
     }
-    return { versionId: snapshot.data.id, draft: structuredClone(value) };
+    return { versionId, draft: structuredClone(value) };
   } finally {
     document.destroy();
   }

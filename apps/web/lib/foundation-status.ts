@@ -1,6 +1,5 @@
-export const SHOPIFY_CONNECTION_KEYS = [
+export const SHOPIFY_SERVER_KEYS = [
   'SHOPIFY_STORE_DOMAIN',
-  'SHOPIFY_STOREFRONT_PASSWORD',
   'SHOPIFY_CLIENT_ID',
   'SHOPIFY_CLIENT_SECRET',
   'SHOPIFY_ONLINE_STORE_PUBLICATION_ID',
@@ -11,23 +10,28 @@ export const SHOPIFY_CONNECTION_KEYS = [
 
 export interface FoundationBuildStatus {
   application: 'attune';
-  phase: 'external-risk-first-foundation';
+  phase: 'p0-manufacturing-outcome';
   deployment: {
     environment: string;
     revision: string | null;
   };
   webmcp: {
-    tool: 'inspect_attune_build';
+    runtime: 'document.modelContext';
     mode: 'imperative';
-    readOnly: true;
-    scope: 'phase-a-only';
+    surface: 'contextual-attune-tools';
+    retiredPhaseATool: {
+      name: 'inspect_attune_build';
+      active: false;
+      scope: 'phase-a-only';
+    };
   };
   shopify: {
-    connected: boolean;
-    configuredInputs: number;
-    requiredInputs: number;
-    missingInputs: string[];
-    nextGate: 'connect-shopify' | 'run-connectivity-spike';
+    serverConfigured: boolean;
+    configuredServerInputs: number;
+    requiredServerInputs: number;
+    missingServerInputs: string[];
+    storefrontPasswordPolicy: 'judge-supplied-on-liquid-storefront';
+    nextGate: 'configure-server-integration' | 'grant-read_inventory-and-complete-handoff';
   };
 }
 
@@ -36,28 +40,36 @@ function hasValue(value: string | undefined): boolean {
 }
 
 export function getFoundationBuildStatus(environment: NodeJS.ProcessEnv): FoundationBuildStatus {
-  const missingInputs = SHOPIFY_CONNECTION_KEYS.filter((key) => !hasValue(environment[key]));
-  const configuredInputs = SHOPIFY_CONNECTION_KEYS.length - missingInputs.length;
+  const missingServerInputs = SHOPIFY_SERVER_KEYS.filter((key) => !hasValue(environment[key]));
+  const configuredServerInputs = SHOPIFY_SERVER_KEYS.length - missingServerInputs.length;
 
   return {
     application: 'attune',
-    phase: 'external-risk-first-foundation',
+    phase: 'p0-manufacturing-outcome',
     deployment: {
       environment: environment.VERCEL_ENV ?? environment.NODE_ENV ?? 'local',
       revision: environment.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? null,
     },
     webmcp: {
-      tool: 'inspect_attune_build',
+      runtime: 'document.modelContext',
       mode: 'imperative',
-      readOnly: true,
-      scope: 'phase-a-only',
+      surface: 'contextual-attune-tools',
+      retiredPhaseATool: {
+        name: 'inspect_attune_build',
+        active: false,
+        scope: 'phase-a-only',
+      },
     },
     shopify: {
-      connected: missingInputs.length === 0,
-      configuredInputs,
-      requiredInputs: SHOPIFY_CONNECTION_KEYS.length,
-      missingInputs,
-      nextGate: missingInputs.length === 0 ? 'run-connectivity-spike' : 'connect-shopify',
+      serverConfigured: missingServerInputs.length === 0,
+      configuredServerInputs,
+      requiredServerInputs: SHOPIFY_SERVER_KEYS.length,
+      missingServerInputs,
+      storefrontPasswordPolicy: 'judge-supplied-on-liquid-storefront',
+      nextGate:
+        missingServerInputs.length === 0
+          ? 'grant-read_inventory-and-complete-handoff'
+          : 'configure-server-integration',
     },
   };
 }

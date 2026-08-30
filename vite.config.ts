@@ -68,6 +68,12 @@ export default defineConfig({
           'no-await-in-loop': 'off',
         },
       },
+      {
+        files: ['packages/shopify/**/*.ts'],
+        rules: {
+          'no-await-in-loop': 'off',
+        },
+      },
     ],
     ignorePatterns: [
       '**/.next/**',

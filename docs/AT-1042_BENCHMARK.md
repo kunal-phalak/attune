@@ -1,7 +1,9 @@
 # AT-1042 Outcome Benchmark
 
-This protocol is implemented and run only after the Shopify gate and golden workflow
-exist. It prevents unsupported performance claims.
+The product now captures single-run evidence directly from authoritative receipts,
+capability transitions, intervention observations, rejections, and Shopify verification
+records. The comparative five-run benchmark remains pending until the complete Shopify
+browser gate is repeatable. This protocol prevents unsupported performance claims.
 
 ## Scenario
 
@@ -30,9 +32,9 @@ medians. Do not publish a percentage improvement until both five-run sets exist.
 
 ## Product evidence
 
-The canonical commitment UI must render a compact, source-backed outcome panel after a
-completed run. Values are computed from receipts, revision records, verification
-attempts, and benchmark timestamps—not hard-coded marketing copy.
+The canonical commitment UI renders a compact, source-backed outcome panel throughout
+the run. Values are computed from receipts, revision records, verification attempts,
+rejections, and benchmark timestamps—not hard-coded marketing copy.
 
 ```text
 AT-1042 · Outcome

@@ -70,6 +70,7 @@ invent a WebMCP priority annotation.
 | Draft has hard conflicts                        | `compare_valid_changes`        | Candidate after-state, resolved conflicts, moved entities, preserved locks |
 | Human selected a valid repair                   | `apply_deterministic_repair`   | Exact command, expected version, predicted clearance, preserved locks      |
 | Draft is valid and unquoted                     | `request_quote`                | Frozen input hash and current capability epoch                             |
+| Exact buyer quote request is current            | `freeze_and_quote_revision`    | Immutable revision and one-lot ₹2,400 quote                                |
 | Provider quote exists for frozen revision       | `accept_revision`              | Exact revision, quote, amount, quantity, and expiry                        |
 | Accepted revision is current and unmaterialized | `materialize_for_commerce`     | Exact revision/spec hash and Shopify lot semantics                         |
 | Shopify verification is exact                   | `navigate_to_storefront`       | Verified product URL, revision hash, and verification timestamp            |
@@ -82,3 +83,29 @@ blocked server-side.
 Dynamic registration is transport only. Attune's differentiator is the deterministic
 state, consequence prediction, intervention detection, and revocable authority that
 determine the compiled surface.
+
+## Execution boundary
+
+Every mutation revalidates the server-owned principal and role, `workspace_seq`,
+`capability_epoch`, current specification hash, and idempotency binding. Exact retries
+return the original immutable result; reusing a command ID for different content is
+rejected. Browser fields cannot assign provenance, role, Shopify verification, or actor.
+
+The product response includes the complete frontier for buyer, provider, and agent,
+including code-owned reasons, predicted consequences, and exact blocker codes. Each
+receipt links a capability transition containing the actions gained and lost across all
+three roles.
+
+## WebMCP eval contract
+
+`packages/webmcp` contains deterministic tests plus probabilistic prompt cases for:
+
+- direct and ambiguous manufacturing requests;
+- unseen human intervention and stale capability;
+- boundary-bypass and adversarial external-content requests;
+- multi-step quote/accept/materialize sequencing;
+- use of returned hashes, sequences, and epochs in subsequent calls.
+
+Deterministic cases run in the normal test suite. Probabilistic cases are a versioned
+acceptance manifest for the production Browser Run harness; they are not presented as
+passing until executed against the deployed browser surface.

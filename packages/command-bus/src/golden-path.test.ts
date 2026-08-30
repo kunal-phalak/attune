@@ -1,5 +1,9 @@
 import { compileCapabilities } from '@attune/capabilities';
-import { createAt1042Workspace, type CommerceVerification } from '@attune/domain';
+import {
+  createAt1042Workspace,
+  hashSpecification,
+  type CommerceVerification,
+} from '@attune/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -32,21 +36,26 @@ const shopify: TrustedExecutionContext = {
   role: 'agent',
 };
 
-const commerceVerification: CommerceVerification = {
-  adminVerified: true,
-  publicationVerified: true,
-  storefrontVerified: true,
-  productId: 'gid://shopify/Product/AT1042R7',
-  variantId: 'gid://shopify/ProductVariant/AT1042R7LOT4',
-  publicationId: 'gid://shopify/Publication/online-store',
-  storefrontUrl: 'https://attune-demo.myshopify.com/products/at-1042-r7',
-  title: 'Custom Equipment Panel — AT-1042 r7',
-  sku: 'AT-1042-R7-LOT4',
-  amountMinor: 240_000,
-  currency: 'INR',
-  panelCount: 4,
-  verifiedAt: FIXED_TIME,
-};
+function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
+  return {
+    adminVerified: true,
+    publicationVerified: true,
+    storefrontVerified: true,
+    productId: 'gid://shopify/Product/AT1042R7',
+    variantId: 'gid://shopify/ProductVariant/AT1042R7LOT4',
+    publicationId: 'gid://shopify/Publication/online-store',
+    storefrontUrl: 'https://attune-demo.myshopify.com/products/at-1042-r7',
+    commitmentId: 'AT-1042',
+    revisionId: 'r7',
+    specHash: hashSpecification(bus.inspect('agent').workspace),
+    title: 'Custom Equipment Panel — AT-1042 r7',
+    sku: 'AT-1042-R7-LOT4',
+    amountMinor: 240_000,
+    currency: 'INR',
+    panelCount: 4,
+    verifiedAt: FIXED_TIME,
+  };
+}
 
 function envelope(
   bus: AttuneCommandBus,
@@ -58,6 +67,7 @@ function envelope(
     commandId,
     expectedWorkspaceSeq: workspace.workspaceSeq,
     expectedCapabilityEpoch: workspace.capabilityEpoch,
+    expectedSpecHash: hashSpecification(workspace),
     observationCursor,
   };
 }
@@ -148,6 +158,35 @@ describe('shared Attune semantic command bus', () => {
         role: 'buyer',
       }),
     ).toThrowError(expect.objectContaining({ code: 'ROLE_MISMATCH' }));
+    expect(() =>
+      bus.execute(
+        { type: 'move_slot', centerX: 194, centerY: 60 },
+        {
+          ...request,
+          commandId: 'forged-spec',
+          expectedWorkspaceSeq: 1,
+          expectedCapabilityEpoch: 2,
+        },
+        agent,
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'SPEC_HASH_MISMATCH' }));
+    expect(() =>
+      bus.execute(
+        { type: 'move_slot', centerX: 194, centerY: 60 },
+        envelope(bus, 'forged-principal'),
+        { ...agent, principalId: 'buyer:forged-browser-claim' },
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'PRINCIPAL_MISMATCH' }));
+    expect(() =>
+      bus.execute({ type: 'move_slot', centerX: 194, centerY: 60 }, request, agent),
+    ).toThrowError(expect.objectContaining({ code: 'IDEMPOTENCY_CONFLICT' }));
+    expect(bus.rejections().map(({ code }) => code)).toEqual([
+      'STALE_WORKSPACE',
+      'ROLE_MISMATCH',
+      'SPEC_HASH_MISMATCH',
+      'PRINCIPAL_MISMATCH',
+      'IDEMPOTENCY_CONFLICT',
+    ]);
   });
 });
 
@@ -163,7 +202,11 @@ describe('AT-1042 r7 to r8 authority path', () => {
 
     const materializeEnvelope = envelope(bus, 'materialize-r7');
     bus.execute(
-      { type: 'materialize_for_commerce', revisionId: 'r7', verification: commerceVerification },
+      {
+        type: 'materialize_for_commerce',
+        revisionId: 'r7',
+        verification: commerceVerification(bus),
+      },
       materializeEnvelope,
       shopify,
     );
@@ -193,18 +236,27 @@ describe('AT-1042 r7 to r8 authority path', () => {
     expect(r8Capabilities).not.toContain('navigate_to_storefront');
     expect(() =>
       bus.execute(
-        { type: 'materialize_for_commerce', revisionId: 'r7', verification: commerceVerification },
+        {
+          type: 'materialize_for_commerce',
+          revisionId: 'r7',
+          verification: commerceVerification(bus),
+        },
         {
           commandId: 'stale-materialize',
           expectedWorkspaceSeq: r8.workspaceSeq,
           expectedCapabilityEpoch: staleEpoch,
+          expectedSpecHash: hashSpecification(r8),
         },
         shopify,
       ),
     ).toThrowError(AttuneCommandError);
     expect(() =>
       bus.execute(
-        { type: 'materialize_for_commerce', revisionId: 'r7', verification: commerceVerification },
+        {
+          type: 'materialize_for_commerce',
+          revisionId: 'r7',
+          verification: commerceVerification(bus),
+        },
         envelope(bus, 'revalidated-materialize'),
         shopify,
       ),
@@ -229,6 +281,15 @@ describe('AT-1042 r7 to r8 authority path', () => {
     expect(receipts.at(-1)).toEqual(
       expect.objectContaining({ workspaceSeq: 4, draftVersion: 7, capabilityEpoch: 5 }),
     );
+    expect(bus.transitions()).toHaveLength(4);
+    expect(bus.transitions()[1].gained).toContainEqual({
+      role: 'provider',
+      capabilityId: 'freeze_and_quote_revision',
+    });
+    expect(bus.transitions()[3].gained).toContainEqual({
+      role: 'agent',
+      capabilityId: 'materialize_for_commerce',
+    });
     expect(Object.isFrozen(receipts[0])).toBe(true);
     expect(Object.isFrozen(receipts[0].validationAfter)).toBe(true);
   });

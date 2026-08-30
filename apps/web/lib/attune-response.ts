@@ -1,3 +1,4 @@
+import { ShopifyIntegrationError } from '@attune/shopify';
 import { NextResponse } from 'next/server';
 
 import { isAttuneCommandError } from './attune-runtime';
@@ -14,6 +15,19 @@ export function attuneErrorResponse(error: unknown): NextResponse {
     return NextResponse.json(
       { error: { code: 'INVALID_COMMAND', message: error.message } },
       { status: 400 },
+    );
+  }
+
+  if (error instanceof ShopifyIntegrationError) {
+    return NextResponse.json(
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: error.retryable,
+        },
+      },
+      { status: error.retryable ? 503 : 424 },
     );
   }
 

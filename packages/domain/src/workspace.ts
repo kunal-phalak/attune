@@ -160,6 +160,13 @@ function materializeRevision(
   if (!revision || revision.specHash !== hashSpecification(workspace)) {
     throw new Error('Commerce materialization must target the exact current frozen specification.');
   }
+  if (
+    command.verification.commitmentId !== workspace.commitmentId ||
+    command.verification.revisionId !== revision.revisionId ||
+    command.verification.specHash !== revision.specHash
+  ) {
+    throw new Error('Shopify verification must link the exact frozen Attune revision and hash.');
+  }
 
   return advance(workspace, {
     commerceLinks: [

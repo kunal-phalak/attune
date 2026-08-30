@@ -53,6 +53,11 @@ The script performs:
 The script intentionally does not automate the storefront password or browser-native
 WebMCP steps. Those must be tested in the judge-equivalent visible browser session.
 
+The product materialization endpoint uses the same contract with a stable
+`productSet(identifier: { handle })` upsert for exact r7. It preflights authority before
+the external write and revalidates the command bus again before recording the immutable
+`shopify_verification` receipt. Shopify credentials remain server-only.
+
 ## Quantity contract
 
 ```text
@@ -93,6 +98,10 @@ WebMCP verification.
 The app therefore needs `read_locations` to resolve the location and `read_inventory` to
 verify `InventoryLevel` state. Inventory mutation remains part of `productSet` under the
 existing `write_products` scope; Attune does not require a separate inventory mutation.
+
+As of August 30, 2026, the installed app still lacks `read_inventory`. Both the bounded
+spike and the product materialization service stop at scope preflight before creating or
+updating a product.
 
 ## Storefront metafields
 

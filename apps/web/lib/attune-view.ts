@@ -1,0 +1,250 @@
+export type CapabilityRole = 'buyer' | 'provider' | 'agent';
+
+export interface CapabilityView {
+  readonly id: string;
+  readonly capabilityEpoch: number;
+  readonly description: string;
+  readonly predictedConsequences: readonly string[];
+  readonly available: boolean;
+  readonly reason: string | null;
+  readonly blockers: readonly { readonly code: string; readonly message: string }[];
+}
+
+export interface AttuneApiView {
+  readonly specHash: string;
+  readonly workspace: {
+    readonly commitmentId: 'AT-1042';
+    readonly workspaceSeq: number;
+    readonly draftVersion: number;
+    readonly capabilityEpoch: number;
+    readonly quoteRequests: readonly {
+      readonly id: string;
+      readonly draftVersion: number;
+      readonly specHash: string;
+    }[];
+    readonly frozenRevisions: readonly {
+      readonly revisionId: string;
+      readonly specHash: string;
+      readonly frozenAt: string;
+    }[];
+    readonly quotes: readonly {
+      readonly quoteId: string;
+      readonly revisionId: string;
+      readonly specHash: string;
+      readonly amountMinor: number;
+      readonly currency: string;
+      readonly panelCount: number;
+      readonly commerceLotQuantity: number;
+    }[];
+    readonly acceptances: readonly {
+      readonly acceptanceId: string;
+      readonly quoteId: string;
+      readonly revisionId: string;
+      readonly specHash: string;
+    }[];
+    readonly commerceLinks: readonly CommerceLinkView[];
+  };
+  readonly validation: {
+    readonly valid: boolean;
+    readonly issues: readonly { readonly id: string; readonly message: string }[];
+    readonly evidence: {
+      readonly slotRightClearanceMm: number;
+      readonly requiredSlotClearanceMm: number;
+      readonly lockedMountsPreserved: number;
+      readonly lockedMountsTotal: number;
+    };
+  };
+  readonly capabilities: readonly CapabilityView[];
+  readonly frontier: readonly CapabilityView[];
+  readonly frontiers: Readonly<Record<CapabilityRole, readonly CapabilityView[]>>;
+  readonly repairs: readonly {
+    readonly id: RepairId;
+    readonly label: string;
+    readonly predictedClearanceMm: number;
+    readonly predictedSpecHash: string;
+    readonly preservedLockedEntities: readonly string[];
+  }[];
+  readonly observation: {
+    readonly previousWorkspaceSeq: number;
+    readonly currentWorkspaceSeq: number;
+    readonly interventions: readonly {
+      readonly receiptSeq: number;
+      readonly origin: string;
+      readonly command: string;
+      readonly affectedEntities: readonly string[];
+      readonly beforeHash: string;
+      readonly afterHash: string;
+    }[];
+  };
+  readonly records: {
+    readonly receipts: readonly ReceiptView[];
+    readonly capabilityTransitions: readonly CapabilityTransitionView[];
+    readonly commandRejections: readonly RejectionView[];
+    readonly externalVerifications: readonly CommerceLinkView[];
+  };
+  readonly latestReceipt: ReceiptView | null;
+  readonly latestCapabilityTransition: CapabilityTransitionView | null;
+  readonly receiptCount: number;
+  readonly impact: {
+    readonly needToBuildableMs: number | null;
+    readonly conflictsCaughtBeforeQuote: number;
+    readonly lockedRequirementsPreserved: {
+      readonly preserved: number;
+      readonly total: number;
+    };
+    readonly humanInterventionsDetected: number;
+    readonly staleConsequentialActionsBlocked: number;
+    readonly exactRevisionShopifyVerifications: number;
+    readonly goldenPath: { readonly completedRuns: number; readonly startedRuns: number };
+  };
+}
+
+export type RepairId = 'move_slot_left_to_clearance' | 'narrow_slot_to_clearance';
+
+export interface ReceiptView {
+  readonly receiptSeq: number;
+  readonly receiptId: string;
+  readonly commandId: string;
+  readonly command: string;
+  readonly origin: string;
+  readonly principalId: string;
+  readonly beforeHash: string;
+  readonly afterHash: string;
+  readonly specHashBefore: string;
+  readonly specHashAfter: string;
+  readonly preservedLocks: readonly string[];
+  readonly workspaceSeq: number;
+  readonly draftVersion: number;
+  readonly capabilityEpoch: number;
+  readonly createdAt: string;
+}
+
+export interface CapabilityTransitionView {
+  readonly transitionId: string;
+  readonly receiptId: string;
+  readonly workspaceSeq: number;
+  readonly capabilityEpoch: number;
+  readonly gained: readonly {
+    readonly role: CapabilityRole;
+    readonly capabilityId: string;
+  }[];
+  readonly lost: readonly {
+    readonly role: CapabilityRole;
+    readonly capabilityId: string;
+  }[];
+}
+
+export interface RejectionView {
+  readonly rejectionId: string;
+  readonly commandId: string;
+  readonly command: string;
+  readonly origin: string;
+  readonly principalId: string;
+  readonly code: string;
+  readonly workspaceSeq: number;
+  readonly capabilityEpoch: number;
+  readonly currentSpecHash: string;
+  readonly createdAt: string;
+}
+
+export interface CommerceLinkView {
+  readonly commerceLinkId: string;
+  readonly revisionId: string;
+  readonly specHash: string;
+  readonly status: 'VERIFIED';
+  readonly verification: {
+    readonly adminVerified: true;
+    readonly publicationVerified: true;
+    readonly storefrontVerified: true;
+    readonly productId: string;
+    readonly variantId: string;
+    readonly publicationId: string;
+    readonly storefrontUrl: string;
+    readonly commitmentId: 'AT-1042';
+    readonly revisionId: 'r7';
+    readonly specHash: string;
+    readonly title: string;
+    readonly sku: string;
+    readonly amountMinor: number;
+    readonly currency: string;
+    readonly panelCount: number;
+    readonly verifiedAt: string;
+  };
+}
+
+export class AttuneHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = 'AttuneHttpError';
+  }
+}
+
+export function isAttuneApiView(value: unknown): value is AttuneApiView {
+  if (typeof value !== 'object' || value === null) return false;
+  const workspace = Reflect.get(value, 'workspace');
+  const specHash = Reflect.get(value, 'specHash');
+  return (
+    typeof workspace === 'object' &&
+    workspace !== null &&
+    Reflect.get(workspace, 'commitmentId') === 'AT-1042' &&
+    Number.isInteger(Reflect.get(workspace, 'workspaceSeq')) &&
+    typeof specHash === 'string'
+  );
+}
+
+function jsonHeaders(initial?: HeadersInit): Headers {
+  const headers = new Headers(initial);
+  headers.set('Accept', 'application/json');
+  headers.set('Content-Type', 'application/json');
+  return headers;
+}
+
+export async function requestAttuneView(path: string, init?: RequestInit): Promise<AttuneApiView> {
+  const response = await fetch(path, {
+    ...init,
+    cache: 'no-store',
+    headers: jsonHeaders(init?.headers),
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    const error =
+      typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : undefined;
+    const code =
+      typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : 'REQUEST_FAILED';
+    const message =
+      typeof error === 'object' && error !== null
+        ? Reflect.get(error, 'message')
+        : 'The authoritative request failed.';
+    const retryable =
+      typeof error === 'object' && error !== null && Reflect.get(error, 'retryable') === true;
+    throw new AttuneHttpError(
+      response.status,
+      typeof code === 'string' ? code : 'REQUEST_FAILED',
+      typeof message === 'string' ? message : 'The authoritative request failed.',
+      retryable,
+    );
+  }
+  if (!isAttuneApiView(payload)) throw new TypeError('Attune returned an invalid workspace view.');
+  return payload;
+}
+
+export function commandRequestBody(
+  view: AttuneApiView,
+  command: Readonly<Record<string, unknown>>,
+  originPrefix: string,
+  observationCursor?: number,
+) {
+  return JSON.stringify({
+    command,
+    commandId: `${originPrefix}-${crypto.randomUUID()}`,
+    expectedWorkspaceSeq: view.workspace.workspaceSeq,
+    expectedCapabilityEpoch: view.workspace.capabilityEpoch,
+    expectedSpecHash: view.specHash,
+    observationCursor,
+  });
+}

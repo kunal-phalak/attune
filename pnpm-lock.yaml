@@ -33,6 +33,9 @@ importers:
       '@attune/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@attune/shopify':
+        specifier: workspace:*
+        version: link:../../packages/shopify
       next:
         specifier: 16.3.3
         version: 16.3.3(@types/node@24.10.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -84,6 +87,32 @@ importers:
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/shopify:
+    dependencies:
+      '@attune/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 5.9.2
+        version: 5.9.2
+
+  packages/webmcp:
+    dependencies:
+      '@attune/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
+      '@attune/command-bus':
+        specifier: workspace:*
+        version: link:../command-bus
+      '@attune/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
       typescript:
         specifier: 5.9.2
         version: 5.9.2

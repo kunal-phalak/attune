@@ -17,12 +17,44 @@ export type CapabilityId =
   | 'materialize_for_commerce'
   | 'navigate_to_storefront';
 
-export interface CompiledCapability {
+export type CapabilityBlockerCode =
+  | 'ROLE_REQUIRED'
+  | 'SPECIFICATION_INVALID'
+  | 'NO_HARD_CONFLICT'
+  | 'QUOTE_ALREADY_REQUESTED'
+  | 'QUOTE_REQUEST_MISSING'
+  | 'QUOTE_ALREADY_EXISTS'
+  | 'FROZEN_REVISION_MISSING'
+  | 'ACCEPTANCE_ALREADY_EXISTS'
+  | 'ACCEPTANCE_MISSING'
+  | 'COMMERCE_ALREADY_VERIFIED'
+  | 'COMMERCE_VERIFICATION_MISSING';
+
+export interface CapabilityBlocker {
+  readonly code: CapabilityBlockerCode;
+  readonly message: string;
+}
+
+interface CapabilityBase {
   readonly id: CapabilityId;
   readonly capabilityEpoch: number;
   readonly description: string;
   readonly predictedConsequences: readonly string[];
 }
+
+export interface CompiledCapability extends CapabilityBase {
+  readonly available: true;
+  readonly reason: string;
+  readonly blockers: readonly [];
+}
+
+export interface BlockedCapability extends CapabilityBase {
+  readonly available: false;
+  readonly reason: null;
+  readonly blockers: readonly CapabilityBlocker[];
+}
+
+export type CapabilityFrontierEntry = CompiledCapability | BlockedCapability;
 
 const COMMAND_CAPABILITY: Readonly<Partial<Record<AttuneCommandType, CapabilityId>>> = {
   apply_deterministic_repair: 'apply_deterministic_repair',
@@ -33,16 +65,7 @@ const COMMAND_CAPABILITY: Readonly<Partial<Record<AttuneCommandType, CapabilityI
   materialize_for_commerce: 'materialize_for_commerce',
 };
 
-function capability(
-  workspace: AttuneWorkspace,
-  id: CapabilityId,
-  description: string,
-  predictedConsequences: readonly string[],
-): CompiledCapability {
-  return { id, capabilityEpoch: workspace.capabilityEpoch, description, predictedConsequences };
-}
-
-function currentAuthority(workspace: AttuneWorkspace) {
+export function deriveCurrentAuthority(workspace: AttuneWorkspace) {
   const specHash = hashSpecification(workspace);
   const revisionId = `r${workspace.draftVersion}`;
   const request = workspace.quoteRequests.find(
@@ -65,7 +88,7 @@ function currentAuthority(workspace: AttuneWorkspace) {
   return { acceptance, commerce, quote, request, revision, revisionId, specHash };
 }
 
-type Authority = ReturnType<typeof currentAuthority>;
+type Authority = ReturnType<typeof deriveCurrentAuthority>;
 
 interface CompilerContext {
   readonly workspace: AttuneWorkspace;
@@ -74,125 +97,244 @@ interface CompilerContext {
   readonly authority: Authority;
 }
 
-function canEdit(role: AttuneRole): boolean {
-  return role === 'buyer' || role === 'agent';
+interface CapabilityDefinition {
+  readonly id: CapabilityId;
+  readonly description: (context: CompilerContext) => string;
+  readonly predictedConsequences: (context: CompilerContext) => readonly string[];
+  readonly blockers: (context: CompilerContext) => readonly CapabilityBlocker[];
+  readonly reason: (context: CompilerContext) => string;
 }
 
-function editCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  if (!canEdit(context.role)) return [];
+function blocker(code: CapabilityBlockerCode, message: string): CapabilityBlocker {
+  return { code, message };
+}
+
+function requireRole(context: CompilerContext, roles: readonly AttuneRole[]) {
+  return roles.includes(context.role)
+    ? []
+    : [blocker('ROLE_REQUIRED', `Requires role: ${roles.join(' or ')}.`)];
+}
+
+function editBlockers(context: CompilerContext) {
+  return requireRole(context, ['buyer', 'agent']);
+}
+
+function conflictBlockers(context: CompilerContext) {
   return [
-    capability(context.workspace, 'edit_draft', 'Move an editable feature in the current draft.', [
+    ...requireRole(context, ['buyer', 'agent']),
+    ...(context.valid
+      ? [blocker('NO_HARD_CONFLICT', 'The current specification has no hard conflict to repair.')]
+      : []),
+  ];
+}
+
+function requestBlockers(context: CompilerContext) {
+  const { authority, valid } = context;
+  return [
+    ...requireRole(context, ['buyer']),
+    ...(!valid
+      ? [blocker('SPECIFICATION_INVALID', 'Resolve every hard conflict before requesting a quote.')]
+      : []),
+    ...(authority.request
+      ? [
+          blocker(
+            'QUOTE_ALREADY_REQUESTED',
+            'This exact specification already has a quote request.',
+          ),
+        ]
+      : []),
+    ...(authority.quote
+      ? [blocker('QUOTE_ALREADY_EXISTS', 'This exact specification is already quoted.')]
+      : []),
+  ];
+}
+
+function quoteBlockers(context: CompilerContext) {
+  const { authority } = context;
+  return [
+    ...requireRole(context, ['provider']),
+    ...(!authority.request
+      ? [blocker('QUOTE_REQUEST_MISSING', 'The current specification has no buyer quote request.')]
+      : []),
+    ...(authority.quote
+      ? [blocker('QUOTE_ALREADY_EXISTS', 'The current specification is already frozen and quoted.')]
+      : []),
+  ];
+}
+
+function acceptanceBlockers(context: CompilerContext) {
+  const { authority } = context;
+  return [
+    ...requireRole(context, ['buyer']),
+    ...(!authority.revision || !authority.quote
+      ? [
+          blocker(
+            'FROZEN_REVISION_MISSING',
+            'A provider must freeze and quote this exact specification first.',
+          ),
+        ]
+      : []),
+    ...(authority.acceptance
+      ? [blocker('ACCEPTANCE_ALREADY_EXISTS', 'This exact frozen revision is already accepted.')]
+      : []),
+  ];
+}
+
+function commerceBlockers(context: CompilerContext) {
+  const { authority } = context;
+  return [
+    ...requireRole(context, ['agent']),
+    ...(!authority.acceptance
+      ? [
+          blocker(
+            'ACCEPTANCE_MISSING',
+            'The exact current frozen revision has not been accepted by the buyer.',
+          ),
+        ]
+      : []),
+    ...(authority.commerce
+      ? [
+          blocker(
+            'COMMERCE_ALREADY_VERIFIED',
+            'The exact current frozen revision is already verified in commerce.',
+          ),
+        ]
+      : []),
+  ];
+}
+
+function navigationBlockers(context: CompilerContext) {
+  return context.authority.commerce
+    ? []
+    : [
+        blocker(
+          'COMMERCE_VERIFICATION_MISSING',
+          'No exact Admin, publication, and Storefront verification exists for the current revision.',
+        ),
+      ];
+}
+
+const DEFINITIONS: readonly CapabilityDefinition[] = [
+  {
+    id: 'compare_valid_changes',
+    description: () => 'Compare deterministic repairs for hard conflicts.',
+    predictedConsequences: ({ workspace }) => [
+      `${compareValidChanges(workspace).length} valid repairs are currently available.`,
+      'Does not mutate the specification.',
+    ],
+    blockers: conflictBlockers,
+    reason: () => 'A hard manufacturability conflict has deterministic valid alternatives.',
+  },
+  {
+    id: 'apply_deterministic_repair',
+    description: () => 'Apply one exact predicted repair.',
+    predictedConsequences: () => [
+      'Resolves slot clearance while preserving all four buyer-locked mounts.',
       'Increments draft version and capability epoch.',
-      'Invalidates authority tied to the previous specification.',
-    ]),
-  ];
-}
-
-function repairCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  if (context.valid || !canEdit(context.role)) return [];
-  return [
-    capability(
-      context.workspace,
-      'compare_valid_changes',
-      'Compare deterministic repairs for hard conflicts.',
-      [`${compareValidChanges(context.workspace).length} valid repairs are currently available.`],
-    ),
-    capability(
-      context.workspace,
-      'apply_deterministic_repair',
-      'Apply one exact predicted repair.',
-      ['Resolves slot clearance while preserving all four locked mounts.'],
-    ),
-  ];
-}
-
-function quoteRequestCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  const { authority, role, valid, workspace } = context;
-  if (!valid || role !== 'buyer' || authority.request || authority.quote) return [];
-  return [
-    capability(
-      workspace,
-      'request_quote',
-      'Request a provider quote for the exact specification.',
-      [`Binds the request to ${authority.specHash}.`],
-    ),
-  ];
-}
-
-function providerCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  const { authority, role, workspace } = context;
-  if (role !== 'provider' || !authority.request || authority.quote) return [];
-  return [
-    capability(
-      workspace,
-      'freeze_and_quote_revision',
-      'Freeze and quote the requested specification.',
-      [
-        `Creates immutable ${authority.revisionId}.`,
-        'Quotes one four-panel fabrication lot at ₹2,400.',
-      ],
-    ),
-  ];
-}
-
-function acceptanceCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  const { authority, role, workspace } = context;
-  if (role !== 'buyer' || !authority.revision || !authority.quote || authority.acceptance)
-    return [];
-  return [
-    capability(workspace, 'accept_revision', 'Accept the exact quoted frozen revision.', [
+    ],
+    blockers: conflictBlockers,
+    reason: () => 'At least one predicted repair resolves the current hard conflict.',
+  },
+  {
+    id: 'edit_draft',
+    description: () => 'Move an editable feature in the current draft.',
+    predictedConsequences: () => [
+      'Increments draft version and capability epoch.',
+      'Revokes authority tied to the previous specification.',
+    ],
+    blockers: editBlockers,
+    reason: () => 'The slot is editable by the current principal.',
+  },
+  {
+    id: 'request_quote',
+    description: () => 'Request a provider quote for the exact specification.',
+    predictedConsequences: ({ authority }) => [`Binds the request to ${authority.specHash}.`],
+    blockers: requestBlockers,
+    reason: () => 'The current specification is buildable and has no current quote authority.',
+  },
+  {
+    id: 'freeze_and_quote_revision',
+    description: () => 'Freeze and quote the requested specification.',
+    predictedConsequences: ({ authority }) => [
+      `Creates immutable ${authority.revisionId}.`,
+      'Quotes one four-panel fabrication lot at ₹2,400.',
+    ],
+    blockers: quoteBlockers,
+    reason: () => 'A buyer request matches the exact current specification hash.',
+  },
+  {
+    id: 'accept_revision',
+    description: () => 'Accept the exact quoted frozen revision.',
+    predictedConsequences: ({ authority }) => [
       `Accepts ${authority.revisionId} and its exact specification hash.`,
-    ]),
-  ];
+      'Accrues commerce materialization authority for an agent.',
+    ],
+    blockers: acceptanceBlockers,
+    reason: () => 'The provider quote and immutable revision match the current specification.',
+  },
+  {
+    id: 'materialize_for_commerce',
+    description: () => 'Materialize the accepted revision in Shopify.',
+    predictedConsequences: () => [
+      'Requires exact Admin, publication, and Storefront verification.',
+      'Creates one purchasable lot representing four physical panels.',
+    ],
+    blockers: commerceBlockers,
+    reason: () => 'Buyer acceptance matches the current frozen revision and specification hash.',
+  },
+  {
+    id: 'navigate_to_storefront',
+    description: () => 'Open the independently verified Shopify Liquid product.',
+    predictedConsequences: ({ authority }) => [
+      authority.commerce
+        ? `Top-level navigation opens ${authority.commerce.verification.storefrontUrl}.`
+        : 'Top-level navigation remains unavailable until external verification passes.',
+      'Attune tools disappear with this document; Shopify-native WebMCP becomes authoritative.',
+    ],
+    blockers: navigationBlockers,
+    reason: () =>
+      'The exact current frozen revision has verified Admin, publication, and Storefront state.',
+  },
+];
+
+function compileEntry(
+  workspace: AttuneWorkspace,
+  definition: CapabilityDefinition,
+  context: CompilerContext,
+): CapabilityFrontierEntry {
+  const blockers = definition.blockers(context);
+  const base = {
+    id: definition.id,
+    capabilityEpoch: workspace.capabilityEpoch,
+    description: definition.description(context),
+    predictedConsequences: definition.predictedConsequences(context),
+  };
+
+  return blockers.length === 0
+    ? { ...base, available: true, reason: definition.reason(context), blockers: [] }
+    : { ...base, available: false, reason: null, blockers };
 }
 
-function commerceCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  const { authority, role, workspace } = context;
-  if (role !== 'agent' || !authority.acceptance || authority.commerce) return [];
-  return [
-    capability(
-      workspace,
-      'materialize_for_commerce',
-      'Materialize the accepted revision in Shopify.',
-      [
-        'Requires exact Admin, publication, and Storefront verification.',
-        'Creates one purchasable lot representing four physical panels.',
-      ],
-    ),
-  ];
+export function compileCapabilityFrontier(
+  workspace: AttuneWorkspace,
+  role: AttuneRole,
+): readonly CapabilityFrontierEntry[] {
+  const context: CompilerContext = {
+    workspace,
+    role,
+    valid: validateWorkspace(workspace).valid,
+    authority: deriveCurrentAuthority(workspace),
+  };
+  return DEFINITIONS.map((definition) => compileEntry(workspace, definition, context));
 }
-
-function navigationCapabilities(context: CompilerContext): readonly CompiledCapability[] {
-  const { authority, workspace } = context;
-  if (!authority.commerce) return [];
-  return [
-    capability(workspace, 'navigate_to_storefront', 'Open the independently verified product.', [
-      `Navigates to ${authority.commerce.verification.storefrontUrl}.`,
-    ]),
-  ];
-}
-
-const CAPABILITY_BUILDERS = [
-  editCapabilities,
-  repairCapabilities,
-  quoteRequestCapabilities,
-  providerCapabilities,
-  acceptanceCapabilities,
-  commerceCapabilities,
-  navigationCapabilities,
-] as const;
 
 export function compileCapabilities(
   workspace: AttuneWorkspace,
   role: AttuneRole,
 ): readonly CompiledCapability[] {
-  const context: CompilerContext = {
-    workspace,
-    role,
-    valid: validateWorkspace(workspace).valid,
-    authority: currentAuthority(workspace),
-  };
-  return CAPABILITY_BUILDERS.flatMap((build) => build(context));
+  return compileCapabilityFrontier(workspace, role).filter(
+    (entry): entry is CompiledCapability => entry.available,
+  );
 }
 
 export function requiredCapability(commandType: AttuneCommandType): CapabilityId | undefined {

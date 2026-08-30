@@ -1,0 +1,17 @@
+{
+  "name": "@attune/webmcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@attune/capabilities": "workspace:*",
+    "@attune/command-bus": "workspace:*",
+    "@attune/domain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2"
+  }
+}

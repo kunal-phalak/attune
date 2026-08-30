@@ -1,6 +1,6 @@
-import { parseRepairExecutionInput } from '../../../../lib/attune-request';
+import { parseCommandExecutionInput } from '../../../../lib/attune-request';
 import { attuneErrorResponse, noStoreJson } from '../../../../lib/attune-response';
-import { executeHumanRepair, inspectForHuman } from '../../../../lib/attune-runtime';
+import { executeHumanCommand, inspectForHuman } from '../../../../lib/attune-runtime';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,8 +10,13 @@ export function GET() {
 
 export async function POST(request: Request) {
   try {
-    const input = parseRepairExecutionInput(await request.json());
-    return noStoreJson(executeHumanRepair(input));
+    const input = parseCommandExecutionInput(await request.json(), [
+      'apply_deterministic_repair',
+      'move_slot',
+      'request_quote',
+      'accept_revision',
+    ]);
+    return noStoreJson(executeHumanCommand(input));
   } catch (error) {
     return attuneErrorResponse(error);
   }

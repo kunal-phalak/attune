@@ -2,74 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-type RegistrationState = 'checking' | 'registered' | 'unsupported' | 'failed';
-type RepairId = 'move_slot_left_to_clearance' | 'narrow_slot_to_clearance';
+import {
+  commandRequestBody,
+  requestAttuneView,
+  type AttuneApiView,
+  type RepairId,
+} from '../lib/attune-view';
 
-interface AttuneApiView {
-  readonly workspace: {
-    readonly commitmentId: string;
-    readonly workspaceSeq: number;
-    readonly draftVersion: number;
-    readonly capabilityEpoch: number;
-  };
-  readonly validation: {
-    readonly valid: boolean;
-    readonly evidence: {
-      readonly slotRightClearanceMm: number;
-      readonly requiredSlotClearanceMm: number;
-      readonly lockedMountsPreserved: number;
-      readonly lockedMountsTotal: number;
-    };
-  };
-  readonly capabilities: readonly { readonly id: string }[];
-  readonly repairs: readonly { readonly id: string; readonly label: string }[];
-  readonly observation: {
-    readonly interventions: readonly unknown[];
-  };
-  readonly receipt?: {
-    readonly receiptId: string;
-    readonly afterHash: string;
-    readonly preservedLocks: readonly string[];
-  };
-}
+type RegistrationState = 'checking' | 'registered' | 'unsupported' | 'failed';
 
 interface ToolRuntime {
   readonly observe: () => Promise<AttuneApiView>;
-  readonly applyRepair: (repairId: RepairId) => Promise<unknown>;
-}
-
-function isAttuneApiView(value: unknown): value is AttuneApiView {
-  if (typeof value !== 'object' || value === null) return false;
-  const workspace = Reflect.get(value, 'workspace');
-  return (
-    typeof workspace === 'object' &&
-    workspace !== null &&
-    Reflect.get(workspace, 'commitmentId') === 'AT-1042' &&
-    Number.isInteger(Reflect.get(workspace, 'workspaceSeq'))
-  );
-}
-
-function jsonHeaders(initial?: HeadersInit): Headers {
-  const headers = new Headers(initial);
-  headers.set('Accept', 'application/json');
-  headers.set('Content-Type', 'application/json');
-  return headers;
-}
-
-async function requestView(path: string, init?: RequestInit): Promise<AttuneApiView> {
-  const response = await fetch(path, {
-    ...init,
-    cache: 'no-store',
-    headers: jsonHeaders(init?.headers),
-  });
-  const payload: unknown = await response.json();
-  if (!response.ok) {
-    const error =
-      typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : payload;
-    throw new Error(`Attune command rejected (${response.status}): ${JSON.stringify(error)}`);
-  }
-  if (!isAttuneApiView(payload)) throw new TypeError('Attune returned an invalid workspace view.');
-  return payload;
+  readonly execute: (
+    command: Readonly<Record<string, unknown>>,
+    requireNoIntervention?: boolean,
+  ) => Promise<unknown>;
+  readonly navigateToStorefront: () => Promise<unknown>;
 }
 
 function validateEmptyInput(input: unknown): void {
@@ -87,7 +35,30 @@ function readRepairId(input: unknown): RepairId {
   if (value !== 'move_slot_left_to_clearance' && value !== 'narrow_slot_to_clearance') {
     throw new TypeError('repair_id must identify one of the offered deterministic repairs.');
   }
+  if (Object.keys(input).some((key) => key !== 'repair_id')) {
+    throw new TypeError('The repair input contains unsupported fields.');
+  }
   return value;
+}
+
+function readSlotPosition(input: unknown) {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    throw new TypeError('center_x_mm and center_y_mm are required.');
+  }
+  const centerX = Reflect.get(input, 'center_x_mm');
+  const centerY = Reflect.get(input, 'center_y_mm');
+  if (
+    typeof centerX !== 'number' ||
+    !Number.isFinite(centerX) ||
+    typeof centerY !== 'number' ||
+    !Number.isFinite(centerY)
+  ) {
+    throw new TypeError('Slot coordinates must be finite millimetre values.');
+  }
+  if (Object.keys(input).some((key) => key !== 'center_x_mm' && key !== 'center_y_mm')) {
+    throw new TypeError('The slot input contains unsupported fields.');
+  }
+  return { centerX, centerY };
 }
 
 function summarize(view: AttuneApiView) {
@@ -96,14 +67,20 @@ function summarize(view: AttuneApiView) {
     workspace_seq: view.workspace.workspaceSeq,
     draft_version: view.workspace.draftVersion,
     capability_epoch: view.workspace.capabilityEpoch,
+    spec_hash: view.specHash,
     valid: view.validation.valid,
     clearance_mm: view.validation.evidence.slotRightClearanceMm,
     required_clearance_mm: view.validation.evidence.requiredSlotClearanceMm,
     locked_mounts_preserved: `${view.validation.evidence.lockedMountsPreserved}/${view.validation.evidence.lockedMountsTotal}`,
-    capabilities: view.capabilities.map(({ id }) => id),
+    available_capabilities: view.capabilities,
+    capability_frontier: view.frontier,
+    latest_capability_transition: view.latestCapabilityTransition,
     human_interventions_since_last_observation: view.observation.interventions,
     deterministic_repairs: view.repairs,
-    receipt: view.receipt,
+    latest_receipt: view.latestReceipt,
+    external_shopify_verification: view.records.externalVerifications.at(-1) ?? null,
+    recent_rejections: view.records.commandRejections.slice(-5),
+    measured_outcome: view.impact,
   };
 }
 
@@ -112,36 +89,55 @@ function createToolRuntime(
   updateView: (view: AttuneApiView) => void,
 ): ToolRuntime {
   const observe = async () => {
-    const next = await requestView(`/api/attune/webmcp?cursor=${cursor.current}`);
+    const next = await requestAttuneView(`/api/attune/webmcp?cursor=${cursor.current}`);
     cursor.current = next.workspace.workspaceSeq;
     updateView(next);
     return next;
   };
-  const applyRepair = async (repairId: RepairId) => {
+  const execute = async (
+    command: Readonly<Record<string, unknown>>,
+    requireNoIntervention = true,
+  ) => {
     const observed = await observe();
-    if (observed.observation.interventions.length > 0) {
+    if (requireNoIntervention && observed.observation.interventions.length > 0) {
       return {
         status: 'REVALIDATION_REQUIRED',
         reason: 'Human intervention was detected before execution.',
         ...summarize(observed),
       };
     }
-    const next = await requestView('/api/attune/webmcp', {
+    const next = await requestAttuneView('/api/attune/webmcp', {
       method: 'POST',
-      body: JSON.stringify({
-        repairId,
-        commandId: `webmcp-${crypto.randomUUID()}`,
-        expectedWorkspaceSeq: observed.workspace.workspaceSeq,
-        expectedCapabilityEpoch: observed.workspace.capabilityEpoch,
-        observationCursor: cursor.current,
-      }),
+      body: commandRequestBody(observed, command, 'webmcp', cursor.current),
     });
     cursor.current = next.workspace.workspaceSeq;
     updateView(next);
     window.dispatchEvent(new Event('attune:workspace-changed'));
     return { status: 'APPLIED', ...summarize(next) };
   };
-  return { applyRepair, observe };
+  const navigateToStorefront = async () => {
+    const observed = await observe();
+    const commerce = observed.workspace.commerceLinks.find(
+      ({ revisionId, specHash }) =>
+        revisionId === `r${observed.workspace.draftVersion}` && specHash === observed.specHash,
+    );
+    if (!commerce) {
+      return {
+        status: 'REVALIDATION_REQUIRED',
+        reason: 'The current revision has no exact verified Shopify identity.',
+        ...summarize(observed),
+      };
+    }
+    const destination = commerce.verification.storefrontUrl;
+    window.location.assign(destination);
+    return {
+      status: 'NAVIGATING_TOP_LEVEL',
+      destination,
+      revision_id: commerce.revisionId,
+      spec_hash: commerce.specHash,
+    };
+  };
+  return { execute, navigateToStorefront, observe };
 }
 
 function inspectionTool(runtime: ToolRuntime): WebMcpTool {
@@ -149,9 +145,9 @@ function inspectionTool(runtime: ToolRuntime): WebMcpTool {
     name: 'inspect_attune_workspace',
     title: 'Inspect AT-1042 authoritative state',
     description:
-      'Read current AT-1042 validation, versions, capabilities, and human interventions observed since this tab last interacted. Returns no secrets.',
+      'Read current AT-1042 validation, capability frontier, immutable records, measured outcomes, and human interventions observed since this tab last interacted. Returns no secrets.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, untrustedContentHint: false },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     async execute(input) {
       validateEmptyInput(input);
       return summarize(await runtime.observe());
@@ -164,9 +160,9 @@ function comparisonTool(runtime: ToolRuntime): WebMcpTool {
     name: 'compare_valid_changes',
     title: 'Compare valid AT-1042 repairs',
     description:
-      'Return deterministic slot-clearance repairs, predicted consequences, and any unseen human intervention before a repair is selected.',
+      'Return deterministic slot-clearance repairs, predicted consequences, lock-preservation evidence, and any unseen human intervention before selection.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, untrustedContentHint: false },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
     async execute(input) {
       validateEmptyInput(input);
       return summarize(await runtime.observe());
@@ -179,7 +175,7 @@ function repairTool(runtime: ToolRuntime): WebMcpTool {
     name: 'apply_attune_repair',
     title: 'Apply selected AT-1042 repair',
     description:
-      'Apply one offered deterministic repair through Attune’s shared command bus. Revalidates authoritative sequence and capability epoch; preserves all buyer-locked mounts.',
+      'Apply one offered deterministic repair through the shared command bus. Revalidates principal, sequence, capability epoch, specification hash, and unseen human intervention; preserves all buyer locks.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -192,9 +188,69 @@ function repairTool(runtime: ToolRuntime): WebMcpTool {
       required: ['repair_id'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, untrustedContentHint: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: true },
     execute(input) {
-      return runtime.applyRepair(readRepairId(input));
+      return runtime.execute({
+        type: 'apply_deterministic_repair',
+        repairId: readRepairId(input),
+      });
+    },
+  };
+}
+
+function editTool(runtime: ToolRuntime): WebMcpTool {
+  return {
+    name: 'move_attune_slot',
+    title: 'Move the AT-1042 connector slot',
+    description:
+      'Move the editable connector slot in millimetres through the shared command bus. Predictably creates a new draft, increments the capability epoch, and revokes authority tied to the previous specification.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        center_x_mm: { type: 'number', description: 'Slot center X coordinate in millimetres.' },
+        center_y_mm: { type: 'number', description: 'Slot center Y coordinate in millimetres.' },
+      },
+      required: ['center_x_mm', 'center_y_mm'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, untrustedContentHint: true },
+    execute(input) {
+      const position = readSlotPosition(input);
+      return runtime.execute({
+        type: 'move_slot',
+        centerX: position.centerX,
+        centerY: position.centerY,
+      });
+    },
+  };
+}
+
+function materializationTool(runtime: ToolRuntime): WebMcpTool {
+  return {
+    name: 'materialize_attune_revision',
+    title: 'Materialize accepted r7 in Shopify',
+    description:
+      'Materialize the exact accepted AT-1042 r7 as one four-panel ₹2,400 Shopify lot. The server revalidates current authority, then requires Admin, publication, inventory, and Storefront conformance before recording VERIFIED.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: true },
+    execute(input) {
+      validateEmptyInput(input);
+      return runtime.execute({ type: 'materialize_for_commerce', revisionId: 'r7' });
+    },
+  };
+}
+
+function navigationTool(runtime: ToolRuntime): WebMcpTool {
+  return {
+    name: 'open_verified_shopify_product',
+    title: 'Open the verified Shopify Liquid product',
+    description:
+      'Navigate the top-level browser to the exact verified Shopify Liquid product. Attune tools leave with this document; Shopify-native browser WebMCP becomes the independent visible-session surface.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: true },
+    execute(input) {
+      validateEmptyInput(input);
+      return runtime.navigateToStorefront();
     },
   };
 }
@@ -208,6 +264,9 @@ async function registerTools(
   const tools = [inspectionTool(runtime)];
   if (capabilityIds.has('compare_valid_changes')) tools.push(comparisonTool(runtime));
   if (capabilityIds.has('apply_deterministic_repair')) tools.push(repairTool(runtime));
+  if (capabilityIds.has('edit_draft')) tools.push(editTool(runtime));
+  if (capabilityIds.has('materialize_for_commerce')) tools.push(materializationTool(runtime));
+  if (capabilityIds.has('navigate_to_storefront')) tools.push(navigationTool(runtime));
   await Promise.all(tools.map((tool) => Promise.resolve(context.registerTool(tool, { signal }))));
 }
 
@@ -215,12 +274,16 @@ export function AttuneWebMcp() {
   const [registrationState, setRegistrationState] = useState<RegistrationState>('checking');
   const [view, setView] = useState<AttuneApiView | null>(null);
   const observationCursor = useRef(0);
-  const refresh = useCallback(async () => setView(await requestView('/api/attune/webmcp')), []);
+  const refresh = useCallback(
+    async () => setView(await requestAttuneView('/api/attune/webmcp')),
+    [],
+  );
   const capabilityKey =
     view?.capabilities
       .map(({ id }) => id)
       .toSorted()
       .join('|') ?? '';
+  const workspaceReady = view !== null;
 
   useEffect(() => {
     void refresh().catch(() => setRegistrationState('failed'));
@@ -235,7 +298,7 @@ export function AttuneWebMcp() {
       setRegistrationState('unsupported');
       return undefined;
     }
-    if (!capabilityKey) return undefined;
+    if (!workspaceReady) return undefined;
     const lifecycle = new AbortController();
     const runtime = createToolRuntime(observationCursor, setView);
     setRegistrationState('checking');
@@ -244,7 +307,7 @@ export function AttuneWebMcp() {
       () => setRegistrationState('failed'),
     );
     return () => lifecycle.abort();
-  }, [capabilityKey]);
+  }, [capabilityKey, workspaceReady]);
 
   return (
     <aside className="webmcp-state" aria-live="polite">

@@ -182,3 +182,32 @@ This ledger distinguishes implementation work from the pre-implementation specif
   `attune-beta-five.vercel.app` alias. Aligned the declared Node 24 floor with Vercel's compatible
   `24.19.0` production runtime after the first successful build surfaced the overly narrow local
   `24.20.0` floor.
+
+## 2026-08-30 — Full manufacturing outcome surface
+
+- Preserved the passing AT-1042 model and extended its compiler into a complete capability
+  frontier. Buyer, provider, and agent now receive available actions, factual reasons, predicted
+  consequences, blocked actions, and exact blocker codes from one source.
+- Bound every mutation to a server-owned principal/role plus expected workspace sequence,
+  capability epoch, and current specification hash. Exact idempotent replay returns the original
+  result; command-ID reuse with different content is rejected and recorded.
+- Linked every immutable receipt to a cross-role capability transition. Product responses now
+  expose receipts, transitions, command rejections, and exact Shopify verification records.
+- Exposed the real browser workflow for repair, buyer quote request, provider freeze/₹2,400 r7
+  quote, exact buyer acceptance, live Shopify materialization, verified storefront navigation,
+  human r8 mutation, and stale-r7 rejection. Materialization accepts no browser-supplied
+  verification; the server performs Admin, publication, inventory, and Storefront conformance.
+- Expanded native `document.modelContext` to static, code-owned contextual tools for inspection,
+  repair comparison/application, slot movement, materialization, and verified top-level Shopify
+  navigation. External and user-controlled results carry `untrustedContentHint: true`.
+- Added measured in-product outcome data for need-to-buildable elapsed time, pre-quote conflicts,
+  lock preservation, detected interventions, blocked stale commerce actions, exact Shopify
+  matches, and golden-path completion. No comparative claim is emitted before five-run evidence.
+- Added deterministic and probabilistic WebMCP eval contracts for direct, ambiguous, intervention,
+  stale, boundary-bypass, adversarial, multi-step, and tool-result reuse cases.
+- Native browser acceptance proved initial tool discovery, WebMCP repair, dynamic tool removal,
+  buyer/provider UI transitions, automatic unseen-human-intervention detection, and appearance of
+  `materialize_attune_revision` only after exact r7 acceptance.
+- A fresh Shopify preflight still reports one external blocker: `read_inventory`. It stops before
+  product mutation; no disposable fixture exists to clean. Product development continues without
+  weakening the verification contract.

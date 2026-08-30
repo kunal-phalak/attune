@@ -99,6 +99,9 @@ export interface CommerceVerification {
   readonly variantId: string;
   readonly publicationId: string;
   readonly storefrontUrl: string;
+  readonly commitmentId: 'AT-1042';
+  readonly revisionId: 'r7';
+  readonly specHash: string;
   readonly title: 'Custom Equipment Panel — AT-1042 r7';
   readonly sku: 'AT-1042-R7-LOT4';
   readonly amountMinor: 240_000;

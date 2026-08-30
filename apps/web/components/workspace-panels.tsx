@@ -10,7 +10,7 @@ import {
 } from '@liveblocks/react';
 import { AvatarStack, Composer, Thread } from '@liveblocks/react-ui';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as Y from 'yjs';
 
 import type { AttuneApiView, CapabilityRole, CapabilityView } from '../lib/attune-view';
@@ -677,10 +677,13 @@ function RestoreYjsVersion({ versionId }: { readonly versionId: string }) {
 
 export function CollaborationHeader() {
   const syncStatus = useSyncStatus();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const synchronized = mounted && syncStatus === 'synchronized';
   return (
     <div className="workspace-collaborators">
-      <span className={syncStatus === 'synchronized' ? 'sync-state is-synced' : 'sync-state'}>
-        <i /> {syncStatus === 'synchronized' ? 'Synced' : 'Syncing'}
+      <span className={synchronized ? 'sync-state is-synced' : 'sync-state'}>
+        <i /> {synchronized ? 'Synced' : 'Connecting'}
       </span>
       <AvatarStack max={4} size={26} />
     </div>

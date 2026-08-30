@@ -261,7 +261,7 @@ export function DashboardLibrary({
                 <div className="library-file-facts">
                   <span>Draft r{file.draftVersion}</span>
                   <span>
-                    {new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(
+                    {new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' }).format(
                       new Date(file.updatedAt),
                     )}
                   </span>

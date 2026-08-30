@@ -4385,7 +4385,6 @@ input {
     grid-template-columns: minmax(260px, 1fr) auto minmax(330px, 1fr);
   }
 
-  .topbar-secondary,
   .sync-state {
     display: none;
   }

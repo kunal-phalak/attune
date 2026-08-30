@@ -3042,12 +3042,16 @@ input {
 }
 
 .items-panel-footer {
+  background: var(--shell-panel);
   border-top: 1px solid var(--shell-line);
   color: var(--shell-muted);
   display: flex;
   font-size: 8px;
   gap: 9px;
+  justify-content: flex-start;
+  min-height: auto;
   padding: 10px 13px;
+  padding-inline: 13px;
 }
 
 .items-panel-footer span + span {
@@ -3292,17 +3296,18 @@ input {
   padding: 12px;
   position: absolute;
   right: 22px;
-  top: 42%;
+  top: 14%;
   z-index: 5;
 }
 
 .geometry-local-callout::before {
-  border-bottom: 1px solid var(--shell-amber);
+  border-left: 1px solid var(--shell-amber);
   content: '';
-  left: -54px;
+  height: 138px;
+  left: 50%;
   position: absolute;
-  top: 28px;
-  width: 50px;
+  top: 100%;
+  width: 0;
 }
 
 .geometry-local-callout.is-valid {
@@ -4332,7 +4337,9 @@ input {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  min-height: auto;
   padding: 12px 20px;
+  padding-inline: 20px;
 }
 
 .workspace-modal > footer button {

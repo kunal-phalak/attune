@@ -10,7 +10,28 @@ import {
   type RepairId,
 } from '../lib/attune-view';
 
-type RegistrationState = 'checking' | 'registered' | 'unsupported' | 'failed';
+export type RegistrationState = 'checking' | 'registered' | 'unsupported' | 'failed';
+export type WebMcpExecutionState =
+  | 'idle'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'revalidation_required';
+
+export interface AttuneWebMcpStatus {
+  readonly registration: RegistrationState;
+  readonly execution: WebMcpExecutionState;
+  readonly lastAction: string | null;
+  readonly workspaceSeq: number | null;
+  readonly draftVersion: number | null;
+  readonly availableTools: readonly string[];
+  readonly interventions: number;
+}
+
+interface RuntimeStatus {
+  readonly execution: WebMcpExecutionState;
+  readonly lastAction: string | null;
+}
 
 interface ToolRuntime {
   readonly observe: () => Promise<AttuneApiView>;
@@ -89,8 +110,9 @@ function createToolRuntime(
   workspaceId: string,
   cursor: { current: number },
   updateView: (view: AttuneApiView) => void,
+  report: (status: RuntimeStatus) => void,
 ): ToolRuntime {
-  const observe = async () => {
+  const loadObservation = async () => {
     const next = await requestAttuneView(
       attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, { cursor: cursor.current }),
     );
@@ -98,53 +120,94 @@ function createToolRuntime(
     updateView(next);
     return next;
   };
+  const observe = async () => {
+    report({ execution: 'executing', lastAction: 'inspect_attune_workspace' });
+    try {
+      const next = await loadObservation();
+      report({ execution: 'completed', lastAction: 'inspect_attune_workspace' });
+      return next;
+    } catch (error) {
+      report({ execution: 'failed', lastAction: 'inspect_attune_workspace' });
+      throw error;
+    }
+  };
   const execute = async (
     command: Readonly<Record<string, unknown>>,
     requireNoIntervention = true,
   ) => {
-    const observed = await observe();
-    if (requireNoIntervention && observed.observation.interventions.length > 0) {
-      return {
-        status: 'REVALIDATION_REQUIRED',
-        reason: 'Human intervention was detected before execution.',
-        ...summarize(observed),
-      };
+    const action = typeof command.type === 'string' ? command.type : 'attune_command';
+    report({ execution: 'executing', lastAction: action });
+    try {
+      const observed = await loadObservation();
+      if (requireNoIntervention && observed.observation.interventions.length > 0) {
+        report({ execution: 'revalidation_required', lastAction: action });
+        return {
+          status: 'REVALIDATION_REQUIRED',
+          reason: 'Human intervention was detected before execution.',
+          ...summarize(observed),
+        };
+      }
+      const next = await requestAttuneView(
+        attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId),
+        {
+          method: 'POST',
+          body: commandRequestBody(observed, command, 'webmcp', cursor.current),
+        },
+      );
+      cursor.current = next.workspace.workspaceSeq;
+      updateView(next);
+      window.dispatchEvent(new Event('attune:workspace-changed'));
+      report({ execution: 'completed', lastAction: action });
+      return { status: 'APPLIED', ...summarize(next) };
+    } catch (error) {
+      report({ execution: 'failed', lastAction: action });
+      throw error;
     }
-    const next = await requestAttuneView(
-      attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId),
-      {
-        method: 'POST',
-        body: commandRequestBody(observed, command, 'webmcp', cursor.current),
-      },
-    );
-    cursor.current = next.workspace.workspaceSeq;
-    updateView(next);
-    window.dispatchEvent(new Event('attune:workspace-changed'));
-    return { status: 'APPLIED', ...summarize(next) };
   };
   const navigateToStorefront = async () => {
-    const observed = await observe();
-    const commerce = observed.workspace.commerceLinks.find(
-      ({ revisionId, specHash }) =>
-        revisionId === `r${observed.workspace.draftVersion}` && specHash === observed.specHash,
-    );
-    if (!commerce) {
+    const action = 'open_verified_shopify_product';
+    report({ execution: 'executing', lastAction: action });
+    try {
+      const observed = await loadObservation();
+      const commerce = observed.workspace.commerceLinks.find(
+        ({ revisionId, specHash }) =>
+          revisionId === `r${observed.workspace.draftVersion}` && specHash === observed.specHash,
+      );
+      if (!commerce) {
+        report({ execution: 'revalidation_required', lastAction: action });
+        return {
+          status: 'REVALIDATION_REQUIRED',
+          reason: 'The current revision has no exact verified Shopify identity.',
+          ...summarize(observed),
+        };
+      }
+      const destination = commerce.verification.storefrontUrl;
+      report({ execution: 'completed', lastAction: action });
+      window.location.assign(destination);
       return {
-        status: 'REVALIDATION_REQUIRED',
-        reason: 'The current revision has no exact verified Shopify identity.',
-        ...summarize(observed),
+        status: 'NAVIGATING_TOP_LEVEL',
+        destination,
+        revision_id: commerce.revisionId,
+        spec_hash: commerce.specHash,
       };
+    } catch (error) {
+      report({ execution: 'failed', lastAction: action });
+      throw error;
     }
-    const destination = commerce.verification.storefrontUrl;
-    window.location.assign(destination);
-    return {
-      status: 'NAVIGATING_TOP_LEVEL',
-      destination,
-      revision_id: commerce.revisionId,
-      spec_hash: commerce.specHash,
-    };
   };
   return { execute, navigateToStorefront, observe };
+}
+
+function availableToolNames(view: AttuneApiView | null): readonly string[] {
+  if (!view) return [];
+  const capabilityIds = new Set(view.capabilities.map(({ id }) => id));
+  const tools = ['inspect_attune_workspace'];
+  if (capabilityIds.has('compare_valid_changes')) tools.push('compare_valid_changes');
+  if (capabilityIds.has('apply_deterministic_repair')) tools.push('apply_attune_repair');
+  if (capabilityIds.has('edit_draft')) tools.push('move_attune_slot');
+  if (capabilityIds.has('materialize_for_commerce')) tools.push('materialize_attune_revision');
+  if (capabilityIds.has('navigate_to_storefront')) tools.push('open_verified_shopify_product');
+  return tools;
 }
 
 function inspectionTool(runtime: ToolRuntime): WebMcpTool {
@@ -277,8 +340,18 @@ async function registerTools(
   await Promise.all(tools.map((tool) => Promise.resolve(context.registerTool(tool, { signal }))));
 }
 
-export function AttuneWebMcp({ workspaceId }: { readonly workspaceId: string }) {
+export function AttuneWebMcp({
+  workspaceId,
+  onStatus,
+}: {
+  readonly workspaceId: string;
+  readonly onStatus?: (status: AttuneWebMcpStatus) => void;
+}) {
   const [registrationState, setRegistrationState] = useState<RegistrationState>('checking');
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>({
+    execution: 'idle',
+    lastAction: null,
+  });
   const [view, setView] = useState<AttuneApiView | null>(null);
   const observationCursor = useRef(0);
   const refresh = useCallback(
@@ -308,7 +381,7 @@ export function AttuneWebMcp({ workspaceId }: { readonly workspaceId: string }) 
     }
     if (!workspaceReady) return undefined;
     const lifecycle = new AbortController();
-    const runtime = createToolRuntime(workspaceId, observationCursor, setView);
+    const runtime = createToolRuntime(workspaceId, observationCursor, setView, setRuntimeStatus);
     setRegistrationState('checking');
     void registerTools(context, new Set(capabilityKey.split('|')), runtime, lifecycle.signal).then(
       () => setRegistrationState('registered'),
@@ -317,11 +390,21 @@ export function AttuneWebMcp({ workspaceId }: { readonly workspaceId: string }) 
     return () => lifecycle.abort();
   }, [capabilityKey, workspaceId, workspaceReady]);
 
+  useEffect(() => {
+    onStatus?.({
+      registration: registrationState,
+      execution: runtimeStatus.execution,
+      lastAction: runtimeStatus.lastAction,
+      workspaceSeq: view?.workspace.workspaceSeq ?? null,
+      draftVersion: view?.workspace.draftVersion ?? null,
+      availableTools: availableToolNames(view),
+      interventions: view?.observation.interventions.length ?? 0,
+    });
+  }, [onStatus, registrationState, runtimeStatus, view]);
+
   return (
-    <aside className="webmcp-state" aria-live="polite">
-      <span>Contextual WebMCP</span>
-      <strong>{registrationState}</strong>
-      {view ? <span>epoch {view.workspace.capabilityEpoch}</span> : null}
-    </aside>
+    <output className="visually-hidden" aria-live="polite">
+      Contextual WebMCP {registrationState}. {availableToolNames(view).length} tools available.
+    </output>
   );
 }

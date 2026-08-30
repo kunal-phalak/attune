@@ -12,6 +12,7 @@ export {
   JUDGE_WORKSPACE_ID,
   listProjectsForUser,
   readWorkspaceBundle,
+  resetJudgeWorkspace,
   reserveExternalMaterialization,
   workspaceRoles,
 } from './repository';

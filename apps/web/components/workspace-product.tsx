@@ -1,21 +1,9 @@
 'use client';
 
-import {
-  LiveblocksProvider,
-  RoomProvider,
-  useHistoryVersionYjsData,
-  useHistoryVersions,
-  useRoom,
-  useSyncStatus,
-  useThreads,
-  useUnreadInboxNotificationsCount,
-  useUpdateMyPresence,
-} from '@liveblocks/react';
-import { AvatarStack, Composer, Cursors, Thread } from '@liveblocks/react-ui';
+import { LiveblocksProvider, RoomProvider, useRoom } from '@liveblocks/react';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import * as Y from 'yjs';
 
 import {
   AttuneHttpError,
@@ -26,9 +14,30 @@ import {
   type CapabilityRole,
 } from '../lib/attune-view';
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
-import { AttuneWebMcp } from './attune-webmcp';
+import { AttuneWebMcp, type AttuneWebMcpStatus } from './attune-webmcp';
+import { WorkspaceCanvas } from './workspace-canvas';
+import {
+  BottomDock,
+  CollaborationHeader,
+  InspectorPanel,
+  ItemsPanel,
+  LifecycleStrip,
+  type DockTab,
+  type InspectorTab,
+  type WorkflowAction,
+} from './workspace-panels';
 
 type ProductState = 'loading' | 'ready' | 'applying' | 'failed';
+
+const initialWebMcpStatus: AttuneWebMcpStatus = {
+  registration: 'checking',
+  execution: 'idle',
+  lastAction: null,
+  workspaceSeq: null,
+  draftVersion: null,
+  availableTools: [],
+  interventions: 0,
+};
 
 function available(view: AttuneApiView, role: CapabilityRole, id: string): boolean {
   return view.frontiers[role].some((entry) => entry.id === id && entry.available);
@@ -75,305 +84,7 @@ function YjsDraftBridge({ workspaceId }: { readonly workspaceId: string }) {
   return null;
 }
 
-function RestoreYjsVersion({ versionId }: { readonly versionId: string }) {
-  const version = useHistoryVersionYjsData(versionId);
-  const room = useRoom();
-  const restore = () => {
-    if (!version.data) return;
-    const historicDocument = new Y.Doc();
-    try {
-      Y.applyUpdate(historicDocument, version.data);
-      const historicDraft = historicDocument.getMap('attune').get('draft');
-      if (historicDraft) {
-        getYjsProviderForRoom(room).getYDoc().getMap('attune').set('draft', historicDraft);
-      }
-    } finally {
-      historicDocument.destroy();
-    }
-  };
-  return (
-    <button type="button" onClick={restore} disabled={!version.data}>
-      Load as draft
-    </button>
-  );
-}
-
-function CollaborationPanel({ workspaceId }: { readonly workspaceId: string }) {
-  const threadResult = useThreads({ query: { metadata: { workspaceId } } });
-  const historyResult = useHistoryVersions();
-  const notificationResult = useUnreadInboxNotificationsCount();
-  const syncStatus = useSyncStatus();
-  const threads = threadResult.threads ?? [];
-  const versions = historyResult.versions ?? [];
-
-  return (
-    <section className="collaboration-panel" aria-label="Workspace collaboration">
-      <div className="collaboration-heading">
-        <div>
-          <span>Collaboration</span>
-          <strong>{syncStatus === 'synchronized' ? 'Synced' : 'Synchronizing'}</strong>
-        </div>
-        <AvatarStack max={4} size={26} />
-      </div>
-      <div className="collaboration-stats">
-        <span>{threads.length} discussions</span>
-        <span>{versions.length} snapshots</span>
-        <span>{notificationResult.count ?? 0} unread</span>
-      </div>
-      <div className="thread-list">
-        {threads.slice(0, 2).map((thread) => (
-          <Thread thread={thread} key={thread.id} showComposer="collapsed" />
-        ))}
-      </div>
-      <Composer
-        className="workspace-composer"
-        metadata={{ workspaceId, entityId: 'workspace', x: 0, y: 0 }}
-      />
-      {versions.length > 0 ? (
-        <div className="version-list">
-          <span>Collaboration history</span>
-          {versions.slice(0, 2).map((version) => (
-            <div key={version.id}>
-              <code>{version.id}</code>
-              <RestoreYjsVersion versionId={version.id} />
-            </div>
-          ))}
-          <p>
-            Loading a snapshot changes only the mutable draft; frozen revisions remain immutable.
-          </p>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function GeometryDrawing({
-  view,
-  updatePresence,
-  showCursors,
-}: {
-  readonly view: AttuneApiView;
-  readonly updatePresence?: (patch: {
-    readonly cursor?: { readonly x: number; readonly y: number } | null;
-    readonly selection?: string[];
-    readonly currentTool?: string;
-  }) => void;
-  readonly showCursors: boolean;
-}) {
-  const geometry = view.workspace.geometry;
-  const scale = 2.2;
-  const offsetX = 45;
-  const offsetY = 45;
-  const slotX = offsetX + (geometry.slot.center.x - geometry.slot.width / 2) * scale;
-  const slotY = offsetY + (geometry.slot.center.y - geometry.slot.height / 2) * scale;
-  const conflict = !view.validation.valid;
-
-  return (
-    <section
-      className="geometry-stage"
-      aria-label="AT-1042 semantic geometry"
-      onPointerMove={(event) => {
-        const bounds = event.currentTarget.getBoundingClientRect();
-        updatePresence?.({
-          cursor: { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
-        });
-      }}
-      onPointerLeave={() => updatePresence?.({ cursor: null })}
-    >
-      <div className="stage-toolbar">
-        <div>
-          <button type="button" aria-pressed="true">
-            Select
-          </button>
-          <button type="button" disabled>
-            Hole
-          </button>
-          <button type="button" disabled>
-            Slot
-          </button>
-        </div>
-        <span>Semantic preview · committed operations only</span>
-      </div>
-      <div className="stage-canvas">
-        {showCursors ? <Cursors /> : null}
-        <svg viewBox="0 0 570 360" aria-labelledby="geometry-title geometry-description">
-          <title id="geometry-title">AT-1042 equipment panel</title>
-          <desc id="geometry-description">
-            A 218 by 120 millimeter acrylic panel with four locked mounts, two symmetric holes, and
-            one connector slot.
-          </desc>
-          <rect
-            className="workspace-sheet"
-            x={offsetX}
-            y={offsetY}
-            width={geometry.width * scale}
-            height={geometry.height * scale}
-            rx="4"
-          />
-          {[...geometry.mounts, ...geometry.auxiliaryHoles].map((hole) => (
-            <g key={hole.id}>
-              <circle
-                className={hole.locked ? 'workspace-hole locked' : 'workspace-hole'}
-                cx={offsetX + hole.center.x * scale}
-                cy={offsetY + hole.center.y * scale}
-                r={(hole.diameter * scale) / 2}
-              />
-              {hole.locked ? (
-                <text
-                  x={offsetX + hole.center.x * scale + 8}
-                  y={offsetY + hole.center.y * scale - 8}
-                >
-                  LOCK
-                </text>
-              ) : null}
-            </g>
-          ))}
-          <rect
-            className={conflict ? 'workspace-slot conflict' : 'workspace-slot'}
-            x={slotX}
-            y={slotY}
-            width={geometry.slot.width * scale}
-            height={geometry.slot.height * scale}
-            rx={geometry.slot.height * scale * 0.45}
-            onPointerDown={() =>
-              updatePresence?.({ selection: ['slot:connector'], currentTool: 'select' })
-            }
-          />
-          <path
-            className="workspace-dimension"
-            d={`M${slotX} 330H${slotX + geometry.slot.width * scale}`}
-          />
-          <text className="workspace-measure" x={slotX} y="348">
-            clearance {view.validation.evidence.slotRightClearanceMm} /{' '}
-            {view.validation.evidence.requiredSlotClearanceMm} mm
-          </text>
-        </svg>
-      </div>
-    </section>
-  );
-}
-
-function CollaborativeGeometryStage({ view }: { readonly view: AttuneApiView }) {
-  const updatePresence = useUpdateMyPresence();
-  return <GeometryDrawing view={view} updatePresence={updatePresence} showCursors />;
-}
-
-function GeometryStage({
-  view,
-  collaboration,
-}: {
-  readonly view: AttuneApiView;
-  readonly collaboration: boolean;
-}) {
-  return collaboration ? (
-    <CollaborativeGeometryStage view={view} />
-  ) : (
-    <GeometryDrawing view={view} showCursors={false} />
-  );
-}
-
-function SpecificationPanel({ view }: { readonly view: AttuneApiView }) {
-  const geometry = view.workspace.geometry;
-  return (
-    <aside className="specification-panel">
-      <div className="shell-panel-heading">
-        <span>Specification</span>
-        <strong>r{view.workspace.draftVersion}</strong>
-      </div>
-      <dl className="spec-list">
-        <div>
-          <dt>Panel</dt>
-          <dd>
-            {geometry.width} × {geometry.height} mm
-          </dd>
-        </div>
-        <div>
-          <dt>Material</dt>
-          <dd>
-            {geometry.material} · {geometry.thickness} mm
-          </dd>
-        </div>
-        <div>
-          <dt>Fabrication</dt>
-          <dd>{view.workspace.fabricationQuantity} panels</dd>
-        </div>
-        <div>
-          <dt>Mounts</dt>
-          <dd>4 buyer-locked</dd>
-        </div>
-      </dl>
-      <div className="constraint-list">
-        <span>Constraints</span>
-        <article className={view.validation.valid ? 'constraint valid' : 'constraint invalid'}>
-          <div>
-            <strong>Slot clearance</strong>
-            <span>{view.validation.valid ? 'PASS' : 'HARD'}</span>
-          </div>
-          <p>
-            {view.validation.evidence.slotRightClearanceMm} mm observed ·{' '}
-            {view.validation.evidence.requiredSlotClearanceMm} mm required
-          </p>
-        </article>
-        <article className="constraint valid">
-          <div>
-            <strong>Equal auxiliary holes</strong>
-            <span>PASS</span>
-          </div>
-          <p>Ø8 mm pair</p>
-        </article>
-        <article className="constraint valid">
-          <div>
-            <strong>Symmetry</strong>
-            <span>PASS</span>
-          </div>
-          <p>Centered on panel axis</p>
-        </article>
-      </div>
-    </aside>
-  );
-}
-
-function CapabilityPanel({ view }: { readonly view: AttuneApiView }) {
-  const [role, setRole] = useState<CapabilityRole>('buyer');
-  return (
-    <aside className="workspace-capabilities">
-      <div className="shell-panel-heading">
-        <span>Capability + consequence</span>
-        <strong>epoch {view.workspace.capabilityEpoch}</strong>
-      </div>
-      <div className="compact-role-tabs" aria-label="Inspect capability frontier by role">
-        {(['buyer', 'provider', 'agent'] as const).map((candidate) => (
-          <button
-            type="button"
-            key={candidate}
-            aria-pressed={role === candidate}
-            onClick={() => setRole(candidate)}
-          >
-            {candidate}
-          </button>
-        ))}
-      </div>
-      <p className="role-note">View only. Server membership determines execution authority.</p>
-      <div className="compact-capability-list">
-        {view.frontiers[role].map((capability) => (
-          <article
-            className={capability.available ? 'is-available' : 'is-blocked'}
-            key={capability.id}
-          >
-            <div>
-              <strong>{capability.id.replaceAll('_', ' ')}</strong>
-              <span>{capability.available ? 'AVAILABLE' : 'BLOCKED'}</span>
-            </div>
-            <p>{capability.available ? capability.reason : capability.blockers[0]?.message}</p>
-            {capability.available ? <small>{capability.predictedConsequences[0]}</small> : null}
-          </article>
-        ))}
-      </div>
-    </aside>
-  );
-}
-
-function workflowAction(view: AttuneApiView) {
+function workflowAction(view: AttuneApiView): WorkflowAction | null {
   const quote = view.workspace.quotes.find(
     (candidate) =>
       candidate.revisionId === `r${view.workspace.draftVersion}` &&
@@ -388,14 +99,14 @@ function workflowAction(view: AttuneApiView) {
     };
   if (available(view, 'provider', 'freeze_and_quote_revision'))
     return {
-      label: 'Freeze + quote exact r7',
+      label: `Freeze + quote exact r${view.workspace.draftVersion}`,
       path: '/api/attune/provider',
       prefix: 'provider',
       command: { type: 'freeze_and_quote_revision' },
     };
   if (available(view, 'buyer', 'accept_revision') && quote)
     return {
-      label: 'Accept exact r7',
+      label: `Accept exact ${quote.revisionId}`,
       path: '/api/attune/human',
       prefix: 'buyer',
       command: { type: 'accept_revision', revisionId: quote.revisionId, quoteId: quote.quoteId },
@@ -405,11 +116,11 @@ function workflowAction(view: AttuneApiView) {
       label: 'Materialize + verify Shopify',
       path: '/api/attune/webmcp',
       prefix: 'agent',
-      command: { type: 'materialize_for_commerce', revisionId: 'r7' },
+      command: { type: 'materialize_for_commerce', revisionId: `r${view.workspace.draftVersion}` },
     };
   if (available(view, 'agent', 'navigate_to_storefront') && view.workspace.draftVersion === 7)
     return {
-      label: 'Create r8 by moving slot',
+      label: 'Continue work as draft r8',
       path: '/api/attune/human',
       prefix: 'buyer',
       command: { type: 'move_slot', centerX: 195, centerY: 60 },
@@ -417,165 +128,185 @@ function workflowAction(view: AttuneApiView) {
   return null;
 }
 
-function WorkflowBar({
-  view,
-  disabled,
-  execute,
-}: {
-  readonly view: AttuneApiView;
-  readonly disabled: boolean;
-  readonly execute: (
-    path: string,
-    command: Readonly<Record<string, unknown>>,
-    prefix: string,
-  ) => void;
-}) {
-  const next = workflowAction(view);
-  const verified = view.workspace.commerceLinks.at(-1);
+function ProjectMark() {
   return (
-    <div className="workspace-actions">
-      <div>
-        <span>
-          {view.validation.valid
-            ? `Buildable r${view.workspace.draftVersion}`
-            : 'Manufacturing conflict'}
-        </span>
-        <strong>
-          {view.validation.valid
-            ? 'The current draft can advance.'
-            : 'Choose one deterministic valid change.'}
-        </strong>
-      </div>
-      <div>
-        {!view.validation.valid
-          ? view.repairs.map((repair) => (
-              <button
-                type="button"
-                key={repair.id}
-                disabled={disabled}
-                onClick={() =>
-                  execute(
-                    '/api/attune/human',
-                    { type: 'apply_deterministic_repair', repairId: repair.id },
-                    'buyer',
-                  )
-                }
-              >
-                {repair.label}
-              </button>
-            ))
-          : null}
-        {next ? (
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => execute(next.path, next.command, next.prefix)}
-          >
-            {next.label}
+    <svg viewBox="0 0 28 28" aria-hidden="true">
+      <path d="M5 6h18v16H5zM9 10h10v8H9z" />
+      <circle cx="7" cy="8" r="1.5" />
+      <circle cx="21" cy="20" r="1.5" />
+    </svg>
+  );
+}
+
+function ShareDialog({ onClose }: { readonly onClose: () => void }) {
+  return (
+    <div className="workspace-modal-backdrop" role="presentation" onPointerDown={onClose}>
+      <dialog
+        open
+        className="workspace-modal"
+        aria-labelledby="share-dialog-title"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <span>Workspace access</span>
+            <h2 id="share-dialog-title">Share AT-1042</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close share dialog">
+            ×
           </button>
-        ) : null}
-        {verified && view.workspace.draftVersion === 7 ? (
-          <a href={verified.verification.storefrontUrl}>Open verified Shopify ↗</a>
-        ) : null}
-      </div>
+        </header>
+        <div className="share-dialog-body">
+          <p>
+            Membership and business roles are verified by the server. Sharing this browser URL does
+            not grant quote, acceptance, or commerce authority.
+          </p>
+          <div className="share-member-row">
+            <span>CJ</span>
+            <div>
+              <strong>Challenge Judge</strong>
+              <small>Buyer · Provider · Agent evaluation</small>
+            </div>
+            <b>Member</b>
+          </div>
+          <div className="share-member-row">
+            <span>AA</span>
+            <div>
+              <strong>Attune agent</strong>
+              <small>Contextual WebMCP principal</small>
+            </div>
+            <b>Agent</b>
+          </div>
+        </div>
+        <footer>
+          <button type="button" className="primary-action" onClick={onClose}>
+            Done
+          </button>
+        </footer>
+      </dialog>
     </div>
   );
 }
 
-function EvidenceGrid({ view }: { readonly view: AttuneApiView }) {
-  const verification = view.workspace.commerceLinks.at(-1);
-  const receipts = view.records.receipts.toReversed().slice(0, 5);
+function ResetDialog({
+  applying,
+  onClose,
+  onReset,
+}: {
+  readonly applying: boolean;
+  readonly onClose: () => void;
+  readonly onReset: () => void;
+}) {
   return (
-    <section className="workspace-evidence">
-      <article>
-        <div className="shell-panel-heading">
-          <span>Activity</span>
-          <strong>{view.receiptCount} receipts</strong>
-        </div>
-        <ol>
-          {receipts.map((receipt) => (
-            <li key={receipt.receiptId}>
-              <span>
-                #{receipt.receiptSeq} · {receipt.origin}
-              </span>
-              <strong>{receipt.command.replaceAll('_', ' ')}</strong>
-              <code>{receipt.specHashAfter.slice(0, 10)}</code>
-            </li>
-          ))}
-        </ol>
-      </article>
-      <article>
-        <div className="shell-panel-heading">
-          <span>External verification</span>
-          <strong>{verification ? 'VERIFIED' : 'PENDING'}</strong>
-        </div>
-        {verification ? (
-          <dl className="commerce-proof">
-            <div>
-              <dt>Admin</dt>
-              <dd>verified</dd>
-            </div>
-            <div>
-              <dt>Publication</dt>
-              <dd>verified</dd>
-            </div>
-            <div>
-              <dt>Storefront</dt>
-              <dd>verified</dd>
-            </div>
-            <div>
-              <dt>SKU</dt>
-              <dd>{verification.verification.sku}</dd>
-            </div>
-            <div>
-              <dt>Lot</dt>
-              <dd>₹2,400 · 4 panels · qty 1</dd>
-            </div>
-          </dl>
-        ) : (
-          <p className="empty-evidence">
-            Shopify Admin, publication, inventory, and Storefront evidence will appear here. Judges
-            never need Admin access.
+    <div className="workspace-modal-backdrop" role="presentation" onPointerDown={onClose}>
+      <dialog
+        open
+        className="workspace-modal reset-dialog"
+        aria-labelledby="reset-dialog-title"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <span>Judge scenario</span>
+            <h2 id="reset-dialog-title">Reset AT-1042?</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close reset dialog">
+            ×
+          </button>
+        </header>
+        <div className="share-dialog-body">
+          <p>
+            Restore the deterministic r6 clearance conflict and remove scenario receipts, quotes,
+            acceptances, and commerce records. The project and workspace remain in Neon.
           </p>
-        )}
-      </article>
-      <article>
-        <div className="shell-panel-heading">
-          <span>AT-1042 outcome</span>
-          <strong>measured</strong>
+          <div className="reset-target">
+            <strong>Initial condition</strong>
+            <span>8.1 mm observed · 12 mm required · 4/4 mounts locked</span>
+          </div>
         </div>
-        <dl className="outcome-compact">
-          <div>
-            <dt>Need → buildable</dt>
-            <dd>
-              {view.impact.needToBuildableMs === null
-                ? 'measuring'
-                : `${Math.round(view.impact.needToBuildableMs / 1000)}s`}
-            </dd>
-          </div>
-          <div>
-            <dt>Conflicts pre-quote</dt>
-            <dd>{view.impact.conflictsCaughtBeforeQuote}</dd>
-          </div>
-          <div>
-            <dt>Locked mounts</dt>
-            <dd>{view.impact.lockedRequirementsPreserved.preserved}/4</dd>
-          </div>
-          <div>
-            <dt>Human intervention</dt>
-            <dd>{view.impact.humanInterventionsDetected > 0 ? 'detected' : 'awaiting'}</dd>
-          </div>
-          <div>
-            <dt>Stale actions blocked</dt>
-            <dd>{view.impact.staleConsequentialActionsBlocked}</dd>
-          </div>
-          <div>
-            <dt>Revision → Shopify</dt>
-            <dd>{view.impact.exactRevisionShopifyVerifications > 0 ? 'exact' : 'pending'}</dd>
-          </div>
-        </dl>
-      </article>
-    </section>
+        <footer>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="danger-action" disabled={applying} onClick={onReset}>
+            {applying ? 'Resetting…' : 'Reset deterministic scenario'}
+          </button>
+        </footer>
+      </dialog>
+    </div>
+  );
+}
+
+function WorkspaceHeader({
+  view,
+  collaboration,
+  webMcpStatus,
+  onAgent,
+  onShare,
+  onReset,
+}: {
+  readonly view: AttuneApiView;
+  readonly collaboration: boolean;
+  readonly webMcpStatus: AttuneWebMcpStatus;
+  readonly onAgent: () => void;
+  readonly onShare: () => void;
+  readonly onReset: () => void;
+}) {
+  return (
+    <header className="editor-topbar">
+      <div className="editor-nav-group">
+        <Link href="/dashboard" className="back-to-library" aria-label="Back to dashboard">
+          ←
+        </Link>
+        <Link href="/" className="editor-brand" aria-label="Attune home">
+          <ProjectMark />
+        </Link>
+        <div className="editor-document-identity">
+          <span>{view.product.projectName}</span>
+          <strong>{view.workspace.commitmentId} · Equipment panel</strong>
+        </div>
+      </div>
+      <div className="editor-state-group">
+        <span className="revision-pill">Draft r{view.workspace.draftVersion}</span>
+        <span
+          className={
+            view.validation.valid ? 'buildability-pill is-valid' : 'buildability-pill is-conflict'
+          }
+        >
+          <i /> {view.validation.valid ? 'Buildable' : '1 hard conflict'}
+        </span>
+      </div>
+      <div className="editor-actions-group">
+        {collaboration ? (
+          <CollaborationHeader />
+        ) : (
+          <span className="sync-state">
+            <i /> Local view
+          </span>
+        )}
+        <button
+          type="button"
+          className={
+            webMcpStatus.registration === 'registered'
+              ? 'agent-state-button is-connected'
+              : 'agent-state-button'
+          }
+          onClick={onAgent}
+        >
+          <i />
+          <span>Agent</span>
+          <strong>
+            {webMcpStatus.registration === 'registered' ? 'Connected' : webMcpStatus.registration}
+          </strong>
+        </button>
+        <button type="button" className="topbar-secondary" onClick={onReset}>
+          Reset scenario
+        </button>
+        <button type="button" className="share-button" onClick={onShare}>
+          Share
+        </button>
+      </div>
+    </header>
   );
 }
 
@@ -589,6 +320,16 @@ function WorkspaceShell({
   const [view, setView] = useState<AttuneApiView | null>(null);
   const [state, setState] = useState<ProductState>('loading');
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState('slot:connector');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('constraints');
+  const [dockTab, setDockTab] = useState<DockTab | null>(null);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [webMcpStatus, setWebMcpStatus] = useState<AttuneWebMcpStatus>(initialWebMcpStatus);
+
   const refresh = useCallback(async () => {
     try {
       setView(await requestAttuneView(attuneWorkspaceEndpoint('/api/attune/human', workspaceId)));
@@ -597,6 +338,7 @@ function WorkspaceShell({
       setState('failed');
     }
   }, [workspaceId]);
+
   useEffect(() => {
     void refresh();
     const reload = () => void refresh();
@@ -604,70 +346,177 @@ function WorkspaceShell({
     return () => window.removeEventListener('attune:workspace-changed', reload);
   }, [refresh]);
 
-  async function execute(path: string, command: Readonly<Record<string, unknown>>, prefix: string) {
-    if (!view) return;
+  const execute = useCallback(
+    async (path: string, command: Readonly<Record<string, unknown>>, prefix: string) => {
+      if (!view) return;
+      setState('applying');
+      setMessage(null);
+      try {
+        const next = await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId), {
+          method: 'POST',
+          body: commandRequestBody(view, command, prefix),
+        });
+        setView(next);
+        setState('ready');
+        setCompareOpen(false);
+        window.dispatchEvent(new Event('attune:workspace-changed'));
+      } catch (error) {
+        setMessage(
+          error instanceof AttuneHttpError
+            ? `${error.code}: ${error.message}`
+            : 'The authoritative command failed.',
+        );
+        setState('failed');
+        await refresh();
+      }
+    },
+    [refresh, view, workspaceId],
+  );
+
+  const reset = useCallback(async () => {
     setState('applying');
     setMessage(null);
     try {
-      const next = await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId), {
-        method: 'POST',
-        body: commandRequestBody(view, command, prefix),
-      });
+      const next = await requestAttuneView('/api/attune/reset', { method: 'POST', body: '{}' });
       setView(next);
+      setSelectedEntity('slot:connector');
+      setInspectorTab('constraints');
+      setDockTab(null);
+      setCompareOpen(false);
+      setResetOpen(false);
       setState('ready');
       window.dispatchEvent(new Event('attune:workspace-changed'));
     } catch (error) {
       setMessage(
-        error instanceof AttuneHttpError
-          ? `${error.code}: ${error.message}`
-          : 'The command failed.',
+        error instanceof AttuneHttpError ? `${error.code}: ${error.message}` : 'Reset failed.',
       );
+      setResetOpen(false);
       setState('failed');
       await refresh();
     }
-  }
+  }, [refresh]);
 
-  if (!view)
+  if (!view) {
     return (
       <main className="workspace-loading">
         {state === 'failed' ? 'Workspace unavailable' : 'Loading authoritative workspace…'}
       </main>
     );
+  }
+
+  const nextAction = workflowAction(view);
+  const executeWorkflow = (action: WorkflowAction) =>
+    void execute(action.path, action.command, action.prefix);
+  const selectEntity = (entityId: string, tab?: InspectorTab) => {
+    setSelectedEntity(entityId);
+    if (tab) setInspectorTab(tab);
+    setRightCollapsed(false);
+  };
+  const compare = () => {
+    setSelectedEntity('slot:connector');
+    setInspectorTab('constraints');
+    setCompareOpen(true);
+    setRightCollapsed(false);
+  };
+  const askAgent = () => setDockTab('agent');
+
   return (
-    <main className="workspace-page">
-      <AttuneWebMcp workspaceId={workspaceId} />
-      <header className="workspace-header">
-        <Link className="wordmark" href="/dashboard">
-          ATTUNE
-        </Link>
-        <div className="document-identity">
-          <span>{view.product.projectName}</span>
-          <strong>{view.product.fileName}</strong>
-        </div>
-        <div className="revision-identity">
-          <span>{view.workspace.commitmentId}</span>
-          <strong>Draft r{view.workspace.draftVersion}</strong>
-          <span>seq {view.workspace.workspaceSeq}</span>
-        </div>
-      </header>
-      {!collaboration ? (
-        <div className="integration-banner">
-          Liveblocks is wired but inactive until LIVEBLOCKS_SECRET_KEY is configured.
-        </div>
-      ) : null}
-      {message ? <output className="workspace-message">{message}</output> : null}
-      <section className="workspace-main">
-        <SpecificationPanel view={view} />
-        <GeometryStage view={view} collaboration={collaboration} />
-        <CapabilityPanel view={view} />
-      </section>
-      <WorkflowBar
+    <main className="attune-workspace-shell">
+      <AttuneWebMcp workspaceId={workspaceId} onStatus={setWebMcpStatus} />
+      <WorkspaceHeader
         view={view}
-        disabled={state === 'applying'}
-        execute={(path, command, prefix) => void execute(path, command, prefix)}
+        collaboration={collaboration}
+        webMcpStatus={webMcpStatus}
+        onAgent={askAgent}
+        onShare={() => setShareOpen(true)}
+        onReset={() => setResetOpen(true)}
       />
-      {collaboration ? <CollaborationPanel workspaceId={workspaceId} /> : null}
-      <EvidenceGrid view={view} />
+      <LifecycleStrip view={view} />
+      {message ? <output className="workspace-toast">{message}</output> : null}
+      <section
+        className={[
+          'workspace-editor-grid',
+          leftCollapsed ? 'is-left-collapsed' : '',
+          rightCollapsed ? 'is-right-collapsed' : '',
+          dockTab ? 'has-open-dock' : '',
+        ].join(' ')}
+      >
+        {leftCollapsed ? (
+          <button
+            type="button"
+            className="collapsed-rail-trigger is-left"
+            onClick={() => setLeftCollapsed(false)}
+          >
+            Items <span>›</span>
+          </button>
+        ) : (
+          <ItemsPanel
+            view={view}
+            selectedEntity={selectedEntity}
+            onSelect={selectEntity}
+            onCollapse={() => setLeftCollapsed(true)}
+          />
+        )}
+        <WorkspaceCanvas
+          view={view}
+          selectedEntity={selectedEntity}
+          onSelect={(entityId) =>
+            selectEntity(entityId, entityId === 'slot:connector' ? 'constraints' : 'design')
+          }
+          onCompare={compare}
+          onAskAgent={askAgent}
+          collaboration={collaboration}
+        />
+        {rightCollapsed ? (
+          <button
+            type="button"
+            className="collapsed-rail-trigger is-right"
+            onClick={() => setRightCollapsed(false)}
+          >
+            ‹ <span>Inspector</span>
+          </button>
+        ) : (
+          <InspectorPanel
+            view={view}
+            selectedEntity={selectedEntity}
+            tab={inspectorTab}
+            compareOpen={compareOpen}
+            workflowAction={nextAction}
+            disabled={state === 'applying'}
+            onTab={setInspectorTab}
+            onCollapse={() => setRightCollapsed(true)}
+            onCompare={compare}
+            onAskAgent={askAgent}
+            onRepair={(repairId) =>
+              void execute(
+                '/api/attune/human',
+                { type: 'apply_deterministic_repair', repairId },
+                'buyer',
+              )
+            }
+            onWorkflow={executeWorkflow}
+          />
+        )}
+      </section>
+      <BottomDock
+        view={view}
+        workspaceId={workspaceId}
+        collaboration={collaboration}
+        tab={dockTab}
+        webMcpStatus={webMcpStatus}
+        workflowAction={nextAction}
+        disabled={state === 'applying'}
+        onTab={setDockTab}
+        onWorkflow={executeWorkflow}
+      />
+      {shareOpen ? <ShareDialog onClose={() => setShareOpen(false)} /> : null}
+      {resetOpen ? (
+        <ResetDialog
+          applying={state === 'applying'}
+          onClose={() => setResetOpen(false)}
+          onReset={() => void reset()}
+        />
+      ) : null}
     </main>
   );
 }

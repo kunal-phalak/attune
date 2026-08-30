@@ -12,3 +12,4 @@ test-results/
 .vercel/
 *.log
 artifacts/shopify-spike/*.json
+docs/attune-ui-reference-pack/*

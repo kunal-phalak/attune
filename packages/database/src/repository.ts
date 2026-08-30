@@ -309,6 +309,66 @@ export async function ensureJudgeWorkspace(): Promise<void> {
   });
 }
 
+export async function resetJudgeWorkspace(): Promise<void> {
+  await ensureJudgeWorkspace();
+  const database = getDatabase();
+  const initial = createAt1042Workspace();
+  const now = new Date().toISOString();
+
+  await database.transaction(async (transaction) => {
+    await transaction
+      .delete(agentInterventionObservations)
+      .where(eq(agentInterventionObservations.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(capabilityTransitions)
+      .where(eq(capabilityTransitions.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(commandRejections)
+      .where(eq(commandRejections.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(commandIdempotencyRecords)
+      .where(eq(commandIdempotencyRecords.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(externalActionAttempts)
+      .where(eq(externalActionAttempts.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(commerceVerificationRecords)
+      .where(eq(commerceVerificationRecords.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction.delete(acceptances).where(eq(acceptances.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction.delete(quotes).where(eq(quotes.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(quoteRequests)
+      .where(eq(quoteRequests.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(frozenRevisions)
+      .where(eq(frozenRevisions.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(changeReceipts)
+      .where(eq(changeReceipts.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(workspaceSnapshots)
+      .where(eq(workspaceSnapshots.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .update(workspaces)
+      .set({
+        currentSpecification: initial,
+        workspaceSeq: initial.workspaceSeq,
+        draftVersion: initial.draftVersion,
+        capabilityEpoch: initial.capabilityEpoch,
+        needStartedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(workspaces.id, JUDGE_WORKSPACE_ID));
+    await transaction.insert(workspaceSnapshots).values({
+      id: `${JUDGE_WORKSPACE_ID}:snapshot:0`,
+      workspaceId: JUDGE_WORKSPACE_ID,
+      workspaceSeq: 0,
+      specification: initial,
+      specHash: hashSpecification(initial),
+    });
+  });
+}
+
 export async function identityForWorkspace(
   workspaceId: string,
   userId: string,

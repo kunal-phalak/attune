@@ -91,6 +91,7 @@ export default defineConfig({
     ignorePatterns: [
       'ATTUNE_CODEX_MASTER_BUILD_SPEC.md',
       'apps/web/next-env.d.ts',
+      'docs/attune-ui-reference-pack/**',
       'packages/database/drizzle/**',
     ],
   },

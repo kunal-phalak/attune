@@ -84,6 +84,7 @@ export default function Home() {
         </a>
         <nav className="landing-nav" aria-label="Primary navigation">
           <a href="#system">System</a>
+          <Link href="/judge">Judge access</Link>
           <Link href="/sign-in">Sign in</Link>
         </nav>
       </header>

@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import {
   ensureAuthenticatedUser,
@@ -9,6 +9,7 @@ import {
 import type { AttuneRole } from '@attune/domain';
 import { cookies } from 'next/headers';
 
+import { judgeAccessCodeConfigured, judgeAccessCodeMatches } from './judge-access';
 import { getNeonAuth, neonAuthConfigured } from './neon';
 
 const JUDGE_COOKIE = 'attune_judge_session';
@@ -61,20 +62,16 @@ function parseJudgeSession(value: string | undefined): JudgeSessionPayload | nul
   }
 }
 
-function safeEqualHex(left: string, right: string): boolean {
-  if (!/^[a-f0-9]{64}$/.test(left) || !/^[a-f0-9]{64}$/.test(right)) return false;
-  return timingSafeEqual(Buffer.from(left, 'hex'), Buffer.from(right, 'hex'));
-}
-
 export function judgeCredentialConfigured(): boolean {
-  return Boolean(process.env.ATTUNE_JUDGE_TOKEN_HASH && process.env.ATTUNE_SESSION_SECRET);
+  return (
+    judgeAccessCodeConfigured() &&
+    typeof process.env.ATTUNE_SESSION_SECRET === 'string' &&
+    process.env.ATTUNE_SESSION_SECRET.length >= 32
+  );
 }
 
-export async function establishJudgeSession(opaqueToken: string): Promise<boolean> {
-  const expectedHash = process.env.ATTUNE_JUDGE_TOKEN_HASH;
-  if (!expectedHash || !judgeCredentialConfigured()) return false;
-  const suppliedHash = createHash('sha256').update(opaqueToken).digest('hex');
-  if (!safeEqualHex(expectedHash, suppliedHash)) return false;
+export async function establishJudgeSession(accessCode: string): Promise<boolean> {
+  if (!judgeCredentialConfigured() || !judgeAccessCodeMatches(accessCode)) return false;
   const expiresAt = Date.now() + JUDGE_SESSION_SECONDS * 1000;
   const cookieStore = await cookies();
   cookieStore.set(JUDGE_COOKIE, judgeSessionValue({ kind: 'judge', expiresAt }), {

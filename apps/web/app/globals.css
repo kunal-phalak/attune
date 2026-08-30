@@ -1078,6 +1078,162 @@ footer p {
   margin: 8px 0 0;
 }
 
+.judge-page {
+  background:
+    linear-gradient(rgba(23, 25, 19, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(23, 25, 19, 0.05) 1px, transparent 1px), var(--paper);
+  background-size: 24px 24px;
+  min-height: 100svh;
+}
+
+.judge-topbar {
+  align-items: center;
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  height: 70px;
+  justify-content: space-between;
+  padding-inline: clamp(24px, 4.5vw, 72px);
+}
+
+.judge-topbar > span,
+.judge-form-heading > span,
+.judge-privacy-note,
+.judge-introduction li,
+.judge-form-panel label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.judge-access {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+  min-height: calc(100svh - 70px);
+}
+
+.judge-introduction {
+  align-content: center;
+  display: grid;
+  padding: clamp(56px, 9vw, 140px) clamp(24px, 7vw, 110px);
+}
+
+.judge-introduction .section-index {
+  margin-bottom: 32px;
+}
+
+.judge-introduction h1 {
+  font-size: clamp(56px, 7vw, 112px);
+  line-height: 0.85;
+  margin-bottom: 40px;
+  max-width: 860px;
+  white-space: normal;
+}
+
+.judge-introduction > p:not(.section-index) {
+  font-size: 17px;
+  line-height: 1.5;
+  max-width: 610px;
+}
+
+.judge-introduction ol {
+  border-top: 1px solid var(--line);
+  list-style: none;
+  margin: 48px 0 0;
+  max-width: 610px;
+  padding: 0;
+}
+
+.judge-introduction li {
+  border-bottom: 1px solid var(--line);
+  padding-block: 15px;
+}
+
+.judge-form-panel {
+  align-self: stretch;
+  background: var(--ink);
+  color: var(--paper);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(36px, 6vw, 84px);
+}
+
+.judge-form-heading {
+  border-bottom: 1px solid rgba(240, 239, 231, 0.24);
+  margin-bottom: 42px;
+  padding-bottom: 24px;
+}
+
+.judge-form-heading > span {
+  color: var(--acid);
+  display: block;
+  margin-bottom: 12px;
+}
+
+.judge-form-heading > strong {
+  font-size: clamp(28px, 3vw, 44px);
+  letter-spacing: -0.045em;
+}
+
+.judge-form-panel form {
+  display: grid;
+  gap: 16px;
+}
+
+.judge-form-panel label {
+  color: #b8b9b2;
+}
+
+.judge-form-panel input {
+  background: rgba(240, 239, 231, 0.06);
+  border: 1px solid rgba(240, 239, 231, 0.52);
+  border-radius: 0;
+  color: var(--paper);
+  font: inherit;
+  font-size: 18px;
+  min-height: 54px;
+  padding: 12px 14px;
+}
+
+.judge-form-panel input:focus-visible,
+.judge-form-panel button:focus-visible {
+  outline: 3px solid var(--acid);
+  outline-offset: 3px;
+}
+
+.judge-form-panel button {
+  background: var(--acid);
+  border: 1px solid var(--acid);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  min-height: 50px;
+  text-transform: uppercase;
+  transition-property: scale, opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
+}
+
+.judge-form-panel button:active {
+  scale: 0.96;
+}
+
+.judge-form-panel .form-error,
+.judge-form-panel .setup-callout {
+  color: var(--ink);
+}
+
+.judge-privacy-note {
+  color: #9d9f97;
+  line-height: 1.55;
+  margin: 28px 0 0;
+}
+
 .auth-switch {
   color: var(--muted);
   font-size: 12px;
@@ -1813,6 +1969,14 @@ footer p {
   .workspace-evidence > article:last-child {
     grid-column: auto;
   }
+
+  .judge-access {
+    grid-template-columns: 1fr;
+  }
+
+  .judge-form-panel {
+    min-height: 420px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1820,6 +1984,10 @@ footer p {
   .auth-card button,
   .workspace-actions button,
   .project-card {
+    transition: none;
+  }
+
+  .judge-form-panel button {
     transition: none;
   }
 }

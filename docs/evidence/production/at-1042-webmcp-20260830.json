@@ -1,0 +1,63 @@
+{
+  "recorded_at": "2026-08-30T06:02:38Z",
+  "repository_revision": "de11a1a3d8b61ecd0ce5697acc7e33b238526b3a",
+  "deployment_id": "dpl_EdGRrDTQbmQhF5BA6PdBhYvRYN7W",
+  "production_url": "https://attune-beta-five.vercel.app/",
+  "health_url": "https://attune-beta-five.vercel.app/api/build-status",
+  "https_verified": true,
+  "webmcp_runtime": "document.modelContext",
+  "phase_a_tool": {
+    "name": "inspect_attune_build",
+    "active": false,
+    "scope": "phase-a-only"
+  },
+  "native_tools_observed": [
+    "inspect_attune_workspace",
+    "move_attune_slot",
+    "materialize_attune_revision"
+  ],
+  "authoritative_state": {
+    "commitment_id": "AT-1042",
+    "workspace_seq": 4,
+    "draft_version": 7,
+    "capability_epoch": 5,
+    "valid": true,
+    "clearance_mm": 12,
+    "required_clearance_mm": 12,
+    "locked_mounts_preserved": "4/4",
+    "spec_hash": "7494e98cce2f8a9691ce964423ed43eb66fe5be284668accfe9184fe3407806a",
+    "materialize_for_commerce_available": true,
+    "navigate_to_storefront_available": false
+  },
+  "production_ui_verified": {
+    "capability_and_consequence_panel": true,
+    "immutable_receipts_visible": 4,
+    "external_verification_panel": "awaiting exact verification",
+    "outcome_panel": true
+  },
+  "screenshot": {
+    "captured_in_codex_browser_run": true,
+    "bytes": 51317,
+    "sha256": "0e9f31dd66b20e0d7a3a621acb227317f7e26abb84a98ffaf589180c45ecb3fa"
+  },
+  "shopify": {
+    "server_inputs_configured": 7,
+    "server_inputs_required": 7,
+    "materialization_result": "BLOCKED",
+    "blocker": "Missing Shopify Admin access scopes: read_inventory.",
+    "state_drift_after_failure": false,
+    "disposable_product_created": false,
+    "cleanup_required": false
+  },
+  "cloudflare_browser_run": {
+    "result": "BLOCKED",
+    "connected_action": "POST /accounts/{account_id}/browser-rendering/devtools/browser",
+    "blocker": "Cloudflare API error 10000: Authentication error"
+  },
+  "redaction": {
+    "secret_values_recorded": false,
+    "storefront_password_recorded": false,
+    "shopify_admin_access_token_recorded": false,
+    "shopify_storefront_access_token_recorded": false
+  }
+}

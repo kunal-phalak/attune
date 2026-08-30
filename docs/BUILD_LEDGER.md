@@ -211,3 +211,21 @@ This ledger distinguishes implementation work from the pre-implementation specif
 - A fresh Shopify preflight still reports one external blocker: `read_inventory`. It stops before
   product mutation; no disposable fixture exists to clean. Product development continues without
   weakening the verification contract.
+
+## 2026-08-30 — Production authority-path acceptance
+
+- Published repository revisions `c82dce2` and `de11a1a` and deployed the latter to the canonical
+  production alias. The HTTPS status endpoint reports the contextual `document.modelContext`
+  surface and explicitly marks `inspect_attune_build` inactive and Phase-A-only.
+- Native production WebMCP listed the contextual inspection, draft-edit, and exact-r7
+  materialization tools. Inspection returned buildable r7, workspace sequence 4, capability epoch
+  5, 12 mm clearance, 4/4 locked mounts preserved, and exact current specification hash.
+- The visible product showed capability reasons, predicted consequences, blocker codes, immutable
+  receipts, external-verification status, and measured outcomes. The browser screenshot was
+  captured and fingerprinted in the redacted production evidence record.
+- A live materialization call revalidated current authority and stopped at Shopify's
+  `read_inventory` scope preflight. Workspace sequence and capability epoch did not drift, no
+  verification was recorded, and no disposable product was created.
+- The connected Cloudflare Browser Run LAB session-create action was attempted separately and
+  returned API error 10000 (authentication). Browser Run remains an external acceptance-harness
+  blocker, not production runtime infrastructure.

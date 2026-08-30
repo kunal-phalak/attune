@@ -1,3 +1,5 @@
+import type { PanelGeometry } from '@attune/domain';
+
 export type CapabilityRole = 'buyer' | 'provider' | 'agent';
 
 export interface CapabilityView {
@@ -11,12 +13,20 @@ export interface CapabilityView {
 }
 
 export interface AttuneApiView {
+  readonly product: {
+    readonly workspaceId: string;
+    readonly projectName: string;
+    readonly fileName: string;
+    readonly liveblocksRoomId: string;
+  };
   readonly specHash: string;
   readonly workspace: {
     readonly commitmentId: 'AT-1042';
     readonly workspaceSeq: number;
     readonly draftVersion: number;
     readonly capabilityEpoch: number;
+    readonly fabricationQuantity: 4;
+    readonly geometry: PanelGeometry;
     readonly quoteRequests: readonly {
       readonly id: string;
       readonly draftVersion: number;
@@ -202,6 +212,16 @@ function jsonHeaders(initial?: HeadersInit): Headers {
   headers.set('Accept', 'application/json');
   headers.set('Content-Type', 'application/json');
   return headers;
+}
+
+export function attuneWorkspaceEndpoint(
+  path: string,
+  workspaceId: string,
+  parameters?: Readonly<Record<string, string | number>>,
+): string {
+  const search = new URLSearchParams({ workspace_id: workspaceId });
+  for (const [name, value] of Object.entries(parameters ?? {})) search.set(name, String(value));
+  return `${path}?${search}`;
 }
 
 export async function requestAttuneView(path: string, init?: RequestInit): Promise<AttuneApiView> {

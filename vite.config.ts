@@ -88,7 +88,11 @@ export default defineConfig({
     singleQuote: true,
     sortImports: true,
     sortPackageJson: true,
-    ignorePatterns: ['ATTUNE_CODEX_MASTER_BUILD_SPEC.md', 'apps/web/next-env.d.ts'],
+    ignorePatterns: [
+      'ATTUNE_CODEX_MASTER_BUILD_SPEC.md',
+      'apps/web/next-env.d.ts',
+      'packages/database/drizzle/**',
+    ],
   },
   staged: {
     '*.{js,jsx,ts,tsx,json,md,yaml,yml}': 'vp check --fix',

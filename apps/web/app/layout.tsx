@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import './globals.css';
+import '@liveblocks/react-ui/styles.css';
 
 export const metadata: Metadata = {
   title: 'Attune — Create what does not exist yet',

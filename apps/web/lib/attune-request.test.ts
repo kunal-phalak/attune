@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseCommandExecutionInput } from './attune-request';
+import { parseCommandExecutionInput, parseWorkspaceId } from './attune-request';
 
 const HASH = 'a'.repeat(64);
 
@@ -15,6 +15,12 @@ function request(command: Record<string, unknown>) {
 }
 
 describe('trusted Attune HTTP command boundary', () => {
+  it('accepts a safe workspace selector but never derives authority from it', () => {
+    expect(parseWorkspaceId('workspace:at-1042')).toBe('workspace:at-1042');
+    expect(() => parseWorkspaceId('../another-workspace')).toThrow(/safe non-empty identifier/);
+    expect(() => parseWorkspaceId(null)).toThrow(/safe non-empty identifier/);
+  });
+
   it('parses the narrow allowed command and binds all authority cursors', () => {
     expect(
       parseCommandExecutionInput(request({ type: 'move_slot', centerX: 195, centerY: 60 }), [

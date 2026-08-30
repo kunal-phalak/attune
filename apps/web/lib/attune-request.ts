@@ -155,6 +155,10 @@ export function parseObservationCursor(value: string | null): number | undefined
   return requiredInteger(Number(value), 'observation_cursor');
 }
 
+export function parseWorkspaceId(value: string | null): string {
+  return requiredIdentifier(value, 'workspace_id');
+}
+
 export function parseCommandExecutionInput(
   value: unknown,
   allowedTypes: readonly AttuneCommandType[],

@@ -3,48 +3,27 @@ import {
   AttuneCommandError,
   type CommandEnvelope,
   type TrustedExecutionContext,
+  type TrustedExecutionPath,
 } from '@attune/command-bus';
 import {
+  ensureJudgeWorkspace,
+  executePersistedCommand,
+  finishExternalMaterialization,
+  JUDGE_WORKSPACE_ID,
+  readWorkspaceBundle,
+  reserveExternalMaterialization,
+  type WorkspaceBundle,
+} from '@attune/database';
+import {
   compareValidChanges,
-  createAt1042Workspace,
-  hashCanonical,
+  hashSpecification,
   type AttuneCommand,
   type AttuneRole,
 } from '@attune/domain';
 import { materializeAt1042Revision } from '@attune/shopify';
 
-const contexts = {
-  agent: {
-    path: 'webmcp',
-    principalId: 'agent:webmcp-session',
-    role: 'agent',
-  },
-  buyer: {
-    path: 'human',
-    principalId: 'buyer:browser-session',
-    role: 'buyer',
-  },
-  provider: {
-    path: 'provider',
-    principalId: 'provider:attune-fabricator',
-    role: 'provider',
-  },
-  shopify: {
-    path: 'shopify',
-    principalId: 'integration:shopify',
-    role: 'agent',
-  },
-} as const satisfies Readonly<Record<string, TrustedExecutionContext>>;
-
-interface RuntimeGlobal {
-  attuneAt1042Bus?: AttuneCommandBus;
-  attuneAt1042StartedAt?: string;
-  attuneObservedHumanReceipts?: Set<number>;
-  attuneMaterializationRequests?: Map<
-    string,
-    { readonly fingerprint: string; readonly promise: Promise<ReturnType<typeof viewFor>> }
-  >;
-}
+import { requireWorkspaceIdentity } from './auth/session';
+import { snapshotCollaborativeDraft } from './liveblocks/server';
 
 export interface CommandExecutionInput {
   readonly command: AttuneCommand;
@@ -56,37 +35,43 @@ export interface CommerceMaterializationInput {
   readonly envelope: CommandEnvelope;
 }
 
-function runtimeGlobal(): typeof globalThis & RuntimeGlobal {
-  return globalThis;
-}
-
-function observedHumanReceipts(): Set<number> {
-  const root = runtimeGlobal();
-  root.attuneObservedHumanReceipts ??= new Set();
-  return root.attuneObservedHumanReceipts;
-}
-
-export function getAt1042CommandBus(): AttuneCommandBus {
-  const root = runtimeGlobal();
-  if (!root.attuneAt1042Bus) {
-    root.attuneAt1042StartedAt = new Date().toISOString();
-    root.attuneAt1042Bus = new AttuneCommandBus(createAt1042Workspace());
+function principalPrefix(path: TrustedExecutionPath): string {
+  switch (path) {
+    case 'human':
+      return 'buyer:';
+    case 'provider':
+      return 'provider:';
+    case 'webmcp':
+      return 'agent:';
+    case 'solver':
+      return 'solver:';
+    case 'shopify':
+      return 'integration:shopify:';
   }
-  return root.attuneAt1042Bus;
+  throw new TypeError('Unsupported execution path.');
 }
 
-function impactMetrics(bus: AttuneCommandBus) {
-  const workspace = bus.inspect('buyer').workspace;
-  const receipts = bus.receipts();
-  const rejections = bus.rejections();
-  const buildableReceipt = receipts.find(
+async function trustedContext(
+  workspaceId: string,
+  path: TrustedExecutionPath,
+  role: AttuneRole,
+): Promise<TrustedExecutionContext> {
+  const identity = await requireWorkspaceIdentity(workspaceId, role);
+  return {
+    path,
+    role,
+    principalId: `${principalPrefix(path)}${identity.userId}`,
+  };
+}
+
+function impactMetrics(bundle: WorkspaceBundle) {
+  const buildableReceipt = bundle.receipts.find(
     ({ validationBefore, validationAfter }) => !validationBefore.valid && validationAfter.valid,
   );
-  const startedAt = runtimeGlobal().attuneAt1042StartedAt;
-  const buildableAt = buildableReceipt?.createdAt;
-  const elapsed =
-    startedAt && buildableAt ? Math.max(0, Date.parse(buildableAt) - Date.parse(startedAt)) : null;
-  const staleConsequentialBlocks = rejections.filter(
+  const elapsed = buildableReceipt
+    ? Math.max(0, Date.parse(buildableReceipt.createdAt) - Date.parse(bundle.needStartedAt))
+    : null;
+  const staleConsequentialBlocks = bundle.rejections.filter(
     ({ command, code }) =>
       command === 'materialize_for_commerce' &&
       [
@@ -96,13 +81,13 @@ function impactMetrics(bus: AttuneCommandBus) {
         'CAPABILITY_UNAVAILABLE',
       ].includes(code),
   ).length;
-  const exactCommerceLinks = workspace.commerceLinks.filter((link) =>
-    workspace.frozenRevisions.some(
+  const exactCommerceLinks = bundle.workspace.commerceLinks.filter((link) =>
+    bundle.workspace.frozenRevisions.some(
       (revision) => revision.revisionId === link.revisionId && revision.specHash === link.specHash,
     ),
   );
   const goldenComplete =
-    workspace.draftVersion >= 8 &&
+    bundle.workspace.draftVersion >= 8 &&
     exactCommerceLinks.some(({ revisionId }) => revisionId === 'r7') &&
     staleConsequentialBlocks > 0;
 
@@ -110,144 +95,154 @@ function impactMetrics(bus: AttuneCommandBus) {
     needToBuildableMs: elapsed,
     conflictsCaughtBeforeQuote: buildableReceipt ? 1 : 0,
     lockedRequirementsPreserved: {
-      preserved: receipts.at(-1)?.preservedLocks.length ?? 4,
+      preserved: bundle.receipts.at(-1)?.preservedLocks.length ?? 4,
       total: 4,
     },
-    humanInterventionsDetected: observedHumanReceipts().size,
+    humanInterventionsDetected: bundle.humanInterventionsDetected,
     staleConsequentialActionsBlocked: staleConsequentialBlocks,
     exactRevisionShopifyVerifications: exactCommerceLinks.length,
     goldenPath: { completedRuns: goldenComplete ? 1 : 0, startedRuns: 1 },
   };
 }
 
-function recordAgentObservation(
-  observation: ReturnType<AttuneCommandBus['inspect']>['observation'],
-) {
-  const observed = observedHumanReceipts();
-  for (const intervention of observation.interventions) {
-    observed.add(intervention.receiptSeq);
-  }
-}
-
-function viewFor(role: AttuneRole, observationCursor?: number) {
-  const bus = getAt1042CommandBus();
-  const inspection = bus.inspect(role, observationCursor);
-  if (role === 'agent' && observationCursor !== undefined) {
-    recordAgentObservation(inspection.observation);
-  }
-  const receipts = bus.receipts();
-  const transitions = bus.transitions();
-
+function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole) {
+  const bus = new AttuneCommandBus(bundle.workspace);
+  const inspection = bus.inspect(role);
   return {
     ...inspection,
+    observation: bundle.observation,
+    product: {
+      workspaceId: bundle.workspaceId,
+      projectName: bundle.projectName,
+      fileName: bundle.fileName,
+      liveblocksRoomId: bundle.liveblocksRoomId,
+    },
     frontiers: {
       buyer: bus.inspect('buyer').frontier,
       provider: bus.inspect('provider').frontier,
       agent: bus.inspect('agent').frontier,
     },
-    repairs: compareValidChanges(inspection.workspace),
+    repairs: compareValidChanges(bundle.workspace),
     records: {
-      receipts,
-      capabilityTransitions: transitions,
-      commandRejections: bus.rejections(),
-      externalVerifications: inspection.workspace.commerceLinks,
+      receipts: bundle.receipts,
+      capabilityTransitions: bundle.transitions,
+      commandRejections: bundle.rejections,
+      externalVerifications: bundle.workspace.commerceLinks,
     },
-    latestReceipt: receipts.at(-1) ?? null,
-    latestCapabilityTransition: transitions.at(-1) ?? null,
-    receiptCount: receipts.length,
-    impact: impactMetrics(bus),
+    latestReceipt: bundle.receipts.at(-1) ?? null,
+    latestCapabilityTransition: bundle.transitions.at(-1) ?? null,
+    receiptCount: bundle.receipts.length,
+    impact: impactMetrics(bundle),
   };
 }
 
-export function inspectForAgent(observationCursor?: number) {
-  return viewFor('agent', observationCursor);
+async function inspect(workspaceId: string, role: AttuneRole, observationCursor?: number) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const path = role === 'provider' ? 'provider' : role === 'agent' ? 'webmcp' : 'human';
+  const context = await trustedContext(workspaceId, path, role);
+  const bundle = await readWorkspaceBundle(
+    workspaceId,
+    observationCursor,
+    role === 'agent' && observationCursor !== undefined ? context.principalId : undefined,
+  );
+  return viewForBundle(bundle, role);
 }
 
-export function inspectForHuman() {
-  return viewFor('buyer');
+export function inspectForAgent(workspaceId: string, observationCursor?: number) {
+  return inspect(workspaceId, 'agent', observationCursor);
 }
 
-export function inspectForProvider() {
-  return viewFor('provider');
+export function inspectForHuman(workspaceId: string) {
+  return inspect(workspaceId, 'buyer');
 }
 
-function executeWithContext(input: CommandExecutionInput, context: TrustedExecutionContext) {
-  const bus = getAt1042CommandBus();
-  bus.execute(input.command, input.envelope, context);
-  return viewFor(context.role, input.envelope.observationCursor);
+export function inspectForProvider(workspaceId: string) {
+  return inspect(workspaceId, 'provider');
 }
 
-export function executeAgentCommand(input: CommandExecutionInput) {
-  return executeWithContext(input, contexts.agent);
+async function executeWithContext(
+  workspaceId: string,
+  input: CommandExecutionInput,
+  path: TrustedExecutionPath,
+  role: AttuneRole,
+  liveblocksVersionId?: string,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const context = await trustedContext(workspaceId, path, role);
+  await executePersistedCommand(
+    { workspaceId, command: input.command, envelope: input.envelope, context },
+    liveblocksVersionId,
+  );
+  const bundle = await readWorkspaceBundle(
+    workspaceId,
+    input.envelope.observationCursor,
+    role === 'agent' ? context.principalId : undefined,
+  );
+  return viewForBundle(bundle, role);
 }
 
-export function executeHumanCommand(input: CommandExecutionInput) {
-  return executeWithContext(input, contexts.buyer);
+export function executeAgentCommand(workspaceId: string, input: CommandExecutionInput) {
+  return executeWithContext(workspaceId, input, 'webmcp', 'agent');
 }
 
-export function executeProviderCommand(input: CommandExecutionInput) {
-  return executeWithContext(input, contexts.provider);
+export function executeHumanCommand(workspaceId: string, input: CommandExecutionInput) {
+  return executeWithContext(workspaceId, input, 'human', 'buyer');
 }
 
-export function executeVerifiedCommerceCommand(input: CommandExecutionInput) {
-  return executeWithContext(input, contexts.shopify);
+export async function executeProviderCommand(workspaceId: string, input: CommandExecutionInput) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  await trustedContext(workspaceId, 'provider', 'provider');
+  const current = await readWorkspaceBundle(workspaceId);
+  const collaboration = await snapshotCollaborativeDraft(
+    current.liveblocksRoomId,
+    current.workspace,
+  );
+  return executeWithContext(workspaceId, input, 'provider', 'provider', collaboration.versionId);
 }
 
-function materializationRequests() {
-  const root = runtimeGlobal();
-  root.attuneMaterializationRequests ??= new Map();
-  return root.attuneMaterializationRequests;
-}
-
-export async function executeCommerceMaterialization(input: CommerceMaterializationInput) {
-  const requests = materializationRequests();
-  const fingerprint = hashCanonical(input);
-  const existing = requests.get(input.envelope.commandId);
-  if (existing) {
-    if (existing.fingerprint === fingerprint) return existing.promise;
-    throw new AttuneCommandError(
-      'IDEMPOTENCY_CONFLICT',
-      'This command identifier is already bound to a different commerce request.',
-    );
+export async function executeCommerceMaterialization(
+  workspaceId: string,
+  input: CommerceMaterializationInput,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  await trustedContext(workspaceId, 'webmcp', 'agent');
+  const context = await trustedContext(workspaceId, 'shopify', 'agent');
+  const reservation = await reserveExternalMaterialization({
+    workspaceId,
+    revisionId: input.revisionId,
+    envelope: input.envelope,
+    context,
+  });
+  if (reservation.status === 'completed') {
+    return viewForBundle(await readWorkspaceBundle(workspaceId), 'agent');
   }
-
-  const promise = (async () => {
-    const bus = getAt1042CommandBus();
-    const workspace = bus.authorize('materialize_for_commerce', input.envelope, contexts.shopify);
-    const revision = workspace.frozenRevisions.find(
-      (candidate) =>
-        candidate.revisionId === input.revisionId &&
-        candidate.specHash === input.envelope.expectedSpecHash,
-    );
-    if (!revision) {
-      throw new AttuneCommandError(
-        'COMMAND_CONFLICT',
-        'Commerce must target the exact current frozen revision.',
-      );
-    }
-    const verification = await materializeAt1042Revision(revision);
-    return executeWithContext(
-      {
-        command: {
-          type: 'materialize_for_commerce',
-          revisionId: input.revisionId,
-          verification,
-        },
-        envelope: input.envelope,
-      },
-      contexts.shopify,
-    );
-  })();
-
-  requests.set(input.envelope.commandId, { fingerprint, promise });
   try {
-    return await promise;
+    const verification = await materializeAt1042Revision(reservation.revision);
+    await executePersistedCommand({
+      workspaceId,
+      command: { type: 'materialize_for_commerce', revisionId: input.revisionId, verification },
+      envelope: input.envelope,
+      context,
+    });
+    await finishExternalMaterialization(workspaceId, input.envelope.commandId, 'completed');
+    return viewForBundle(await readWorkspaceBundle(workspaceId), 'agent');
   } catch (error) {
-    requests.delete(input.envelope.commandId);
+    await finishExternalMaterialization(
+      workspaceId,
+      input.envelope.commandId,
+      'failed',
+      error instanceof Error ? error.name : 'UnknownError',
+    );
     throw error;
   }
 }
 
 export function isAttuneCommandError(error: unknown): error is AttuneCommandError {
   return error instanceof AttuneCommandError;
+}
+
+export function currentSpecificationHash(
+  view: Awaited<ReturnType<typeof inspectForHuman>>,
+): string {
+  return hashSpecification(view.workspace);
 }

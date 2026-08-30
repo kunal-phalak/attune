@@ -5,6 +5,8 @@
   "scripts": {
     "build": "pnpm --filter @attune/web build",
     "check": "vp check",
+    "db:generate": "pnpm --filter @attune/database db:generate",
+    "db:migrate": "pnpm --filter @attune/database db:migrate",
     "dev": "pnpm --filter @attune/web dev",
     "shopify:spike": "node scripts/verify-shopify/connectivity-spike.mjs",
     "shopify:spike:cleanup": "node scripts/verify-shopify/cleanup-connectivity-products.mjs --delete",

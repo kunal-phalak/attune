@@ -229,3 +229,27 @@ This ledger distinguishes implementation work from the pre-implementation specif
 - The connected Cloudflare Browser Run LAB session-create action was attempted separately and
   returned API error 10000 (authentication). Browser Run remains an external acceptance-harness
   blocker, not production runtime infrastructure.
+
+## 2026-08-30 — Durable product architecture checkpoint
+
+- Converted capability, command-bus, and Shopify package entry points into public barrels while
+  preserving their existing APIs and golden-path behavior.
+- Added the permanent Drizzle/Neon schema and transactional repository for memberships, executable
+  workspaces, immutable receipts, capability transitions, idempotency, frozen revisions, quotes,
+  acceptances, Shopify verification, intervention observations, and external-execution leases.
+- Replaced the process-global AT-1042 singleton with a database-seeded judge workspace. Contextual
+  APIs select a workspace but authorize it only through the server session and persisted membership.
+- Added Neon Auth routes plus a reusable opaque judge credential that creates a short-lived signed
+  HttpOnly session; browser role fields remain non-authoritative.
+- Added the public landing, authenticated dashboard, and canonical workspace shell with geometry,
+  constraints, capabilities/consequences, roles, activity, Shopify evidence, and measured outcomes.
+- Added one Liveblocks room and one Y.Doc per workspace for the mutable collaborative draft,
+  Presence, comments, notifications, and version history. Commercial authority remains in Neon.
+- Provider freeze creates and retrieves an exact Liveblocks version, checks its canonical spec hash
+  against the committed workspace, and stores its version ID with the immutable Neon revision.
+- Added a durable five-minute external-action lease so Shopify side effects cannot execute twice;
+  stale materialization rejection remains durable outcome evidence.
+- Shopify configuration is otherwise valid, but the installed app scope inspection still lacks
+  `read_inventory`; no new disposable product was created.
+- Drizzle generation is stable, 19/19 tests pass, the production build succeeds, and the production
+  dependency audit reports no known vulnerabilities after a patched transitive esbuild override.

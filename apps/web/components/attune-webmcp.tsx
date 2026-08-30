@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
+  attuneWorkspaceEndpoint,
   commandRequestBody,
   requestAttuneView,
   type AttuneApiView,
@@ -85,11 +86,14 @@ function summarize(view: AttuneApiView) {
 }
 
 function createToolRuntime(
+  workspaceId: string,
   cursor: { current: number },
   updateView: (view: AttuneApiView) => void,
 ): ToolRuntime {
   const observe = async () => {
-    const next = await requestAttuneView(`/api/attune/webmcp?cursor=${cursor.current}`);
+    const next = await requestAttuneView(
+      attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, { cursor: cursor.current }),
+    );
     cursor.current = next.workspace.workspaceSeq;
     updateView(next);
     return next;
@@ -106,10 +110,13 @@ function createToolRuntime(
         ...summarize(observed),
       };
     }
-    const next = await requestAttuneView('/api/attune/webmcp', {
-      method: 'POST',
-      body: commandRequestBody(observed, command, 'webmcp', cursor.current),
-    });
+    const next = await requestAttuneView(
+      attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId),
+      {
+        method: 'POST',
+        body: commandRequestBody(observed, command, 'webmcp', cursor.current),
+      },
+    );
     cursor.current = next.workspace.workspaceSeq;
     updateView(next);
     window.dispatchEvent(new Event('attune:workspace-changed'));
@@ -270,13 +277,14 @@ async function registerTools(
   await Promise.all(tools.map((tool) => Promise.resolve(context.registerTool(tool, { signal }))));
 }
 
-export function AttuneWebMcp() {
+export function AttuneWebMcp({ workspaceId }: { readonly workspaceId: string }) {
   const [registrationState, setRegistrationState] = useState<RegistrationState>('checking');
   const [view, setView] = useState<AttuneApiView | null>(null);
   const observationCursor = useRef(0);
   const refresh = useCallback(
-    async () => setView(await requestAttuneView('/api/attune/webmcp')),
-    [],
+    async () =>
+      setView(await requestAttuneView(attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId))),
+    [workspaceId],
   );
   const capabilityKey =
     view?.capabilities
@@ -300,14 +308,14 @@ export function AttuneWebMcp() {
     }
     if (!workspaceReady) return undefined;
     const lifecycle = new AbortController();
-    const runtime = createToolRuntime(observationCursor, setView);
+    const runtime = createToolRuntime(workspaceId, observationCursor, setView);
     setRegistrationState('checking');
     void registerTools(context, new Set(capabilityKey.split('|')), runtime, lifecycle.signal).then(
       () => setRegistrationState('registered'),
       () => setRegistrationState('failed'),
     );
     return () => lifecycle.abort();
-  }, [capabilityKey, workspaceReady]);
+  }, [capabilityKey, workspaceId, workspaceReady]);
 
   return (
     <aside className="webmcp-state" aria-live="polite">

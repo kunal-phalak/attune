@@ -1,0 +1,19 @@
+export type AttuneCommandErrorCode =
+  | 'STALE_WORKSPACE'
+  | 'STALE_CAPABILITY'
+  | 'SPEC_HASH_MISMATCH'
+  | 'CAPABILITY_UNAVAILABLE'
+  | 'ROLE_MISMATCH'
+  | 'PRINCIPAL_MISMATCH'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'COMMAND_CONFLICT';
+
+export class AttuneCommandError extends Error {
+  constructor(
+    readonly code: AttuneCommandErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AttuneCommandError';
+  }
+}

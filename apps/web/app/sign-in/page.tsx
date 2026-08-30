@@ -1,0 +1,49 @@
+import Link from 'next/link';
+
+import { neonAuthConfigured } from '../../lib/auth/neon';
+import { signIn } from '../auth-actions';
+
+export const dynamic = 'force-dynamic';
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  readonly searchParams: Promise<{ readonly error?: string }>;
+}) {
+  const error = (await searchParams).error;
+  return (
+    <main className="auth-page">
+      <Link className="wordmark" href="/">
+        ATTUNE
+      </Link>
+      <section className="auth-card">
+        <p className="section-index">MEMBER ACCESS</p>
+        <h1>Sign in to your work.</h1>
+        {neonAuthConfigured() ? (
+          <form action={signIn}>
+            <label>
+              Email
+              <input name="email" type="email" autoComplete="email" required />
+            </label>
+            <label>
+              Password
+              <input name="password" type="password" autoComplete="current-password" required />
+            </label>
+            {error ? (
+              <p className="form-error">Sign-in failed. Check your details and retry.</p>
+            ) : null}
+            <button type="submit">Continue</button>
+          </form>
+        ) : (
+          <div className="setup-callout">
+            <strong>Neon Auth connection required</strong>
+            <p>Add NEON_AUTH_BASE_URL and NEON_AUTH_COOKIE_SECRET to Vercel.</p>
+          </div>
+        )}
+        <p className="auth-switch">
+          New to Attune? <Link href="/sign-up">Create an account</Link>
+        </p>
+      </section>
+    </main>
+  );
+}

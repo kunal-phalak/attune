@@ -23,27 +23,54 @@ function assertNever(command: never): never {
 
 function seedGeometry(): PanelGeometry {
   return {
-    width: 218,
-    height: 120,
+    width: 420,
+    height: 280,
     thickness: 3,
-    material: 'acrylic',
+    material: 'aluminium',
     mounts: [
-      { id: 'mount:top-left', center: { x: 20, y: 20 }, diameter: 6, locked: true },
-      { id: 'mount:top-right', center: { x: 198, y: 20 }, diameter: 6, locked: true },
-      { id: 'mount:bottom-left', center: { x: 20, y: 100 }, diameter: 6, locked: true },
-      { id: 'mount:bottom-right', center: { x: 198, y: 100 }, diameter: 6, locked: true },
+      { id: 'mount:top-left', center: { x: 24, y: 24 }, diameter: 8, locked: true },
+      { id: 'mount:top-right', center: { x: 396, y: 24 }, diameter: 8, locked: true },
+      { id: 'mount:bottom-left', center: { x: 24, y: 256 }, diameter: 8, locked: true },
+      { id: 'mount:bottom-right', center: { x: 396, y: 256 }, diameter: 8, locked: true },
     ],
     auxiliaryHoles: [
-      { id: 'hole:aux-left', center: { x: 80, y: 60 }, diameter: 8, locked: false },
-      { id: 'hole:aux-right', center: { x: 138, y: 60 }, diameter: 8, locked: false },
+      { id: 'hole:gland-left', center: { x: 92, y: 232 }, diameter: 22, locked: false },
+      { id: 'hole:gland-center', center: { x: 148, y: 232 }, diameter: 22, locked: false },
+      { id: 'hole:gland-right', center: { x: 204, y: 232 }, diameter: 22, locked: false },
     ],
     slot: {
       id: 'slot:connector',
-      center: { x: 199.9, y: 60 },
-      width: 20,
-      height: 12,
+      center: { x: 389.9, y: 218 },
+      width: 44,
+      height: 20,
       locked: false,
     },
+    rectangularCutouts: [
+      {
+        id: 'cutout:display',
+        center: { x: 132, y: 82 },
+        width: 172,
+        height: 86,
+        cornerRadius: 5,
+        locked: false,
+      },
+      {
+        id: 'cutout:secondary-control',
+        center: { x: 114, y: 166 },
+        width: 68,
+        height: 44,
+        cornerRadius: 4,
+        locked: false,
+      },
+    ],
+    circularCutouts: [{ id: 'cutout:fan', center: { x: 314, y: 86 }, diameter: 96, locked: false }],
+    ventSlots: Array.from({ length: 6 }, (_, index) => ({
+      id: `slot:vent-${index + 1}`,
+      center: { x: 310, y: 157 + index * 12 },
+      width: 82,
+      height: 6,
+      locked: false,
+    })),
     constraints: {
       requiredSlotClearance: 12,
       equalAuxiliaryHoles: true,
@@ -60,13 +87,16 @@ export function createJudgeProviderCapabilityProfile(): ProviderCapabilityProfil
     version: 'v1',
     processes: [
       {
-        id: 'process:laser-cutting',
-        name: '2D laser cutting',
-        machine: 'Demo laser cell',
+        id: 'process:sheet-cutting',
+        name: '2D sheet cutting',
+        machine: 'Attune sheet cell',
         workEnvelopeMm: { width: 600, height: 400, thickness: 12 },
       },
     ],
-    materials: [{ material: 'acrylic', thicknessesMm: [3, 5, 6] }],
+    materials: [
+      { material: 'aluminium', thicknessesMm: [2, 3, 4] },
+      { material: 'acrylic', thicknessesMm: [3, 5, 6] },
+    ],
     toleranceMm: 0.2,
     minimums: {
       featureMm: 2,
@@ -100,6 +130,7 @@ export function providerBinding(workspace: AttuneWorkspace): ProviderBinding {
 
 export function createAt1042Workspace(): AttuneWorkspace {
   return {
+    scenarioVersion: 2,
     projectId: 'project:attune',
     commitmentId: 'AT-1042',
     workspaceSeq: 0,
@@ -112,6 +143,8 @@ export function createAt1042Workspace(): AttuneWorkspace {
     frozenRevisions: [],
     quotes: [],
     acceptances: [],
+    manufacturingRequests: [],
+    externalCommerceRecords: [],
     commerceLinks: [],
   };
 }
@@ -147,6 +180,11 @@ function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata
   }
 
   return advance(workspace, {
+    manufacturingRequests: workspace.manufacturingRequests.map((candidate) =>
+      candidate.requestId === request.id
+        ? { ...candidate, status: 'QUOTED' as const, updatedAt: metadata.now }
+        : candidate,
+    ),
     frozenRevisions: [
       ...workspace.frozenRevisions,
       {
@@ -190,6 +228,11 @@ function acceptRevision(
   }
 
   return advance(workspace, {
+    manufacturingRequests: workspace.manufacturingRequests.map((candidate) =>
+      candidate.specRevision === quote.revisionId && candidate.specHash === quote.specHash
+        ? { ...candidate, status: 'ACCEPTED' as const, updatedAt: metadata.now }
+        : candidate,
+    ),
     acceptances: [
       ...workspace.acceptances,
       {
@@ -200,6 +243,47 @@ function acceptRevision(
         provider: quote.provider,
         acceptedAt: metadata.now,
       },
+    ],
+  });
+}
+
+function synchronizeDraftOrder(
+  workspace: AttuneWorkspace,
+  command: Extract<AttuneCommand, { type: 'synchronize_shopify_draft_order' }>,
+  metadata: TransitionMetadata,
+): AttuneWorkspace {
+  const request = workspace.manufacturingRequests.find(
+    ({ requestId }) => requestId === command.snapshot.requestId,
+  );
+  if (!request) throw new Error('The Shopify Draft Order does not match an Attune request.');
+  const quote = workspace.quotes.find(
+    ({ revisionId, specHash }) =>
+      revisionId === request.specRevision && specHash === request.specHash,
+  );
+  const exact =
+    command.snapshot.specRevision === request.specRevision &&
+    command.snapshot.specHash === request.specHash &&
+    JSON.stringify(command.snapshot.provider) === JSON.stringify(request.provider) &&
+    command.snapshot.amountMinor === quote?.amountMinor &&
+    command.snapshot.currency === quote?.currency;
+  const syncState = exact ? 'IN_SYNC' : 'EXTERNAL_DRIFT';
+  const record = { ...command.snapshot, syncState, synchronizedAt: metadata.now } as const;
+
+  return advance(workspace, {
+    manufacturingRequests: workspace.manufacturingRequests.map((candidate) =>
+      candidate.requestId === request.requestId
+        ? {
+            ...candidate,
+            status: syncState === 'EXTERNAL_DRIFT' ? 'EXTERNAL_DRIFT' : candidate.status,
+            updatedAt: metadata.now,
+          }
+        : candidate,
+    ),
+    externalCommerceRecords: [
+      ...workspace.externalCommerceRecords.filter(
+        ({ externalId }) => externalId !== command.snapshot.externalId,
+      ),
+      record,
     ],
   });
 }
@@ -269,23 +353,41 @@ export function transitionWorkspace(
         }),
         affectedEntities: ['slot:connector'],
       };
-    case 'request_quote':
+    case 'request_quote': {
+      const requestId = `quote-request:${metadata.commandId}`;
+      const specRevision = `r${workspace.draftVersion}`;
+      const specHash = hashSpecification(workspace);
+      const provider = providerBinding(workspace);
       return {
         workspace: advance(workspace, {
           quoteRequests: [
             ...workspace.quoteRequests,
             {
-              id: `quote-request:${metadata.commandId}`,
+              id: requestId,
               draftVersion: workspace.draftVersion,
-              specHash: hashSpecification(workspace),
-              specRevision: `r${workspace.draftVersion}`,
-              provider: providerBinding(workspace),
+              specHash,
+              specRevision,
+              provider,
               requestedAt: metadata.now,
+            },
+          ],
+          manufacturingRequests: [
+            ...workspace.manufacturingRequests,
+            {
+              requestId,
+              specRevision,
+              specHash,
+              provider,
+              visibility: 'PRIVATE',
+              status: 'PROVIDER_REVIEW_REQUESTED',
+              requestedAt: metadata.now,
+              updatedAt: metadata.now,
             },
           ],
         }),
         affectedEntities: ['commitment:AT-1042'],
       };
+    }
     case 'freeze_and_quote_revision':
       return {
         workspace: freezeAndQuote(workspace, metadata),
@@ -295,6 +397,11 @@ export function transitionWorkspace(
       return {
         workspace: acceptRevision(workspace, command, metadata),
         affectedEntities: [`revision:${command.revisionId}`, command.quoteId],
+      };
+    case 'synchronize_shopify_draft_order':
+      return {
+        workspace: synchronizeDraftOrder(workspace, command, metadata),
+        affectedEntities: [command.snapshot.requestId, command.snapshot.externalId],
       };
     case 'materialize_for_commerce':
       return {

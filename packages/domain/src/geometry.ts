@@ -35,7 +35,7 @@ export function validateUniversalGeometry(
     geometry.width > 0 &&
     geometry.height > 0 &&
     geometry.thickness > 0;
-  const circles = [...geometry.mounts, ...geometry.auxiliaryHoles];
+  const circles = [...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts];
   const circlesContained = circles.every(({ center, diameter }) => {
     const radius = diameter / 2;
     return (
@@ -46,14 +46,16 @@ export function validateUniversalGeometry(
       center.y + radius <= geometry.height
     );
   });
-  const slot = geometry.slot;
-  const slotContained =
-    slot.width > 0 &&
-    slot.height > 0 &&
-    slot.center.x - slot.width / 2 >= 0 &&
-    slot.center.y - slot.height / 2 >= 0 &&
-    slot.center.x + slot.width / 2 <= geometry.width &&
-    slot.center.y + slot.height / 2 <= geometry.height;
+  const rectangles = [geometry.slot, ...geometry.ventSlots, ...geometry.rectangularCutouts];
+  const rectanglesContained = rectangles.every(
+    ({ center, width, height }) =>
+      width > 0 &&
+      height > 0 &&
+      center.x - width / 2 >= 0 &&
+      center.y - height / 2 >= 0 &&
+      center.x + width / 2 <= geometry.width &&
+      center.y + height / 2 <= geometry.height,
+  );
   return [
     ...(!panelValid
       ? [
@@ -66,7 +68,7 @@ export function validateUniversalGeometry(
           },
         ]
       : []),
-    ...(!circlesContained || !slotContained
+    ...(!circlesContained || !rectanglesContained
       ? [
           {
             id: 'feature_outside_profile' as const,
@@ -100,6 +102,18 @@ export function validateProviderCapability(
     (exceeds(geometry.width, process.workEnvelopeMm.width) ||
       exceeds(geometry.height, process.workEnvelopeMm.height) ||
       exceeds(geometry.thickness, process.workEnvelopeMm.thickness));
+  const holeMinimum = profile.minimums.holeDiameterMm;
+  const undersizedHole =
+    typeof holeMinimum === 'number' &&
+    [...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts].find(
+      ({ diameter }) => diameter < holeMinimum,
+    );
+  const slotMinimum = profile.minimums.slotWidthMm;
+  const undersizedSlot =
+    typeof slotMinimum === 'number' &&
+    [geometry.slot, ...geometry.ventSlots].find(
+      ({ width, height }) => Math.min(width, height) < slotMinimum,
+    );
   return [
     ...(envelopeExceeded
       ? [
@@ -132,6 +146,32 @@ export function validateProviderCapability(
             message: `${profile.providerName} does not support ${geometry.thickness} mm ${geometry.material}.`,
             observedMm: geometry.thickness,
             affectedEntities: ['specification:thickness'],
+          },
+        ]
+      : []),
+    ...(undersizedHole
+      ? [
+          {
+            id: 'provider_hole_minimum' as const,
+            severity: 'hard' as const,
+            source: 'provider' as const,
+            message: `${undersizedHole.id} is below ${profile.providerName}'s ${holeMinimum} mm minimum hole diameter.`,
+            observedMm: undersizedHole.diameter,
+            requiredMm: holeMinimum,
+            affectedEntities: [undersizedHole.id],
+          },
+        ]
+      : []),
+    ...(undersizedSlot
+      ? [
+          {
+            id: 'provider_slot_minimum' as const,
+            severity: 'hard' as const,
+            source: 'provider' as const,
+            message: `${undersizedSlot.id} is below ${profile.providerName}'s ${slotMinimum} mm minimum slot width.`,
+            observedMm: Math.min(undersizedSlot.width, undersizedSlot.height),
+            requiredMm: slotMinimum,
+            affectedEntities: [undersizedSlot.id],
           },
         ]
       : []),

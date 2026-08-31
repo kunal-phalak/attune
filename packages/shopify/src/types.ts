@@ -20,8 +20,8 @@ export type GraphqlClient = <T>(
 ) => Promise<T>;
 
 export interface ProductExpectation {
-  readonly title: 'Custom Equipment Panel — AT-1042 r7';
-  readonly handle: 'custom-equipment-panel-at-1042-r7';
+  readonly title: 'Custom Control Faceplate — AT-1042 r7';
+  readonly handle: 'custom-control-faceplate-at-1042-r7';
   readonly variantTitle: 'Fabrication lot — 4 panels';
   readonly sku: 'AT-1042-R7-LOT4';
   readonly price: '2400.00';

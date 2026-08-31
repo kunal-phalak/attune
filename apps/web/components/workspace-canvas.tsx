@@ -60,9 +60,9 @@ function GeometryDrawing({
   readonly showCursors: boolean;
 }) {
   const geometry = view.workspace.geometry;
-  const scale = 2.4;
-  const offsetX = 92;
-  const offsetY = 74;
+  const scale = 1.25;
+  const offsetX = 96;
+  const offsetY = 48;
   const slotX = offsetX + (geometry.slot.center.x - geometry.slot.width / 2) * scale;
   const slotY = offsetY + (geometry.slot.center.y - geometry.slot.height / 2) * scale;
   const conflict = !view.validation.valid;
@@ -119,11 +119,13 @@ function GeometryDrawing({
       <div className="canvas-viewport">
         {showCursors ? <Cursors /> : null}
         <svg viewBox="0 0 720 440" aria-labelledby="attune-geometry-title attune-geometry-desc">
-          <title id="attune-geometry-title">AT-1042 custom equipment panel</title>
+          <title id="attune-geometry-title">AT-1042 custom control-enclosure faceplate</title>
           <desc id="attune-geometry-desc">
-            A 218 by 120 by 3 millimetre acrylic equipment panel. Four buyer mounts are locked. The
-            connector slot has {view.validation.evidence.slotRightClearanceMm} millimetres clearance
-            where {view.validation.evidence.requiredSlotClearanceMm} is required.
+            A 420 by 280 by 3 millimetre aluminium control-enclosure faceplate with a display,
+            cooling fan, cable glands, vents and connector opening. Four buyer installation mounts
+            are locked. The connector slot has {view.validation.evidence.slotRightClearanceMm}{' '}
+            millimetres clearance where {view.validation.evidence.requiredSlotClearanceMm} is
+            required by the selected provider.
           </desc>
           <defs>
             <pattern id="attune-grid-small" width="12" height="12" patternUnits="userSpaceOnUse">
@@ -169,6 +171,46 @@ function GeometryDrawing({
                 </g>
               );
             })}
+            {geometry.circularCutouts.map((cutout) => (
+              <circle
+                className={
+                  selectedEntity === cutout.id ? 'attune-cutout is-selected' : 'attune-cutout'
+                }
+                key={cutout.id}
+                cx={cutout.center.x * scale}
+                cy={cutout.center.y * scale}
+                r={(cutout.diameter * scale) / 2}
+                onPointerDown={() => select(cutout.id)}
+              />
+            ))}
+            {geometry.rectangularCutouts.map((cutout) => (
+              <rect
+                className={
+                  selectedEntity === cutout.id ? 'attune-cutout is-selected' : 'attune-cutout'
+                }
+                key={cutout.id}
+                x={(cutout.center.x - cutout.width / 2) * scale}
+                y={(cutout.center.y - cutout.height / 2) * scale}
+                width={cutout.width * scale}
+                height={cutout.height * scale}
+                rx={cutout.cornerRadius * scale}
+                onPointerDown={() => select(cutout.id)}
+              />
+            ))}
+            {geometry.ventSlots.map((vent) => (
+              <rect
+                className={
+                  selectedEntity === vent.id ? 'attune-cutout is-selected' : 'attune-cutout'
+                }
+                key={vent.id}
+                x={(vent.center.x - vent.width / 2) * scale}
+                y={(vent.center.y - vent.height / 2) * scale}
+                width={vent.width * scale}
+                height={vent.height * scale}
+                rx={(vent.height * scale) / 2}
+                onPointerDown={() => select(vent.id)}
+              />
+            ))}
             <rect
               className={[
                 'attune-slot',
@@ -191,7 +233,7 @@ function GeometryDrawing({
               d={`M${offsetX} ${offsetY - 22}v12M${offsetX} ${offsetY - 16}h${geometry.width * scale}M${offsetX + geometry.width * scale} ${offsetY - 22}v12`}
             />
             <text x={offsetX + (geometry.width * scale) / 2} y={offsetY - 24} textAnchor="middle">
-              218 mm
+              {geometry.width} mm
             </text>
             <path
               d={`M${offsetX - 22} ${offsetY}h12M${offsetX - 16} ${offsetY}v${geometry.height * scale}M${offsetX - 22} ${offsetY + geometry.height * scale}h12`}
@@ -202,7 +244,7 @@ function GeometryDrawing({
               textAnchor="middle"
               transform={`rotate(-90 ${offsetX - 32} ${offsetY + (geometry.height * scale) / 2})`}
             >
-              120 mm
+              {geometry.height} mm
             </text>
             <path
               className={

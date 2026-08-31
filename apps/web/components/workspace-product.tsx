@@ -45,7 +45,7 @@ function available(view: AttuneApiView, role: CapabilityRole, id: string): boole
 
 function draftFrom(view: AttuneApiView): AttuneCollaborativeDraft {
   return {
-    intent: 'Fabricate a custom equipment panel with four protected buyer mounts.',
+    intent: 'Fabricate a custom control-enclosure faceplate with four protected buyer mounts.',
     commitmentId: view.workspace.commitmentId,
     fabricationQuantity: 4,
     geometry: structuredClone(view.workspace.geometry),
@@ -274,7 +274,7 @@ function WorkspaceHeader({
         </Link>
         <div className="editor-document-identity">
           <span>{view.product.projectName}</span>
-          <strong>{view.workspace.commitmentId} · Equipment panel</strong>
+          <strong>{view.workspace.commitmentId} · Control-enclosure faceplate</strong>
         </div>
       </div>
       <div className="editor-state-group">

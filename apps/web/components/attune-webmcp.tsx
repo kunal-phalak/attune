@@ -105,6 +105,7 @@ function summarize(view: AttuneApiView) {
     deterministic_repairs: view.repairs,
     latest_receipt: view.latestReceipt,
     external_shopify_verification: view.records.externalVerifications.at(-1) ?? null,
+    external_draft_order: view.records.externalCommerce.at(-1) ?? null,
     recent_rejections: view.records.commandRejections.slice(-5),
     measured_outcome: view.impact,
   };

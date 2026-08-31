@@ -32,8 +32,10 @@ import {
   commandRejections,
   commerceVerificationRecords,
   delegationGrants,
+  externalCommerceRecords,
   externalActionAttempts,
   frozenRevisions,
+  manufacturingRequests,
   organizationMemberships,
   organizations,
   projects,
@@ -93,6 +95,10 @@ export type ExternalMaterializationReservation =
       readonly revision: AttuneWorkspace['frozenRevisions'][number];
     };
 
+type DatabaseTransaction = Parameters<
+  Parameters<ReturnType<typeof getDatabase>['transaction']>[0]
+>[0];
+
 function commandFingerprint(input: ExecutePersistedCommandInput): string {
   return hashCanonical({
     command: input.command,
@@ -115,10 +121,20 @@ function immutableCopy<T>(value: T): T {
 }
 
 function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspace {
-  if (workspace.providerCapabilityProfile) return workspace;
+  const storedManufacturingRequests = Reflect.get(workspace, 'manufacturingRequests');
+  const storedExternalCommerceRecords = Reflect.get(workspace, 'externalCommerceRecords');
+  const storedGeometry = workspace.geometry;
   const current = {
     ...workspace,
-    providerCapabilityProfile: createJudgeProviderCapabilityProfile(),
+    scenarioVersion: 2 as const,
+    providerCapabilityProfile:
+      workspace.providerCapabilityProfile ?? createJudgeProviderCapabilityProfile(),
+    geometry: {
+      ...storedGeometry,
+      rectangularCutouts: storedGeometry.rectangularCutouts ?? [],
+      circularCutouts: storedGeometry.circularCutouts ?? [],
+      ventSlots: storedGeometry.ventSlots ?? [],
+    },
   };
   const provider = providerBinding(current);
   return {
@@ -144,6 +160,12 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       provider: Reflect.get(acceptance, 'provider') ?? provider,
       acceptedAt: acceptance.acceptedAt,
     })),
+    manufacturingRequests: Array.isArray(storedManufacturingRequests)
+      ? storedManufacturingRequests
+      : [],
+    externalCommerceRecords: Array.isArray(storedExternalCommerceRecords)
+      ? storedExternalCommerceRecords
+      : [],
   };
 }
 
@@ -170,11 +192,63 @@ function interventionSummary(
 }
 
 async function persistDomainRecords(
-  transaction: Parameters<Parameters<ReturnType<typeof getDatabase>['transaction']>[0]>[0],
+  transaction: DatabaseTransaction,
   workspaceId: string,
   workspace: AttuneWorkspace,
   liveblocksVersionId?: string,
 ) {
+  if (workspace.manufacturingRequests.length > 0) {
+    await Promise.all(
+      workspace.manufacturingRequests.map((request) =>
+        transaction
+          .insert(manufacturingRequests)
+          .values({
+            id: request.requestId,
+            workspaceId,
+            revisionId: request.specRevision,
+            specHash: request.specHash,
+            status: request.status,
+            record: request,
+            createdAt: request.requestedAt,
+            updatedAt: request.updatedAt,
+          })
+          .onConflictDoUpdate({
+            target: manufacturingRequests.id,
+            set: {
+              status: request.status,
+              record: request,
+              updatedAt: request.updatedAt,
+            },
+          }),
+      ),
+    );
+  }
+  if (workspace.externalCommerceRecords.length > 0) {
+    await Promise.all(
+      workspace.externalCommerceRecords.map((record) =>
+        transaction
+          .insert(externalCommerceRecords)
+          .values({
+            externalId: record.externalId,
+            workspaceId,
+            requestId: record.requestId,
+            revisionId: record.specRevision,
+            specHash: record.specHash,
+            syncState: record.syncState,
+            record,
+            updatedAt: record.synchronizedAt,
+          })
+          .onConflictDoUpdate({
+            target: externalCommerceRecords.externalId,
+            set: {
+              syncState: record.syncState,
+              record,
+              updatedAt: record.synchronizedAt,
+            },
+          }),
+      ),
+    );
+  }
   if (workspace.quoteRequests.length > 0) {
     await transaction
       .insert(quoteRequests)
@@ -250,6 +324,42 @@ async function persistDomainRecords(
   }
 }
 
+async function clearWorkspaceRecords(
+  transaction: DatabaseTransaction,
+  workspaceId: string,
+): Promise<void> {
+  await transaction
+    .delete(agentInterventionObservations)
+    .where(eq(agentInterventionObservations.workspaceId, workspaceId));
+  await transaction
+    .delete(capabilityTransitions)
+    .where(eq(capabilityTransitions.workspaceId, workspaceId));
+  await transaction.delete(commandRejections).where(eq(commandRejections.workspaceId, workspaceId));
+  await transaction
+    .delete(commandIdempotencyRecords)
+    .where(eq(commandIdempotencyRecords.workspaceId, workspaceId));
+  await transaction
+    .delete(externalActionAttempts)
+    .where(eq(externalActionAttempts.workspaceId, workspaceId));
+  await transaction
+    .delete(commerceVerificationRecords)
+    .where(eq(commerceVerificationRecords.workspaceId, workspaceId));
+  await transaction
+    .delete(externalCommerceRecords)
+    .where(eq(externalCommerceRecords.workspaceId, workspaceId));
+  await transaction
+    .delete(manufacturingRequests)
+    .where(eq(manufacturingRequests.workspaceId, workspaceId));
+  await transaction.delete(acceptances).where(eq(acceptances.workspaceId, workspaceId));
+  await transaction.delete(quotes).where(eq(quotes.workspaceId, workspaceId));
+  await transaction.delete(quoteRequests).where(eq(quoteRequests.workspaceId, workspaceId));
+  await transaction.delete(frozenRevisions).where(eq(frozenRevisions.workspaceId, workspaceId));
+  await transaction.delete(changeReceipts).where(eq(changeReceipts.workspaceId, workspaceId));
+  await transaction
+    .delete(workspaceSnapshots)
+    .where(eq(workspaceSnapshots.workspaceId, workspaceId));
+}
+
 async function persistRejection(
   workspaceId: string,
   rejection: CommandRejection | undefined,
@@ -305,13 +415,16 @@ export async function ensureJudgeWorkspace(): Promise<void> {
         name: 'Custom equipment enclosure',
         code: initial.commitmentId,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: projects.id,
+        set: { name: 'Custom equipment enclosure' },
+      });
     await transaction
       .insert(workspaces)
       .values({
         id: JUDGE_WORKSPACE_ID,
         projectId: initial.projectId,
-        name: 'Equipment panel specification',
+        name: 'Control-enclosure faceplate specification',
         commitmentId: initial.commitmentId,
         liveblocksRoomId: 'attune:workspace:at-1042',
         currentSpecification: initial,
@@ -320,16 +433,22 @@ export async function ensureJudgeWorkspace(): Promise<void> {
         capabilityEpoch: initial.capabilityEpoch,
         needStartedAt: now,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: workspaces.id,
+        set: { name: 'Control-enclosure faceplate specification' },
+      });
     await transaction
       .insert(workspaceFiles)
       .values({
         id: 'file:at-1042-panel',
         workspaceId: JUDGE_WORKSPACE_ID,
-        name: 'Equipment panel.attune',
+        name: 'Control faceplate.attune',
         kind: 'executable-specification',
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: workspaceFiles.id,
+        set: { name: 'Control faceplate.attune' },
+      });
     await transaction
       .insert(workspaceMemberships)
       .values({
@@ -401,7 +520,27 @@ export async function ensureJudgeWorkspace(): Promise<void> {
       .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
       .limit(1);
     const stored = existing[0]?.workspace;
-    if (stored && !stored.providerCapabilityProfile) {
+    if (stored && Reflect.get(stored, 'scenarioVersion') !== 2) {
+      await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
+      await transaction
+        .update(workspaces)
+        .set({
+          currentSpecification: initial,
+          workspaceSeq: initial.workspaceSeq,
+          draftVersion: initial.draftVersion,
+          capabilityEpoch: initial.capabilityEpoch,
+          needStartedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(workspaces.id, JUDGE_WORKSPACE_ID));
+      await transaction.insert(workspaceSnapshots).values({
+        id: `${JUDGE_WORKSPACE_ID}:snapshot:0`,
+        workspaceId: JUDGE_WORKSPACE_ID,
+        workspaceSeq: 0,
+        specification: initial,
+        specHash: hashSpecification(initial),
+      });
+    } else if (stored && !stored.providerCapabilityProfile) {
       await transaction
         .update(workspaces)
         .set({ currentSpecification: workspaceWithCurrentContract(stored), updatedAt: now })
@@ -449,38 +588,7 @@ export async function resetJudgeWorkspace(): Promise<void> {
   const now = new Date().toISOString();
 
   await database.transaction(async (transaction) => {
-    await transaction
-      .delete(agentInterventionObservations)
-      .where(eq(agentInterventionObservations.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(capabilityTransitions)
-      .where(eq(capabilityTransitions.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(commandRejections)
-      .where(eq(commandRejections.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(commandIdempotencyRecords)
-      .where(eq(commandIdempotencyRecords.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(externalActionAttempts)
-      .where(eq(externalActionAttempts.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(commerceVerificationRecords)
-      .where(eq(commerceVerificationRecords.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction.delete(acceptances).where(eq(acceptances.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction.delete(quotes).where(eq(quotes.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(quoteRequests)
-      .where(eq(quoteRequests.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(frozenRevisions)
-      .where(eq(frozenRevisions.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(changeReceipts)
-      .where(eq(changeReceipts.workspaceId, JUDGE_WORKSPACE_ID));
-    await transaction
-      .delete(workspaceSnapshots)
-      .where(eq(workspaceSnapshots.workspaceId, JUDGE_WORKSPACE_ID));
+    await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
     await transaction
       .update(workspaces)
       .set({

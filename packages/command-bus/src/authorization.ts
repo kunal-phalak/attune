@@ -83,6 +83,17 @@ export function authorizationFailure(
   commandType: AttuneCommand['type'],
   now: string,
 ): AuthorizationFailure | undefined {
+  const externalSync = commandType === 'synchronize_shopify_draft_order';
+  const externalPath =
+    context.path === 'shopify_webhook' || context.path === 'shopify_reconciliation';
+  if (externalSync !== externalPath) {
+    return {
+      code: 'ORIGIN_NOT_ALLOWED',
+      message: externalSync
+        ? 'Shopify Draft Order synchronization requires a verified webhook or reconciliation path.'
+        : 'Shopify synchronization paths cannot execute product commands.',
+    };
+  }
   if (!principalMatches(context)) {
     return {
       code: 'PRINCIPAL_MISMATCH',

@@ -10,7 +10,9 @@ import type {
   AttuneRole,
   AttuneWorkspace,
   CommerceLink,
+  ExternalCommerceRecord,
   FrozenRevision,
+  ManufacturingRequest,
   ProviderCapabilityProfile,
   Quote,
   QuoteRequest,
@@ -312,6 +314,33 @@ export const quoteRequests = pgTable('quote_requests', {
   draftVersion: integer('draft_version').notNull(),
   record: jsonb('record').$type<QuoteRequest>().notNull(),
   createdAt,
+});
+
+export const manufacturingRequests = pgTable('manufacturing_requests', {
+  id: text('id').primaryKey(),
+  workspaceId: text('workspace_id')
+    .notNull()
+    .references(() => workspaces.id),
+  revisionId: text('revision_id').notNull(),
+  specHash: text('spec_hash').notNull(),
+  status: text('status').notNull(),
+  record: jsonb('record').$type<ManufacturingRequest>().notNull(),
+  createdAt,
+  updatedAt,
+});
+
+export const externalCommerceRecords = pgTable('external_commerce_records', {
+  externalId: text('external_id').primaryKey(),
+  workspaceId: text('workspace_id')
+    .notNull()
+    .references(() => workspaces.id),
+  requestId: text('request_id').notNull(),
+  revisionId: text('revision_id').notNull(),
+  specHash: text('spec_hash').notNull(),
+  syncState: text('sync_state').notNull(),
+  record: jsonb('record').$type<ExternalCommerceRecord>().notNull(),
+  createdAt,
+  updatedAt,
 });
 
 export const quotes = pgTable('quotes', {

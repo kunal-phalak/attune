@@ -18,6 +18,13 @@ export const REQUIRED_ADMIN_SCOPES = [
   'read_inventory',
 ] as const;
 
+export const TARGET_ADMIN_SCOPES = [
+  ...REQUIRED_ADMIN_SCOPES,
+  'write_draft_orders',
+  'read_customers',
+  'read_orders',
+] as const;
+
 export const STOREFRONT_RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000] as const;
 
 export function configurationFromEnvironment(): ShopifyConfiguration {

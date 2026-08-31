@@ -72,6 +72,35 @@ export interface AttuneApiView {
       readonly revisionId: string;
       readonly specHash: string;
     }[];
+    readonly manufacturingRequests: readonly {
+      readonly requestId: string;
+      readonly specRevision: string;
+      readonly specHash: string;
+      readonly provider: {
+        readonly providerId: string;
+        readonly profileId: string;
+        readonly profileVersion: string;
+      };
+      readonly visibility: 'PRIVATE' | 'DISCOVERABLE';
+      readonly status:
+        | 'PROVIDER_REVIEW_REQUESTED'
+        | 'QUOTED'
+        | 'ACCEPTED'
+        | 'COMMERCE_READY'
+        | 'EXTERNAL_DRIFT';
+      readonly requestedAt: string;
+      readonly updatedAt: string;
+    }[];
+    readonly externalCommerceRecords: readonly {
+      readonly externalId: string;
+      readonly kind: 'SHOPIFY_DRAFT_ORDER';
+      readonly status: string;
+      readonly requestId: string;
+      readonly specRevision: string;
+      readonly specHash: string;
+      readonly syncState: 'IN_SYNC' | 'EXTERNAL_DRIFT';
+      readonly synchronizedAt: string;
+    }[];
     readonly commerceLinks: readonly CommerceLinkView[];
   };
   readonly validation: {
@@ -124,6 +153,7 @@ export interface AttuneApiView {
     readonly receipts: readonly ReceiptView[];
     readonly capabilityTransitions: readonly CapabilityTransitionView[];
     readonly commandRejections: readonly RejectionView[];
+    readonly externalCommerce: AttuneApiView['workspace']['externalCommerceRecords'];
     readonly externalVerifications: readonly CommerceLinkView[];
   };
   readonly latestReceipt: ReceiptView | null;

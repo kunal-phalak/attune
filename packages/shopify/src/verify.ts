@@ -25,8 +25,8 @@ export function expectation(revision: FrozenRevision): ProductExpectation {
     );
   }
   return {
-    title: 'Custom Equipment Panel — AT-1042 r7',
-    handle: 'custom-equipment-panel-at-1042-r7',
+    title: 'Custom Control Faceplate — AT-1042 r7',
+    handle: 'custom-control-faceplate-at-1042-r7',
     variantTitle: 'Fabrication lot — 4 panels',
     sku: 'AT-1042-R7-LOT4',
     price: '2400.00',
@@ -53,7 +53,7 @@ function productInput(expected: ProductExpectation, locationId: string) {
     handle: expected.handle,
     status: 'ACTIVE',
     descriptionHtml:
-      '<p>One verified revision-bound fabrication lot containing four acrylic equipment panels.</p>',
+      '<p>One verified revision-bound fabrication lot containing four aluminium control faceplates.</p>',
     productOptions: [
       { name: 'Configuration', position: 1, values: [{ name: expected.variantTitle }] },
     ],

@@ -218,7 +218,7 @@ export function DashboardLibrary({
           <div className="guided-marker">AT-1042</div>
           <div>
             <span>Guided manufacturing scenario</span>
-            <h2 id="guided-scenario-title">Make the equipment panel buildable.</h2>
+            <h2 id="guided-scenario-title">Make the control-enclosure faceplate buildable.</h2>
             <p>
               Resolve a connector-slot clearance conflict while preserving four buyer-locked mounts,
               then advance the exact revision to quote and commerce.

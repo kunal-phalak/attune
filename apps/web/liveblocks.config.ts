@@ -7,7 +7,7 @@ export interface AttuneCollaborativeDraft {
   readonly geometry: PanelGeometry;
   readonly draftVersion: number;
   readonly metadata: {
-    readonly material: 'acrylic';
+    readonly material: PanelGeometry['material'];
     readonly thicknessMm: number;
   };
 }

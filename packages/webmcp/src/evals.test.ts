@@ -91,7 +91,7 @@ function verification(bus: AttuneCommandBus, storefrontUrl = 'https://shop.test/
     commitmentId: 'AT-1042',
     revisionId: 'r7',
     specHash: hashSpecification(bus.inspect('provider').workspace),
-    title: 'Custom Equipment Panel — AT-1042 r7',
+    title: 'Custom Control Faceplate — AT-1042 r7',
     sku: 'AT-1042-R7-LOT4',
     amountMinor: 240_000,
     currency: 'INR',

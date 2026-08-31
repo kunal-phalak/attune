@@ -12,6 +12,22 @@ import {
 } from './index';
 
 describe('AT-1042 deterministic geometry', () => {
+  it('models a substantial but honest 2D control-enclosure faceplate', () => {
+    const { geometry } = createAt1042Workspace();
+
+    expect(geometry).toEqual(
+      expect.objectContaining({ width: 420, height: 280, thickness: 3, material: 'aluminium' }),
+    );
+    expect(geometry.mounts.filter(({ locked }) => locked)).toHaveLength(4);
+    expect(geometry.rectangularCutouts.map(({ id }) => id)).toEqual([
+      'cutout:display',
+      'cutout:secondary-control',
+    ]);
+    expect(geometry.circularCutouts.map(({ id }) => id)).toEqual(['cutout:fan']);
+    expect(geometry.auxiliaryHoles).toHaveLength(3);
+    expect(geometry.ventSlots).toHaveLength(6);
+  });
+
   it('starts with the exact 8.1 mm hard conflict against a 12 mm requirement', () => {
     const workspace = createAt1042Workspace();
     const validation = validateWorkspace(workspace);
@@ -50,9 +66,9 @@ describe('AT-1042 deterministic geometry', () => {
 
     expect(validateUniversalGeometry(workspace.geometry)).toEqual([]);
     expect(validateProviderCapability(workspace.geometry, unrestrictedProfile)).toEqual([]);
-    expect(validateProviderCapability(workspace.geometry, workspace.providerCapabilityProfile)).toEqual([
-      expect.objectContaining({ id: 'slot_clearance', source: 'provider' }),
-    ]);
+    expect(
+      validateProviderCapability(workspace.geometry, workspace.providerCapabilityProfile),
+    ).toEqual([expect.objectContaining({ id: 'slot_clearance', source: 'provider' })]);
   });
 
   it('offers two deterministic repairs with exact predicted hashes and lock preservation', () => {

@@ -23,10 +23,11 @@ function Hero() {
           </a>
         </div>
       </div>
-      <div className="panel-visual" aria-label="A constrained custom equipment panel">
+      <div className="panel-visual" aria-label="A constrained custom control-enclosure faceplate">
         <span className="visually-hidden">
-          AT-1042 equipment panel with four locked mounting holes, two auxiliary holes, and a
-          connector slot whose clearance is checked against a manufacturing requirement.
+          AT-1042 control-enclosure faceplate with four locked installation mounts, familiar control
+          and ventilation cutouts, and a connector slot checked against the provider's clearance
+          requirement.
         </span>
         <svg viewBox="0 0 640 420" aria-hidden="true">
           <rect className="sheet" x="58" y="52" width="524" height="288" rx="8" />

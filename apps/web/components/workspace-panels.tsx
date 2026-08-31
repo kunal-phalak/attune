@@ -140,14 +140,66 @@ export function ItemsPanel({
           <button
             type="button"
             role="treeitem"
-            aria-selected={selectedEntity === 'hole:aux-left'}
-            className={selectedEntity === 'hole:aux-left' ? 'is-selected' : undefined}
-            onClick={() => onSelect('hole:aux-left', 'design')}
+            aria-selected={selectedEntity === 'cutout:display'}
+            className={selectedEntity === 'cutout:display' ? 'is-selected' : undefined}
+            onClick={() => onSelect('cutout:display', 'design')}
+          >
+            <TreeIcon kind="panel" />
+            <span>
+              <strong>Display / controller</strong>
+              <small>172 × 86 mm · radiused cutout</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="treeitem"
+            aria-selected={selectedEntity === 'cutout:fan'}
+            className={selectedEntity === 'cutout:fan' ? 'is-selected' : undefined}
+            onClick={() => onSelect('cutout:fan', 'design')}
           >
             <TreeIcon kind="hole" />
             <span>
-              <strong>Auxiliary holes</strong>
-              <small>2 × Ø8 mm · equal + symmetric</small>
+              <strong>Cooling fan opening</strong>
+              <small>Ø96 mm · through cut</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="treeitem"
+            aria-selected={selectedEntity.startsWith('hole:gland-')}
+            className={selectedEntity.startsWith('hole:gland-') ? 'is-selected' : undefined}
+            onClick={() => onSelect('hole:gland-center', 'design')}
+          >
+            <TreeIcon kind="hole" />
+            <span>
+              <strong>Cable-gland holes</strong>
+              <small>3 × Ø22 mm · equal</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="treeitem"
+            aria-selected={selectedEntity.startsWith('slot:vent-')}
+            className={selectedEntity.startsWith('slot:vent-') ? 'is-selected' : undefined}
+            onClick={() => onSelect('slot:vent-3', 'design')}
+          >
+            <TreeIcon kind="slot" />
+            <span>
+              <strong>Ventilation array</strong>
+              <small>6 slots · 82 × 6 mm</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="treeitem"
+            aria-selected={selectedEntity === 'cutout:secondary-control'}
+            className={selectedEntity === 'cutout:secondary-control' ? 'is-selected' : undefined}
+            onClick={() => onSelect('cutout:secondary-control', 'design')}
+          >
+            <TreeIcon kind="panel" />
+            <span>
+              <strong>Secondary control</strong>
+              <small>68 × 44 mm · radiused cutout</small>
             </span>
           </button>
           <button
@@ -192,8 +244,8 @@ export function ItemsPanel({
       </div>
       <footer className="items-panel-footer">
         <span>{view.workspace.fabricationQuantity} panels</span>
-        <span>Acrylic</span>
-        <span>3 mm</span>
+        <span>Aluminium</span>
+        <span>{geometry.thickness} mm</span>
       </footer>
     </aside>
   );
@@ -281,7 +333,10 @@ function SelectionProperties({
       </dl>
       <div className="authority-note">
         <span>Manufacturing intent</span>
-        <p>Fabricate four matching acrylic panels while preserving protected buyer interfaces.</p>
+        <p>
+          Fabricate four matching aluminium control faceplates while preserving protected buyer
+          installation interfaces.
+        </p>
       </div>
     </div>
   );
@@ -366,7 +421,7 @@ function ConstraintsInspector({
       ) : null}
       <div className="constraint-checks">
         <div>
-          <span>Equal auxiliary holes</span>
+          <span>Equal cable-gland holes</span>
           <strong>Pass</strong>
         </div>
         <div>
@@ -448,10 +503,15 @@ export function CommerceInspector({
   readonly disabled: boolean;
   readonly onWorkflow: (action: WorkflowAction) => void;
 }) {
-  const exactRequest = view.workspace.quoteRequests.some(
-    ({ draftVersion, specHash }) =>
-      draftVersion === view.workspace.draftVersion && specHash === view.specHash,
+  const exactRequest = view.workspace.manufacturingRequests.find(
+    ({ specRevision, specHash }) =>
+      specRevision === `r${view.workspace.draftVersion}` && specHash === view.specHash,
   );
+  const draftOrder = exactRequest
+    ? view.workspace.externalCommerceRecords.find(
+        ({ requestId }) => requestId === exactRequest.requestId,
+      )
+    : undefined;
   const exactQuote = currentExactRecord(view.workspace.quotes, view);
   const exactAcceptance = currentExactRecord(view.workspace.acceptances, view);
   const exactCommerce = view.workspace.commerceLinks.find(
@@ -461,8 +521,9 @@ export function CommerceInspector({
   const historicalCommerce = view.workspace.commerceLinks.at(-1);
   const steps = [
     { label: 'Buildable draft', complete: view.validation.valid },
-    { label: 'Quote requested', complete: exactRequest },
+    { label: 'Provider review requested', complete: Boolean(exactRequest) },
     { label: 'Frozen + quoted', complete: exactQuote },
+    { label: 'Draft Order synchronized', complete: draftOrder?.syncState === 'IN_SYNC' },
     { label: 'Buyer accepted', complete: exactAcceptance },
     { label: 'Shopify verified', complete: Boolean(exactCommerce) },
   ];
@@ -475,6 +536,15 @@ export function CommerceInspector({
           <span>4 fabricated panels</span>
           <span>Shopify cart quantity 1</span>
         </div>
+      </div>
+      <div className="commerce-contract-state">
+        <span>Request visibility</span>
+        <strong>{exactRequest?.visibility ?? 'PRIVATE'}</strong>
+        <p>
+          {draftOrder
+            ? `Shopify Draft Order is ${draftOrder.syncState.toLowerCase().replaceAll('_', ' ')}.`
+            : 'No Shopify Draft Order exists for an unquoted editing draft.'}
+        </p>
       </div>
       <ol className="commerce-steps">
         {steps.map((step, index) => (

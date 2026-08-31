@@ -31,7 +31,7 @@ function isCollaborativeDraft(value: unknown): value is AttuneCollaborativeDraft
 
 export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborativeDraft {
   return {
-    intent: 'Fabricate a custom equipment panel with four protected buyer mounts.',
+    intent: 'Fabricate a custom control-enclosure faceplate with four protected buyer mounts.',
     commitmentId: workspace.commitmentId,
     fabricationQuantity: workspace.fabricationQuantity,
     geometry: structuredClone(workspace.geometry),

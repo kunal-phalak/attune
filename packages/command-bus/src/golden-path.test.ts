@@ -2,6 +2,7 @@ import { compileCapabilities } from '@attune/capabilities';
 import {
   createAt1042Workspace,
   hashSpecification,
+  providerBinding,
   type CommerceVerification,
 } from '@attune/domain';
 import { describe, expect, it } from 'vitest';
@@ -67,6 +68,12 @@ const shopify: TrustedExecutionContext = {
   principalId: 'integration:shopify',
   role: 'provider',
 };
+const shopifyWebhook: TrustedExecutionContext = {
+  path: 'shopify_webhook',
+  workspaceId: WORKSPACE_ID,
+  principalId: 'shopify:webhook:attune-demo',
+  role: 'provider',
+};
 
 function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
   return {
@@ -80,7 +87,7 @@ function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
     commitmentId: 'AT-1042',
     revisionId: 'r7',
     specHash: hashSpecification(bus.inspect('provider').workspace),
-    title: 'Custom Equipment Panel — AT-1042 r7',
+    title: 'Custom Control Faceplate — AT-1042 r7',
     sku: 'AT-1042-R7-LOT4',
     amountMinor: 240_000,
     currency: 'INR',
@@ -282,6 +289,93 @@ describe('server-issued WebMCP delegation', () => {
         ),
       ).toThrowError(expect.objectContaining({ code: candidate.code }));
     }
+  });
+});
+
+describe('manufacturing request and Shopify synchronization contract', () => {
+  it('binds a private request and quote to the exact provider profile', () => {
+    const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
+    runThroughAcceptance(bus);
+    const workspace = bus.inspect('buyer').workspace;
+
+    expect(workspace.manufacturingRequests).toEqual([
+      expect.objectContaining({
+        specRevision: 'r7',
+        specHash: workspace.quotes[0].specHash,
+        provider: workspace.quotes[0].provider,
+        visibility: 'PRIVATE',
+        status: 'ACCEPTED',
+      }),
+    ]);
+  });
+
+  it('keeps exact webhook state in sync and revokes commerce authority on material drift', () => {
+    const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
+    runThroughAcceptance(bus);
+    const accepted = bus.inspect('provider').workspace;
+    const request = accepted.manufacturingRequests[0];
+    const quote = accepted.quotes[0];
+    const snapshot = {
+      externalId: 'gid://shopify/DraftOrder/1042',
+      kind: 'SHOPIFY_DRAFT_ORDER' as const,
+      status: 'OPEN',
+      requestId: request.requestId,
+      specRevision: request.specRevision,
+      specHash: request.specHash,
+      provider: request.provider,
+      amountMinor: quote.amountMinor,
+      currency: quote.currency,
+      customerId: 'gid://shopify/Customer/1042',
+      updatedAt: FIXED_TIME,
+    };
+
+    bus.execute(
+      { type: 'synchronize_shopify_draft_order', snapshot },
+      envelope(bus, 'draft-order-in-sync'),
+      shopifyWebhook,
+    );
+    expect(bus.inspect('provider').workspace.externalCommerceRecords[0].syncState).toBe('IN_SYNC');
+    expect(compiledIds(bus, 'provider')).toContain('materialize_for_commerce');
+
+    bus.execute(
+      {
+        type: 'synchronize_shopify_draft_order',
+        snapshot: { ...snapshot, amountMinor: 250_000, updatedAt: '2026-08-29T12:01:00.000Z' },
+      },
+      envelope(bus, 'draft-order-drift'),
+      shopifyWebhook,
+    );
+    const drifted = bus.inspect('provider').workspace;
+    expect(drifted.manufacturingRequests[0].status).toBe('EXTERNAL_DRIFT');
+    expect(drifted.externalCommerceRecords[0].syncState).toBe('EXTERNAL_DRIFT');
+    expect(compiledIds(bus, 'provider')).not.toContain('materialize_for_commerce');
+    expect(bus.receipts().at(-1)?.origin).toBe('shopify_webhook');
+  });
+
+  it('does not let a browser claim Shopify synchronization provenance', () => {
+    const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
+    expect(() =>
+      bus.execute(
+        {
+          type: 'synchronize_shopify_draft_order',
+          snapshot: {
+            externalId: 'gid://shopify/DraftOrder/forged',
+            kind: 'SHOPIFY_DRAFT_ORDER',
+            status: 'OPEN',
+            requestId: 'quote-request:forged',
+            specRevision: 'r7',
+            specHash: hashSpecification(bus.inspect('buyer').workspace),
+            provider: providerBinding(bus.inspect('buyer').workspace),
+            amountMinor: 240_000,
+            currency: 'INR',
+            customerId: 'gid://shopify/Customer/forged',
+            updatedAt: FIXED_TIME,
+          },
+        },
+        envelope(bus, 'forged-webhook'),
+        buyer,
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'ORIGIN_NOT_ALLOWED' }));
   });
 });
 

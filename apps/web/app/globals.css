@@ -3254,12 +3254,19 @@ input {
 }
 
 .attune-hole,
-.attune-slot {
+.attune-slot,
+.attune-cutout {
   cursor: pointer;
   fill: #f4f4ef;
   stroke: #435158;
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
+}
+
+.attune-cutout.is-selected {
+  filter: drop-shadow(0 0 3px rgb(35 87 215 / 35%));
+  stroke: var(--shell-blue);
+  stroke-width: 2.4;
 }
 
 .attune-hole.is-locked {
@@ -3880,6 +3887,32 @@ input {
   font-size: 8px;
   justify-content: space-between;
   padding-top: 8px;
+}
+
+.commerce-contract-state {
+  border: 1px solid var(--shell-line);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.commerce-contract-state > span {
+  color: var(--shell-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.commerce-contract-state > strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.82rem;
+}
+
+.commerce-contract-state > p {
+  color: var(--shell-muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  margin: 6px 0 0;
 }
 
 .commerce-steps {

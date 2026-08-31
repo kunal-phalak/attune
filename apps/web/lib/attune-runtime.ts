@@ -153,6 +153,7 @@ function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole, delegation?: D
       receipts: bundle.receipts,
       capabilityTransitions: bundle.transitions,
       commandRejections: bundle.rejections,
+      externalCommerce: bundle.workspace.externalCommerceRecords,
       externalVerifications: bundle.workspace.commerceLinks,
     },
     latestReceipt: bundle.receipts.at(-1) ?? null,

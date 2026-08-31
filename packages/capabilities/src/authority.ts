@@ -39,12 +39,20 @@ export function deriveCurrentAuthority(workspace: AttuneWorkspace): CapabilityAu
       candidate.specHash === specHash &&
       providerMatches(candidate, workspace),
   );
-  const acceptance = workspace.acceptances.find(
+  const externalDrift = workspace.externalCommerceRecords.some(
     (candidate) =>
-      candidate.revisionId === revisionId &&
+      candidate.specRevision === revisionId &&
       candidate.specHash === specHash &&
-      providerMatches(candidate, workspace),
+      candidate.syncState === 'EXTERNAL_DRIFT',
   );
+  const acceptance = externalDrift
+    ? undefined
+    : workspace.acceptances.find(
+        (candidate) =>
+          candidate.revisionId === revisionId &&
+          candidate.specHash === specHash &&
+          providerMatches(candidate, workspace),
+      );
   const commerce = workspace.commerceLinks.find(
     (candidate) => candidate.revisionId === revisionId && candidate.specHash === specHash,
   );

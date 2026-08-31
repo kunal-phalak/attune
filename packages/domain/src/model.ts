@@ -76,10 +76,19 @@ export interface CircularFeature {
 }
 
 export interface SlotFeature {
-  readonly id: 'slot:connector';
+  readonly id: string;
   readonly center: PointMm;
   readonly width: number;
   readonly height: number;
+  readonly locked: boolean;
+}
+
+export interface RectangularFeature {
+  readonly id: string;
+  readonly center: PointMm;
+  readonly width: number;
+  readonly height: number;
+  readonly cornerRadius: number;
   readonly locked: boolean;
 }
 
@@ -87,10 +96,13 @@ export interface PanelGeometry {
   readonly width: number;
   readonly height: number;
   readonly thickness: number;
-  readonly material: 'acrylic';
+  readonly material: 'acrylic' | 'aluminium';
   readonly mounts: readonly CircularFeature[];
   readonly auxiliaryHoles: readonly CircularFeature[];
   readonly slot: SlotFeature;
+  readonly rectangularCutouts: readonly RectangularFeature[];
+  readonly circularCutouts: readonly CircularFeature[];
+  readonly ventSlots: readonly SlotFeature[];
   readonly constraints: {
     readonly requiredSlotClearance: number;
     readonly equalAuxiliaryHoles: boolean;
@@ -111,6 +123,8 @@ export interface ProviderValidationIssue {
     | 'provider_work_envelope'
     | 'provider_material'
     | 'provider_thickness'
+    | 'provider_hole_minimum'
+    | 'provider_slot_minimum'
     | 'slot_clearance';
   readonly severity: 'hard';
   readonly source: 'provider';
@@ -183,6 +197,45 @@ export interface Acceptance {
   readonly acceptedAt: string;
 }
 
+export type DesignVisibility = 'PRIVATE' | 'DISCOVERABLE';
+
+export type ManufacturingRequestStatus =
+  | 'PROVIDER_REVIEW_REQUESTED'
+  | 'QUOTED'
+  | 'ACCEPTED'
+  | 'COMMERCE_READY'
+  | 'EXTERNAL_DRIFT';
+
+export interface ManufacturingRequest {
+  readonly requestId: string;
+  readonly specRevision: string;
+  readonly specHash: string;
+  readonly provider: ProviderBinding;
+  readonly visibility: DesignVisibility;
+  readonly status: ManufacturingRequestStatus;
+  readonly requestedAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ExternalCommerceSnapshot {
+  readonly externalId: string;
+  readonly kind: 'SHOPIFY_DRAFT_ORDER';
+  readonly status: string;
+  readonly requestId: string;
+  readonly specRevision: string;
+  readonly specHash: string;
+  readonly provider: ProviderBinding;
+  readonly amountMinor: number;
+  readonly currency: 'INR';
+  readonly customerId: string;
+  readonly updatedAt: string;
+}
+
+export interface ExternalCommerceRecord extends ExternalCommerceSnapshot {
+  readonly syncState: 'IN_SYNC' | 'EXTERNAL_DRIFT';
+  readonly synchronizedAt: string;
+}
+
 export interface CommerceVerification {
   readonly adminVerified: true;
   readonly publicationVerified: true;
@@ -194,7 +247,7 @@ export interface CommerceVerification {
   readonly commitmentId: 'AT-1042';
   readonly revisionId: 'r7';
   readonly specHash: string;
-  readonly title: 'Custom Equipment Panel — AT-1042 r7';
+  readonly title: 'Custom Control Faceplate — AT-1042 r7';
   readonly sku: 'AT-1042-R7-LOT4';
   readonly amountMinor: 240_000;
   readonly currency: 'INR';
@@ -211,6 +264,7 @@ export interface CommerceLink {
 }
 
 export interface AttuneWorkspace {
+  readonly scenarioVersion: 2;
   readonly projectId: 'project:attune';
   readonly commitmentId: 'AT-1042';
   readonly workspaceSeq: number;
@@ -223,6 +277,8 @@ export interface AttuneWorkspace {
   readonly frozenRevisions: readonly FrozenRevision[];
   readonly quotes: readonly Quote[];
   readonly acceptances: readonly Acceptance[];
+  readonly manufacturingRequests: readonly ManufacturingRequest[];
+  readonly externalCommerceRecords: readonly ExternalCommerceRecord[];
   readonly commerceLinks: readonly CommerceLink[];
 }
 
@@ -242,6 +298,10 @@ export type AttuneCommand =
   | { readonly type: 'request_quote' }
   | { readonly type: 'freeze_and_quote_revision' }
   | { readonly type: 'accept_revision'; readonly revisionId: string; readonly quoteId: string }
+  | {
+      readonly type: 'synchronize_shopify_draft_order';
+      readonly snapshot: ExternalCommerceSnapshot;
+    }
   | {
       readonly type: 'materialize_for_commerce';
       readonly revisionId: string;

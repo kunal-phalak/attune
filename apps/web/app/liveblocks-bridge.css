@@ -1,0 +1,42 @@
+@layer components {
+  .attune-liveblocks-bridge {
+    --lb-radius: 0.5rem;
+    --lb-spacing: 0.75rem;
+    --lb-accent: var(--color-kumo-brand);
+    --lb-background: var(--color-kumo-base);
+    --lb-foreground: var(--color-kumo-contrast);
+    --lb-destructive: var(--color-attune-conflict);
+    --lb-transition-duration: 100ms;
+    isolation: isolate;
+    min-width: 0;
+  }
+
+  .attune-liveblocks-bridge--surface {
+    overflow: clip;
+    border: 1px solid var(--color-kumo-line);
+    border-radius: 0.5rem;
+    background: var(--color-kumo-base);
+  }
+
+  .attune-liveblocks-portal.lb-root,
+  .lb-root:where(.lb-dropdown, .lb-tooltip, .lb-composer-suggestions, .lb-floating-thread) {
+    --lb-accent: var(--color-kumo-brand);
+    --lb-background: var(--color-kumo-base);
+    --lb-foreground: var(--color-kumo-contrast);
+    z-index: 80;
+  }
+
+  body > div:has(> a[href='https://lblcks.io/badge']) {
+    top: 72px !important;
+    right: 8px !important;
+    bottom: auto !important;
+    z-index: 45 !important;
+  }
+
+  @media (max-width: 767px) {
+    body > div:has(> a[href='https://lblcks.io/badge']) {
+      top: 224px !important;
+      right: 8px !important;
+    }
+  }
+}

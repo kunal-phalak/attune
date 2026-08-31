@@ -4,9 +4,9 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { useThreads, useUpdateMyPresence } from '@liveblocks/react';
 import { Cursors } from '@liveblocks/react-ui';
-import { ChatCircle, CursorClick } from '@phosphor-icons/react';
 
 import type { AttuneApiView } from '../lib/attune-view';
+import { AppIcons } from './ui/app-icons';
 
 type PresencePatch = {
   readonly cursor?: { readonly x: number; readonly y: number } | null;
@@ -86,7 +86,7 @@ function GeometryDrawing({
 
   return (
     <section
-      className="attune-canvas"
+      className="attune-canvas absolute inset-0 z-0"
       aria-label="AT-1042 temporary semantic geometry canvas"
       onPointerMove={(event) => {
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -96,14 +96,19 @@ function GeometryDrawing({
       }}
       onPointerLeave={() => updatePresence?.({ cursor: null })}
     >
-      <div className="canvas-status-line">
-        <span className={conflict ? 'is-conflict' : 'is-valid'}>
-          <i /> {conflict ? 'Manufacturing conflict' : 'Buildable specification'}
+      <div className="pointer-events-none absolute top-[132px] right-3 left-3 z-20 flex items-center justify-between gap-3 text-xs text-kumo-subtle transition-[left,right] duration-100 lg:right-[344px] lg:left-[272px] lg:group-data-[left-collapsed=true]/workspace:left-3 lg:group-data-[right-collapsed=true]/workspace:right-3">
+        <span
+          className={`inline-flex items-center gap-2 rounded-full border bg-kumo-base/95 px-3 py-1.5 font-semibold shadow-sm backdrop-blur ${conflict ? 'border-attune-conflict/30 text-attune-conflict' : 'border-attune-valid/30 text-attune-valid'}`}
+        >
+          <i className="size-2 rounded-full bg-current" />{' '}
+          {conflict ? 'Manufacturing conflict' : 'Buildable specification'}
         </span>
-        <span>Top view · millimetres</span>
+        <span className="rounded-full border border-kumo-line bg-kumo-base/95 px-3 py-1.5 shadow-sm backdrop-blur">
+          Top view · millimetres
+        </span>
       </div>
-      <output className="canvas-usage-tip">
-        <CursorClick size={16} weight="bold" />
+      <output className="pointer-events-none absolute top-[174px] left-1/2 z-20 hidden max-w-xl -translate-x-1/2 items-center gap-2 rounded-lg border border-kumo-line bg-kumo-base/95 px-3 py-2 text-xs text-kumo-subtle shadow-sm backdrop-blur md:flex">
+        <AppIcons.Select size={16} weight="bold" />
         <span>
           {commentsMode
             ? 'Comments mode: select a pin to reveal its referenced geometry.'
@@ -112,16 +117,18 @@ function GeometryDrawing({
               : 'Select a feature to inspect its manufacturing properties and constraints.'}
         </span>
       </output>
-      <div className="canvas-tool-rail" aria-label="Workspace tools">
+      <div
+        className="absolute top-1/2 left-3 z-30 flex -translate-y-1/2 flex-col gap-1 rounded-xl border border-kumo-line bg-kumo-base/95 p-1.5 shadow-md backdrop-blur transition-[left] duration-100 lg:left-[272px] lg:group-data-[left-collapsed=true]/workspace:left-3"
+        aria-label="Workspace tools"
+      >
         <Tooltip
           content="Select features"
           render={
             <Button
               type="button"
-              variant="ghost"
+              variant="secondary"
               size="sm"
               shape="square"
-              className="is-active"
               icon={<DraftingIcon name="select" />}
               aria-label="Select features"
             />
@@ -132,17 +139,16 @@ function GeometryDrawing({
           render={
             <Button
               type="button"
-              variant="ghost"
+              variant={selectedEntity === 'slot:connector' ? 'secondary' : 'ghost'}
               size="sm"
               shape="square"
-              className={selectedEntity === 'slot:connector' ? 'is-selected' : undefined}
               icon={<DraftingIcon name="slot" />}
               aria-label="Select connector slot"
               onClick={() => select('slot:connector')}
             />
           }
         />
-        <span />
+        <span className="mx-1 my-0.5 h-px bg-kumo-line" />
         <Tooltip
           content="Inspect constraints"
           render={
@@ -172,7 +178,11 @@ function GeometryDrawing({
         />
       </div>
       <div className="canvas-viewport">
-        {showCursors ? <Cursors /> : null}
+        {showCursors ? (
+          <div className="attune-liveblocks-bridge pointer-events-none absolute inset-0 z-20">
+            <Cursors />
+          </div>
+        ) : null}
         {commentPins}
         <svg viewBox="0 0 720 440" aria-labelledby="attune-geometry-title attune-geometry-desc">
           <title id="attune-geometry-title">AT-1042 custom control-enclosure faceplate</title>
@@ -311,18 +321,22 @@ function GeometryDrawing({
           </g>
         </svg>
         <div
-          className={
-            conflict ? 'geometry-local-callout is-conflict' : 'geometry-local-callout is-valid'
-          }
+          className={`absolute right-3 bottom-16 z-20 w-[min(320px,calc(100%-24px))] rounded-xl border bg-kumo-base/95 p-4 shadow-lg backdrop-blur transition-[right] duration-100 lg:right-[344px] lg:group-data-[right-collapsed=true]/workspace:right-3 ${conflict ? 'border-attune-conflict/35' : 'border-attune-valid/35'}`}
         >
-          <span>{conflict ? 'Clearance conflict' : 'Clearance verified'}</span>
-          <strong>
+          <span
+            className={`text-[11px] font-semibold uppercase tracking-wider ${conflict ? 'text-attune-conflict' : 'text-attune-valid'}`}
+          >
+            {conflict ? 'Clearance conflict' : 'Clearance verified'}
+          </span>
+          <strong className="mt-1 block text-lg font-semibold">
             {view.validation.evidence.slotRightClearanceMm} mm <i>/</i>{' '}
             {view.validation.evidence.requiredSlotClearanceMm} mm required
           </strong>
-          <small>4 / 4 buyer mounts protected</small>
+          <small className="mt-1 block text-xs text-kumo-subtle">
+            4 / 4 buyer mounts protected
+          </small>
           {conflict ? (
-            <div>
+            <div className="mt-4 flex flex-wrap gap-2">
               <Button type="button" variant="primary" size="sm" onClick={onCompare}>
                 Compare valid changes
               </Button>
@@ -331,7 +345,7 @@ function GeometryDrawing({
               </Button>
             </div>
           ) : (
-            <p>+ Request quote available</p>
+            <p className="mt-3 text-sm font-semibold text-attune-valid">Request quote available</p>
           )}
         </div>
         <div className="canvas-axis" aria-hidden="true">
@@ -368,7 +382,7 @@ function SpatialCommentPins({
               left: `${Math.max(3, Math.min(97, (thread.metadata.x / 720) * 100))}%`,
               top: `${Math.max(5, Math.min(95, (thread.metadata.y / 440) * 100))}%`,
             }}
-            icon={<ChatCircle size={16} weight="fill" />}
+            icon={<AppIcons.Comments size={16} weight="fill" />}
             aria-label={`Comment ${index + 1} on ${thread.metadata.entityId}`}
             title={`${thread.metadata.entityId} · ${thread.metadata.revisionId}`}
             key={thread.id}

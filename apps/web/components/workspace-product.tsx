@@ -5,14 +5,6 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Tabs } from '@cloudflare/kumo/components/tabs';
 import { LiveblocksProvider, RoomProvider, useRoom } from '@liveblocks/react';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
-import {
-  ArrowCounterClockwise,
-  ArrowLeft,
-  Robot,
-  ShareNetwork,
-  UserCircle,
-  X,
-} from '@phosphor-icons/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -28,6 +20,7 @@ import {
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
 import { attuneToastManager } from './attune-ui-provider';
 import { AttuneWebMcp, type AttuneWebMcpStatus } from './attune-webmcp';
+import { AppIcons } from './ui/app-icons';
 import { WorkspaceCanvas } from './workspace-canvas';
 import {
   BottomDock,
@@ -184,23 +177,15 @@ function workflowAction(view: AttuneApiView): WorkflowAction | null {
   return null;
 }
 
-function ProjectMark() {
-  return (
-    <svg viewBox="0 0 28 28" aria-hidden="true">
-      <path d="M5 6h18v16H5zM9 10h10v8H9z" />
-      <circle cx="7" cy="8" r="1.5" />
-      <circle cx="21" cy="20" r="1.5" />
-    </svg>
-  );
-}
-
 function ShareDialog({ onClose }: { readonly onClose: () => void }) {
   return (
     <Dialog.Root defaultOpen onOpenChange={(open) => !open && onClose()}>
-      <Dialog className="workspace-modal" size="lg">
-        <header>
+      <Dialog className="z-[90]" size="lg">
+        <header className="flex items-start justify-between gap-4 border-b border-kumo-line p-5">
           <div>
-            <span>Workspace access</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">
+              Workspace access
+            </span>
             <Dialog.Title id="share-dialog-title">Share AT-1042</Dialog.Title>
           </div>
           <Dialog.Close
@@ -209,39 +194,43 @@ function ShareDialog({ onClose }: { readonly onClose: () => void }) {
                 variant="ghost"
                 size="sm"
                 shape="square"
-                icon={<X size={20} weight="bold" />}
+                icon={<AppIcons.Close size={20} weight="bold" />}
                 aria-label="Close share dialog"
               />
             }
           />
         </header>
-        <div className="share-dialog-body">
+        <div className="space-y-4 p-5">
           <Dialog.Description>
             Membership and business roles are verified by the server. Sharing this browser URL does
             not grant quote, acceptance, or commerce authority.
           </Dialog.Description>
-          <div className="share-member-row">
-            <span className="is-human">
-              <UserCircle size={20} weight="fill" />
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-kumo-line p-3">
+            <span className="grid size-9 place-items-center rounded-full bg-kumo-brand/10 text-kumo-brand">
+              <AppIcons.Person size={20} weight="fill" />
             </span>
-            <div>
-              <strong>Challenge Judge</strong>
-              <small>Human member · Buyer and provider perspectives</small>
+            <div className="min-w-0">
+              <strong className="block text-sm">Challenge Judge</strong>
+              <small className="block text-xs text-kumo-subtle">
+                Human member · Buyer and provider perspectives
+              </small>
             </div>
-            <b>Member</b>
+            <b className="text-xs">Member</b>
           </div>
-          <div className="share-member-row">
-            <span className="is-agent">
-              <Robot size={20} weight="fill" />
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-kumo-line p-3">
+            <span className="grid size-9 place-items-center rounded-full bg-attune-agent/10 text-attune-agent">
+              <AppIcons.Agent size={20} weight="fill" />
             </span>
-            <div>
-              <strong>Buyer or provider agent</strong>
-              <small>Role-scoped server delegation · Native WebMCP</small>
+            <div className="min-w-0">
+              <strong className="block text-sm">Buyer or provider agent</strong>
+              <small className="block text-xs text-kumo-subtle">
+                Role-scoped server delegation · Native WebMCP
+              </small>
             </div>
-            <b>Agent</b>
+            <b className="text-xs">Agent</b>
           </div>
         </div>
-        <footer>
+        <footer className="flex justify-end border-t border-kumo-line p-4">
           <Dialog.Close render={<Button variant="primary">Done</Button>} />
         </footer>
       </Dialog>
@@ -260,10 +249,12 @@ function ResetDialog({
 }) {
   return (
     <Dialog.Root role="alertdialog" defaultOpen onOpenChange={(open) => !open && onClose()}>
-      <Dialog className="workspace-modal reset-dialog" size="lg">
-        <header>
+      <Dialog className="z-[90]" size="lg">
+        <header className="flex items-start justify-between gap-4 border-b border-kumo-line p-5">
           <div>
-            <span>Judge scenario</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">
+              Judge scenario
+            </span>
             <Dialog.Title id="reset-dialog-title">Reset AT-1042?</Dialog.Title>
           </div>
           <Dialog.Close
@@ -272,23 +263,25 @@ function ResetDialog({
                 variant="ghost"
                 size="sm"
                 shape="square"
-                icon={<X size={20} weight="bold" />}
+                icon={<AppIcons.Close size={20} weight="bold" />}
                 aria-label="Close reset dialog"
               />
             }
           />
         </header>
-        <div className="share-dialog-body">
+        <div className="space-y-4 p-5">
           <Dialog.Description>
             Restore the deterministic r6 clearance conflict and remove scenario receipts, quotes,
             acceptances, and commerce records. The project and workspace remain in Neon.
           </Dialog.Description>
-          <div className="reset-target">
-            <strong>Initial condition</strong>
-            <span>8.1 mm observed · 12 mm required · 4/4 mounts locked</span>
+          <div className="rounded-lg border border-attune-conflict/25 bg-attune-conflict/5 p-3">
+            <strong className="block text-sm">Initial condition</strong>
+            <span className="mt-1 block text-xs text-kumo-subtle">
+              8.1 mm observed · 12 mm required · 4/4 mounts locked
+            </span>
           </div>
         </div>
-        <footer>
+        <footer className="flex justify-end gap-2 border-t border-kumo-line p-4">
           <Dialog.Close render={<Button variant="secondary">Cancel</Button>} />
           <Button variant="destructive" disabled={applying} onClick={onReset}>
             {applying ? 'Resetting…' : 'Reset deterministic scenario'}
@@ -321,37 +314,54 @@ function WorkspaceHeader({
     {
       value: 'buyer',
       label: (
-        <span className="perspective-tab-label">
-          <UserCircle size={16} weight="bold" /> Judge Buyer
+        <span className="inline-flex items-center gap-1.5">
+          <AppIcons.Person size={16} weight="bold" /> Judge Buyer
         </span>
       ),
     },
     {
       value: 'provider',
       label: (
-        <span className="perspective-tab-label">
-          <UserCircle size={16} weight="bold" /> Judge Provider
+        <span className="inline-flex items-center gap-1.5">
+          <AppIcons.Person size={16} weight="bold" /> Judge Provider
         </span>
       ),
     },
   ];
   return (
-    <header className={`editor-topbar is-${view.perspective}`}>
-      <div className="editor-nav-group">
-        <Link href="/dashboard" className="back-to-library" aria-label="Back to dashboard">
-          <ArrowLeft size={20} weight="bold" />
+    <header
+      className={`absolute top-2 right-2 left-2 z-50 grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 shadow-md backdrop-blur md:grid-cols-[minmax(260px,1fr)_auto_minmax(260px,1fr)] md:px-4 ${view.perspective === 'provider' ? 'border-amber-300 bg-amber-50/95' : 'border-kumo-line bg-kumo-base/95'}`}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <Link
+          href="/dashboard"
+          className="grid size-9 shrink-0 place-items-center rounded-lg text-kumo-subtle no-underline hover:bg-kumo-fill-hover hover:text-kumo-contrast"
+          aria-label="Back to dashboard"
+        >
+          <AppIcons.Back size={20} weight="bold" />
         </Link>
-        <Link href="/" className="editor-brand" aria-label="Attune home">
-          <ProjectMark />
+        <Link
+          href="/"
+          className="grid size-9 shrink-0 place-items-center rounded-lg bg-kumo-contrast text-kumo-base no-underline"
+          aria-label="Attune home"
+        >
+          <AppIcons.Brand size={20} weight="bold" />
         </Link>
-        <div className="editor-document-identity">
-          <span>{view.product.projectName}</span>
-          <strong>{view.workspace.commitmentId} · Control-enclosure faceplate</strong>
+        <div className="min-w-0">
+          <span className="block truncate text-[11px] text-kumo-subtle">
+            {view.product.projectName}
+          </span>
+          <strong className="block truncate text-sm font-semibold">
+            {view.workspace.commitmentId} · Control-enclosure faceplate
+          </strong>
         </div>
       </div>
-      <div className="editor-state-group">
+      <div className="hidden items-center justify-center gap-2 md:flex">
         {judgeMode ? (
-          <div className="perspective-switcher" aria-label="Judge workspace perspective">
+          <div
+            className="flex flex-col items-center gap-0.5"
+            aria-label="Judge workspace perspective"
+          >
             <Tabs
               size="sm"
               value={view.perspective}
@@ -362,49 +372,49 @@ function WorkspaceHeader({
                 )
               }
             />
-            <small>
+            <small className="text-[10px] text-kumo-subtle">
               {view.perspective === 'buyer'
                 ? 'Buyer authority · private design'
                 : 'Provider authority · Shopify mirror enabled'}
             </small>
           </div>
         ) : (
-          <span className={`perspective-badge is-${view.perspective}`}>
+          <span className="rounded-full border border-kumo-line bg-kumo-recessed px-2.5 py-1 text-xs font-semibold capitalize">
             {view.perspective} workspace
           </span>
         )}
-        <span className="revision-pill">Draft r{view.workspace.draftVersion}</span>
+        <span className="rounded-full border border-kumo-line bg-kumo-base px-2.5 py-1 text-xs font-semibold">
+          Draft r{view.workspace.draftVersion}
+        </span>
         <span
-          className={
-            view.validation.valid ? 'buildability-pill is-valid' : 'buildability-pill is-conflict'
-          }
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${view.validation.valid ? 'border-attune-valid/30 bg-attune-valid/10 text-attune-valid' : 'border-attune-conflict/30 bg-attune-conflict/10 text-attune-conflict'}`}
         >
-          <i /> {view.validation.valid ? 'Buildable' : '1 hard conflict'}
+          <i className="size-1.5 rounded-full bg-current" />{' '}
+          {view.validation.valid ? 'Buildable' : '1 hard conflict'}
         </span>
       </div>
-      <div className="editor-actions-group">
+      <div className="flex min-w-0 items-center justify-end gap-1.5">
         {collaboration ? (
           <CollaborationHeader />
         ) : (
-          <span className="sync-state">
-            <i /> Local view
+          <span className="hidden items-center gap-1.5 text-xs text-kumo-subtle lg:inline-flex">
+            <i className="size-1.5 rounded-full bg-kumo-contrast/30" /> Local view
           </span>
         )}
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          icon={<Robot size={20} weight="fill" />}
-          className={
-            webMcpStatus.registration === 'registered'
-              ? 'agent-state-button is-connected'
-              : 'agent-state-button'
-          }
+          icon={<AppIcons.Agent size={20} weight="fill" />}
+          className="hidden lg:inline-flex"
           onClick={onAgent}
         >
-          <i />
           <span>Agent</span>
-          <strong>
+          <strong
+            className={
+              webMcpStatus.registration === 'registered' ? 'text-attune-valid' : 'text-kumo-subtle'
+            }
+          >
             {webMcpStatus.registration === 'registered' ? 'Connected' : webMcpStatus.registration}
           </strong>
         </Button>
@@ -412,8 +422,8 @@ function WorkspaceHeader({
           type="button"
           variant="ghost"
           size="sm"
-          className="topbar-secondary"
-          icon={<ArrowCounterClockwise size={16} weight="bold" />}
+          className="hidden xl:inline-flex"
+          icon={<AppIcons.Reset size={16} weight="bold" />}
           onClick={onReset}
         >
           Reset scenario
@@ -422,8 +432,7 @@ function WorkspaceHeader({
           type="button"
           variant="primary"
           size="sm"
-          className="share-button"
-          icon={<ShareNetwork size={16} weight="bold" />}
+          icon={<AppIcons.Share size={16} weight="bold" />}
           onClick={onShare}
         >
           Share
@@ -536,7 +545,7 @@ function WorkspaceShell({
 
   if (!view) {
     return (
-      <main className="workspace-loading">
+      <main className="grid min-h-dvh place-items-center bg-kumo-canvas text-sm text-kumo-subtle">
         {state === 'failed' ? 'Workspace unavailable' : 'Loading authoritative workspace…'}
       </main>
     );
@@ -559,7 +568,27 @@ function WorkspaceShell({
   const askAgent = () => setDockTab('agent');
 
   return (
-    <main className="attune-workspace-shell" data-perspective={view.perspective}>
+    <main
+      className="group/workspace relative h-dvh min-h-[560px] min-w-0 overflow-hidden bg-kumo-canvas"
+      data-left-collapsed={leftCollapsed}
+      data-perspective={view.perspective}
+      data-right-collapsed={rightCollapsed}
+    >
+      <WorkspaceCanvas
+        view={view}
+        selectedEntity={selectedEntity}
+        onSelect={(entityId) =>
+          selectEntity(entityId, entityId === 'slot:connector' ? 'constraints' : 'design')
+        }
+        onCompare={compare}
+        onAskAgent={askAgent}
+        collaboration={collaboration}
+        commentsMode={dockTab === 'comments'}
+        revisionContext={{
+          revisionId: `draft:r${view.workspace.draftVersion}`,
+          specHash: view.specHash,
+        }}
+      />
       <AttuneWebMcp
         workspaceId={workspaceId}
         perspective={perspective}
@@ -575,83 +604,68 @@ function WorkspaceShell({
         onReset={() => setResetOpen(true)}
       />
       <LifecycleStrip view={view} />
-      <section className="mobile-editing-notice" aria-label="Mobile editing notice">
-        <strong>Review mode on this screen</strong>
-        <span>
+      <section
+        className="absolute top-[132px] right-3 left-3 z-30 rounded-lg border border-kumo-line bg-kumo-base/95 px-4 py-2 text-xs shadow-sm backdrop-blur md:hidden"
+        aria-label="Mobile editing notice"
+      >
+        <strong className="block">Review mode on this screen</strong>
+        <span className="mt-0.5 block text-kumo-subtle">
           Comments, history, capability and order status remain available. Use a larger screen for
           complex geometry editing.
         </span>
       </section>
-      <section
-        className={[
-          'workspace-editor-grid',
-          leftCollapsed ? 'is-left-collapsed' : '',
-          rightCollapsed ? 'is-right-collapsed' : '',
-          dockTab ? 'has-open-dock' : '',
-        ].join(' ')}
-      >
-        {leftCollapsed ? (
-          <button
-            type="button"
-            className="collapsed-rail-trigger is-left"
-            onClick={() => setLeftCollapsed(false)}
-          >
-            Items <span>›</span>
-          </button>
-        ) : (
-          <ItemsPanel
-            view={view}
-            selectedEntity={selectedEntity}
-            onSelect={selectEntity}
-            onCollapse={() => setLeftCollapsed(true)}
-          />
-        )}
-        <WorkspaceCanvas
+      {leftCollapsed ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          icon={<AppIcons.CollapseRight size={16} weight="bold" />}
+          className="absolute top-[132px] left-3 z-40 hidden shadow-sm lg:inline-flex"
+          onClick={() => setLeftCollapsed(false)}
+        >
+          Items
+        </Button>
+      ) : (
+        <ItemsPanel
           view={view}
           selectedEntity={selectedEntity}
-          onSelect={(entityId) =>
-            selectEntity(entityId, entityId === 'slot:connector' ? 'constraints' : 'design')
-          }
+          onSelect={selectEntity}
+          onCollapse={() => setLeftCollapsed(true)}
+        />
+      )}
+      {rightCollapsed ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          icon={<AppIcons.CollapseLeft size={16} weight="bold" />}
+          className="absolute top-[132px] right-3 z-40 hidden shadow-sm lg:inline-flex"
+          onClick={() => setRightCollapsed(false)}
+        >
+          Inspector
+        </Button>
+      ) : (
+        <InspectorPanel
+          view={view}
+          selectedEntity={selectedEntity}
+          tab={inspectorTab}
+          compareOpen={compareOpen}
+          workflowAction={nextAction}
+          disabled={state === 'applying'}
+          onTab={setInspectorTab}
+          onCollapse={() => setRightCollapsed(true)}
           onCompare={compare}
           onAskAgent={askAgent}
-          collaboration={collaboration}
-          commentsMode={dockTab === 'comments'}
-          revisionContext={{
-            revisionId: `draft:r${view.workspace.draftVersion}`,
-            specHash: view.specHash,
-          }}
+          onRepair={(repairId) =>
+            void execute(
+              '/api/attune/human',
+              { type: 'apply_deterministic_repair', repairId },
+              'buyer',
+            )
+          }
+          onWorkflow={executeWorkflow}
         />
-        {rightCollapsed ? (
-          <button
-            type="button"
-            className="collapsed-rail-trigger is-right"
-            onClick={() => setRightCollapsed(false)}
-          >
-            ‹ <span>Inspector</span>
-          </button>
-        ) : (
-          <InspectorPanel
-            view={view}
-            selectedEntity={selectedEntity}
-            tab={inspectorTab}
-            compareOpen={compareOpen}
-            workflowAction={nextAction}
-            disabled={state === 'applying'}
-            onTab={setInspectorTab}
-            onCollapse={() => setRightCollapsed(true)}
-            onCompare={compare}
-            onAskAgent={askAgent}
-            onRepair={(repairId) =>
-              void execute(
-                '/api/attune/human',
-                { type: 'apply_deterministic_repair', repairId },
-                'buyer',
-              )
-            }
-            onWorkflow={executeWorkflow}
-          />
-        )}
-      </section>
+      )}
       <BottomDock
         view={view}
         workspaceId={workspaceId}

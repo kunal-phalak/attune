@@ -13,23 +13,14 @@ import {
 } from '@liveblocks/react';
 import { AvatarStack, Composer, Thread } from '@liveblocks/react-ui';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
-import {
-  ArrowUUpLeft,
-  CaretDown,
-  ChartLineUp,
-  ChatCircle,
-  ClockCounterClockwise,
-  Lightning,
-  ListChecks,
-  LockSimple,
-  Robot,
-  ShoppingBagOpen,
-} from '@phosphor-icons/react';
+import { LockSimple } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 import * as Y from 'yjs';
 
 import type { AttuneApiView, CapabilityView } from '../lib/attune-view';
 import type { AttuneWebMcpStatus } from './attune-webmcp';
+import { AppIcons } from './ui/app-icons';
+import { AppScrollArea } from './ui/app-scroll-area';
 
 export type InspectorTab = 'design' | 'constraints' | 'capability' | 'commerce';
 export type DockTab = 'activity' | 'agent' | 'comments' | 'history' | 'commerce' | 'outcome';
@@ -85,7 +76,18 @@ function TreeIcon({ kind }: { readonly kind: 'panel' | 'hole' | 'slot' | 'constr
 }
 
 function LockMark() {
-  return <LockSimple className="tree-lock" size={16} weight="fill" aria-label="Buyer locked" />;
+  return (
+    <LockSimple
+      className="ml-auto shrink-0 text-kumo-brand"
+      size={16}
+      weight="fill"
+      aria-label="Buyer locked"
+    />
+  );
+}
+
+function treeItemClass(selected: boolean) {
+  return `grid w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors duration-100 hover:bg-kumo-fill-hover focus-visible:outline-2 focus-visible:outline-kumo-focus [&>svg]:size-4 [&>svg]:fill-none [&>svg]:stroke-current [&>svg]:stroke-[1.4] [&>span>strong]:block [&>span>strong]:truncate [&>span>strong]:text-xs [&>span>small]:mt-0.5 [&>span>small]:block [&>span>small]:truncate [&>span>small]:text-[11px] [&>span>small]:text-kumo-subtle ${selected ? 'bg-kumo-fill text-kumo-contrast' : 'text-kumo-subtle'}`;
 }
 
 export function ItemsPanel({
@@ -101,164 +103,193 @@ export function ItemsPanel({
 }) {
   const geometry = view.workspace.geometry;
   return (
-    <Surface render={<aside />} className="workspace-left-panel">
-      <header className="rail-heading">
-        <div>
-          <span>Items</span>
-          <strong>Executable specification</strong>
+    <Surface
+      render={<aside />}
+      className="absolute top-[124px] bottom-14 left-3 z-40 hidden w-[248px] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base/95 shadow-md backdrop-blur lg:flex"
+    >
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3">
+        <div className="min-w-0">
+          <span className="block text-[11px] font-semibold uppercase tracking-wider text-kumo-subtle">
+            Items
+          </span>
+          <strong className="block truncate text-xs font-semibold">Executable specification</strong>
         </div>
-        <button type="button" onClick={onCollapse} aria-label="Collapse items panel">
-          ‹
-        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          shape="square"
+          icon={<AppIcons.CollapseLeft size={16} weight="bold" />}
+          onClick={onCollapse}
+          aria-label="Collapse items panel"
+        />
       </header>
-      <div className="spec-summary-line">
+      <div className="flex shrink-0 items-center justify-between border-b border-kumo-line px-3 py-2 text-[11px] text-kumo-subtle">
         <span>AT-1042</span>
         <span>r{view.workspace.draftVersion} draft</span>
       </div>
-      <div className="items-tree" role="tree" aria-label="Specification items">
-        <button
-          type="button"
-          role="treeitem"
-          aria-selected={selectedEntity === 'panel'}
-          className={selectedEntity === 'panel' ? 'is-selected' : undefined}
-          onClick={() => onSelect('panel', 'design')}
-        >
-          <TreeIcon kind="panel" />
-          <span>
-            <strong>Panel body</strong>
-            <small>
-              {geometry.width} × {geometry.height} × {geometry.thickness} mm
-            </small>
-          </span>
-        </button>
-        <div className="tree-group">
-          <span>Protected mounts</span>
-          {geometry.mounts.map((mount, index) => (
+      <AppScrollArea
+        className="min-h-0 flex-1"
+        contentClassName="space-y-1 p-2"
+        ariaLabel="Specification items"
+      >
+        <div role="tree" aria-label="Specification items">
+          <button
+            type="button"
+            role="treeitem"
+            aria-selected={selectedEntity === 'panel'}
+            className={treeItemClass(selectedEntity === 'panel')}
+            onClick={() => onSelect('panel', 'design')}
+          >
+            <TreeIcon kind="panel" />
+            <span>
+              <strong>Panel body</strong>
+              <small>
+                {geometry.width} × {geometry.height} × {geometry.thickness} mm
+              </small>
+            </span>
+          </button>
+          <div className="mt-3 space-y-1 border-t border-kumo-line pt-2">
+            <span className="px-2 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+              Protected mounts
+            </span>
+            {geometry.mounts.map((mount, index) => (
+              <button
+                type="button"
+                role="treeitem"
+                aria-selected={selectedEntity === mount.id}
+                className={treeItemClass(selectedEntity === mount.id)}
+                key={mount.id}
+                onClick={() => onSelect(mount.id, 'design')}
+              >
+                <TreeIcon kind="hole" />
+                <span>
+                  <strong>Mount {index + 1}</strong>
+                  <small>Ø{mount.diameter} mm · buyer requirement</small>
+                </span>
+                <LockMark />
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 space-y-1 border-t border-kumo-line pt-2">
+            <span className="px-2 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+              Features
+            </span>
             <button
               type="button"
               role="treeitem"
-              aria-selected={selectedEntity === mount.id}
-              className={selectedEntity === mount.id ? 'is-selected' : undefined}
-              key={mount.id}
-              onClick={() => onSelect(mount.id, 'design')}
+              aria-selected={selectedEntity === 'cutout:display'}
+              className={treeItemClass(selectedEntity === 'cutout:display')}
+              onClick={() => onSelect('cutout:display', 'design')}
+            >
+              <TreeIcon kind="panel" />
+              <span>
+                <strong>Display / controller</strong>
+                <small>172 × 86 mm · radiused cutout</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selectedEntity === 'cutout:fan'}
+              className={treeItemClass(selectedEntity === 'cutout:fan')}
+              onClick={() => onSelect('cutout:fan', 'design')}
             >
               <TreeIcon kind="hole" />
               <span>
-                <strong>Mount {index + 1}</strong>
-                <small>Ø{mount.diameter} mm · buyer requirement</small>
+                <strong>Cooling fan opening</strong>
+                <small>Ø96 mm · through cut</small>
               </span>
-              <LockMark />
             </button>
-          ))}
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selectedEntity.startsWith('hole:gland-')}
+              className={treeItemClass(selectedEntity.startsWith('hole:gland-'))}
+              onClick={() => onSelect('hole:gland-center', 'design')}
+            >
+              <TreeIcon kind="hole" />
+              <span>
+                <strong>Cable-gland holes</strong>
+                <small>3 × Ø22 mm · equal</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selectedEntity.startsWith('slot:vent-')}
+              className={treeItemClass(selectedEntity.startsWith('slot:vent-'))}
+              onClick={() => onSelect('slot:vent-3', 'design')}
+            >
+              <TreeIcon kind="slot" />
+              <span>
+                <strong>Ventilation array</strong>
+                <small>6 slots · 82 × 6 mm</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selectedEntity === 'cutout:secondary-control'}
+              className={treeItemClass(selectedEntity === 'cutout:secondary-control')}
+              onClick={() => onSelect('cutout:secondary-control', 'design')}
+            >
+              <TreeIcon kind="panel" />
+              <span>
+                <strong>Secondary control</strong>
+                <small>68 × 44 mm · radiused cutout</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selectedEntity === 'slot:connector'}
+              className={treeItemClass(selectedEntity === 'slot:connector')}
+              onClick={() => onSelect('slot:connector', 'constraints')}
+            >
+              <TreeIcon kind="slot" />
+              <span>
+                <strong>Connector slot</strong>
+                <small>
+                  {geometry.slot.width} × {geometry.slot.height} mm · editable
+                </small>
+              </span>
+              {!view.validation.valid ? (
+                <i className="grid size-5 place-items-center rounded-full bg-attune-conflict/10 text-[11px] font-bold not-italic text-attune-conflict">
+                  !
+                </i>
+              ) : null}
+            </button>
+          </div>
+          <div className="mt-3 space-y-1 border-t border-kumo-line pt-2">
+            <span className="px-2 text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+              Constraints
+            </span>
+            <button
+              type="button"
+              role="treeitem"
+              aria-selected={selectedEntity === 'constraint:slot-clearance'}
+              className={treeItemClass(selectedEntity === 'constraint:slot-clearance')}
+              onClick={() => onSelect('constraint:slot-clearance', 'constraints')}
+            >
+              <TreeIcon kind="constraint" />
+              <span>
+                <strong>Slot clearance</strong>
+                <small>
+                  {view.validation.evidence.slotRightClearanceMm} /{' '}
+                  {view.validation.evidence.requiredSlotClearanceMm} mm
+                </small>
+              </span>
+              <i
+                className={`grid size-5 place-items-center rounded-full text-[11px] font-bold not-italic ${view.validation.valid ? 'bg-attune-valid/10 text-attune-valid' : 'bg-attune-conflict/10 text-attune-conflict'}`}
+              >
+                {view.validation.valid ? <AppIcons.Check size={12} weight="bold" /> : '!'}
+              </i>
+            </button>
+          </div>
         </div>
-        <div className="tree-group">
-          <span>Features</span>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity === 'cutout:display'}
-            className={selectedEntity === 'cutout:display' ? 'is-selected' : undefined}
-            onClick={() => onSelect('cutout:display', 'design')}
-          >
-            <TreeIcon kind="panel" />
-            <span>
-              <strong>Display / controller</strong>
-              <small>172 × 86 mm · radiused cutout</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity === 'cutout:fan'}
-            className={selectedEntity === 'cutout:fan' ? 'is-selected' : undefined}
-            onClick={() => onSelect('cutout:fan', 'design')}
-          >
-            <TreeIcon kind="hole" />
-            <span>
-              <strong>Cooling fan opening</strong>
-              <small>Ø96 mm · through cut</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity.startsWith('hole:gland-')}
-            className={selectedEntity.startsWith('hole:gland-') ? 'is-selected' : undefined}
-            onClick={() => onSelect('hole:gland-center', 'design')}
-          >
-            <TreeIcon kind="hole" />
-            <span>
-              <strong>Cable-gland holes</strong>
-              <small>3 × Ø22 mm · equal</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity.startsWith('slot:vent-')}
-            className={selectedEntity.startsWith('slot:vent-') ? 'is-selected' : undefined}
-            onClick={() => onSelect('slot:vent-3', 'design')}
-          >
-            <TreeIcon kind="slot" />
-            <span>
-              <strong>Ventilation array</strong>
-              <small>6 slots · 82 × 6 mm</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity === 'cutout:secondary-control'}
-            className={selectedEntity === 'cutout:secondary-control' ? 'is-selected' : undefined}
-            onClick={() => onSelect('cutout:secondary-control', 'design')}
-          >
-            <TreeIcon kind="panel" />
-            <span>
-              <strong>Secondary control</strong>
-              <small>68 × 44 mm · radiused cutout</small>
-            </span>
-          </button>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity === 'slot:connector'}
-            className={selectedEntity === 'slot:connector' ? 'is-selected' : undefined}
-            onClick={() => onSelect('slot:connector', 'constraints')}
-          >
-            <TreeIcon kind="slot" />
-            <span>
-              <strong>Connector slot</strong>
-              <small>
-                {geometry.slot.width} × {geometry.slot.height} mm · editable
-              </small>
-            </span>
-            {!view.validation.valid ? <i className="tree-conflict-mark">!</i> : null}
-          </button>
-        </div>
-        <div className="tree-group">
-          <span>Constraints</span>
-          <button
-            type="button"
-            role="treeitem"
-            aria-selected={selectedEntity === 'constraint:slot-clearance'}
-            className={selectedEntity === 'constraint:slot-clearance' ? 'is-selected' : undefined}
-            onClick={() => onSelect('constraint:slot-clearance', 'constraints')}
-          >
-            <TreeIcon kind="constraint" />
-            <span>
-              <strong>Slot clearance</strong>
-              <small>
-                {view.validation.evidence.slotRightClearanceMm} /{' '}
-                {view.validation.evidence.requiredSlotClearanceMm} mm
-              </small>
-            </span>
-            <i className={view.validation.valid ? 'tree-pass-mark' : 'tree-conflict-mark'}>
-              {view.validation.valid ? '✓' : '!'}
-            </i>
-          </button>
-        </div>
-      </div>
-      <footer className="items-panel-footer">
+      </AppScrollArea>
+      <footer className="flex shrink-0 items-center justify-between border-t border-kumo-line px-3 py-2 text-[10px] text-kumo-subtle">
         <span>{view.workspace.fabricationQuantity} panels</span>
         <span>Aluminium</span>
         <span>{geometry.thickness} mm</span>
@@ -279,15 +310,21 @@ function SelectionProperties({
     selectedEntity === 'slot:connector' || selectedEntity === 'constraint:slot-clearance';
   const mount = geometry.mounts.find(({ id }) => id === selectedEntity);
   return (
-    <div className="inspector-section">
-      <div className="selected-entity-heading">
-        <span>{isSlot ? 'SL' : mount ? 'MT' : 'PN'}</span>
-        <div>
-          <strong>{isSlot ? 'Connector slot' : mount ? 'Buyer mount' : 'Panel body'}</strong>
-          <small>{statusForEntity(selectedEntity)}</small>
+    <div className="space-y-4 p-4">
+      <div className="flex items-center gap-3">
+        <span className="grid size-9 place-items-center rounded-lg bg-kumo-recessed text-[11px] font-bold text-kumo-subtle">
+          {isSlot ? 'SL' : mount ? 'MT' : 'PN'}
+        </span>
+        <div className="min-w-0">
+          <strong className="block truncate text-sm">
+            {isSlot ? 'Connector slot' : mount ? 'Buyer mount' : 'Panel body'}
+          </strong>
+          <small className="block text-xs text-kumo-subtle">
+            {statusForEntity(selectedEntity)}
+          </small>
         </div>
       </div>
-      <dl className="property-grid">
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-kumo-line bg-kumo-line [&>div]:bg-kumo-base [&>div]:p-3 [&_dt]:text-[10px] [&_dt]:uppercase [&_dt]:tracking-wider [&_dt]:text-kumo-subtle [&_dd]:mt-1 [&_dd]:text-xs [&_dd]:font-semibold">
         {isSlot ? (
           <>
             <div>
@@ -347,9 +384,11 @@ function SelectionProperties({
           </>
         )}
       </dl>
-      <div className="authority-note">
-        <span>Manufacturing intent</span>
-        <p>
+      <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+          Manufacturing intent
+        </span>
+        <p className="mt-1 text-xs leading-5 text-kumo-subtle">
           Fabricate four matching aluminium control faceplates while preserving protected buyer
           installation interfaces.
         </p>
@@ -375,26 +414,34 @@ function ConstraintsInspector({
 }) {
   const evidence = view.validation.evidence;
   return (
-    <div className="inspector-section constraint-inspector">
+    <div className="space-y-4 p-4">
       <div
-        className={
-          view.validation.valid ? 'constraint-hero is-valid' : 'constraint-hero is-conflict'
-        }
+        className={`rounded-xl border p-4 ${view.validation.valid ? 'border-attune-valid/30 bg-attune-valid/5' : 'border-attune-conflict/30 bg-attune-conflict/5'}`}
       >
-        <span>{view.validation.valid ? 'Buildable' : 'Hard conflict'}</span>
-        <strong>{evidence.slotRightClearanceMm} mm observed</strong>
-        <p>{evidence.requiredSlotClearanceMm} mm required at the panel edge.</p>
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-wider ${view.validation.valid ? 'text-attune-valid' : 'text-attune-conflict'}`}
+        >
+          {view.validation.valid ? 'Buildable' : 'Hard conflict'}
+        </span>
+        <strong className="mt-1 block text-lg">{evidence.slotRightClearanceMm} mm observed</strong>
+        <p className="mt-1 text-xs text-kumo-subtle">
+          {evidence.requiredSlotClearanceMm} mm required at the panel edge.
+        </p>
       </div>
-      <div className="preservation-proof">
-        <span>Protected intent</span>
-        <strong>
+      <div className="rounded-lg border border-kumo-line p-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+          Protected intent
+        </span>
+        <strong className="mt-1 block text-sm">
           {evidence.lockedMountsPreserved} / {evidence.lockedMountsTotal} mounts
         </strong>
-        <p>Every offered repair keeps the buyer-locked mount geometry unchanged.</p>
+        <p className="mt-1 text-xs leading-5 text-kumo-subtle">
+          Every offered repair keeps the buyer-locked mount geometry unchanged.
+        </p>
       </div>
       {!view.validation.valid ? (
         view.perspective === 'buyer' ? (
-          <div className="constraint-actions">
+          <div className="flex flex-wrap gap-2">
             <Button type="button" variant="primary" size="sm" onClick={onCompare}>
               Compare valid changes
             </Button>
@@ -403,31 +450,43 @@ function ConstraintsInspector({
             </Button>
           </div>
         ) : (
-          <div className="authority-note">
-            <span>Provider review</span>
-            <p>The buyer must resolve this provider-specific conflict before requesting review.</p>
+          <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+              Provider review
+            </span>
+            <p className="mt-1 text-xs leading-5 text-kumo-subtle">
+              The buyer must resolve this provider-specific conflict before requesting review.
+            </p>
           </div>
         )
       ) : (
-        <div className="unlocked-action">
-          <span>New consequence</span>
-          <strong>Request quote available</strong>
-          <p>The current exact specification can now advance to provider commitment.</p>
+        <div className="rounded-lg border border-attune-valid/30 bg-attune-valid/5 p-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-attune-valid">
+            New consequence
+          </span>
+          <strong className="mt-1 block text-sm">Request quote available</strong>
+          <p className="mt-1 text-xs leading-5 text-kumo-subtle">
+            The current exact specification can now advance to provider commitment.
+          </p>
         </div>
       )}
       {compareOpen && !view.validation.valid ? (
-        <div className="repair-options">
-          <header>
-            <span>Valid alternatives</span>
-            <small>Analytically verified</small>
+        <div className="space-y-2">
+          <header className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold">Valid alternatives</span>
+            <small className="text-[10px] text-kumo-subtle">Analytically verified</small>
           </header>
           {view.repairs.map((repair) => (
-            <article key={repair.id}>
-              <div>
-                <strong>{repair.label}</strong>
-                <span>{repair.predictedClearanceMm} mm</span>
+            <article className="rounded-lg border border-kumo-line p-3" key={repair.id}>
+              <div className="flex items-center justify-between gap-2">
+                <strong className="text-xs">{repair.label}</strong>
+                <span className="text-xs font-semibold text-attune-valid">
+                  {repair.predictedClearanceMm} mm
+                </span>
               </div>
-              <p>Preserves {repair.preservedLockedEntities.length} protected mounts.</p>
+              <p className="my-2 text-[11px] text-kumo-subtle">
+                Preserves {repair.preservedLockedEntities.length} protected mounts.
+              </p>
               <Button
                 type="button"
                 variant="secondary"
@@ -441,7 +500,7 @@ function ConstraintsInspector({
           ))}
         </div>
       ) : null}
-      <div className="constraint-checks">
+      <div className="divide-y divide-kumo-line rounded-lg border border-kumo-line text-xs [&>div]:flex [&>div]:items-center [&>div]:justify-between [&>div]:gap-2 [&>div]:p-3 [&_strong]:text-attune-valid">
         <div>
           <span>Equal cable-gland holes</span>
           <strong>Pass</strong>
@@ -458,14 +517,24 @@ function ConstraintsInspector({
 function CapabilityRow({ capability }: { readonly capability: CapabilityView }) {
   return (
     <article
-      className={capability.available ? 'capability-row is-available' : 'capability-row is-blocked'}
+      className={`rounded-lg border p-3 ${capability.available ? 'border-attune-valid/30 bg-attune-valid/5' : 'border-kumo-line bg-kumo-recessed/50'}`}
     >
-      <header>
-        <strong>{formatCapability(capability.id)}</strong>
-        <span>{capability.available ? 'Available' : 'Blocked'}</span>
+      <header className="flex items-center justify-between gap-2">
+        <strong className="text-xs capitalize">{formatCapability(capability.id)}</strong>
+        <span
+          className={`text-[10px] font-semibold uppercase tracking-wider ${capability.available ? 'text-attune-valid' : 'text-kumo-subtle'}`}
+        >
+          {capability.available ? 'Available' : 'Blocked'}
+        </span>
       </header>
-      <p>{capability.available ? capability.reason : capability.blockers[0]?.message}</p>
-      {capability.available ? <small>{capability.predictedConsequences[0]}</small> : null}
+      <p className="mt-1 text-xs leading-5 text-kumo-subtle">
+        {capability.available ? capability.reason : capability.blockers[0]?.message}
+      </p>
+      {capability.available ? (
+        <small className="mt-2 block text-[11px] text-attune-valid">
+          {capability.predictedConsequences[0]}
+        </small>
+      ) : null}
     </article>
   );
 }
@@ -474,39 +543,48 @@ function CapabilityInspector({ view }: { readonly view: AttuneApiView }) {
   const transition = view.latestCapabilityTransition;
   const next = view.frontiers[view.perspective].find(({ available }) => available);
   return (
-    <div className="inspector-section">
-      <div className="role-switcher" aria-label="Active capability perspective">
-        <strong>{view.perspective} workspace</strong>
+    <div className="space-y-4 p-4">
+      <div
+        className="rounded-lg border border-kumo-line bg-kumo-recessed px-3 py-2"
+        aria-label="Active capability perspective"
+      >
+        <strong className="text-xs capitalize">{view.perspective} workspace</strong>
       </div>
-      <p className="server-authority-note">
+      <p className="text-xs leading-5 text-kumo-subtle">
         Server membership and delegation determine this authority.
       </p>
       {next ? (
-        <div className="contextual-capability">
-          <Lightning size={20} weight="fill" />
+        <div className="flex gap-3 rounded-xl border border-kumo-brand/25 bg-kumo-brand/5 p-3 text-kumo-brand">
+          <AppIcons.Capability size={20} weight="fill" />
           <div>
-            <span>Available consequence</span>
-            <strong>{formatCapability(next.id)}</strong>
-            <p>{next.reason}</p>
-            <small>{next.predictedConsequences[0]}</small>
+            <span className="text-[10px] font-semibold uppercase tracking-wider">
+              Available consequence
+            </span>
+            <strong className="mt-1 block text-sm capitalize text-kumo-contrast">
+              {formatCapability(next.id)}
+            </strong>
+            <p className="mt-1 text-xs leading-5 text-kumo-subtle">{next.reason}</p>
+            <small className="mt-2 block text-[11px]">{next.predictedConsequences[0]}</small>
           </div>
         </div>
       ) : null}
-      <div className="capability-frontier-list">
+      <div className="space-y-2">
         {view.frontiers[view.perspective].map((capability) => (
           <CapabilityRow capability={capability} key={capability.id} />
         ))}
       </div>
       {transition && (transition.gained.length > 0 || transition.lost.length > 0) ? (
-        <div className="latest-capability-change">
-          <span>Changed by latest receipt</span>
+        <div className="rounded-lg border border-kumo-line p-3 text-xs">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+            Changed by latest receipt
+          </span>
           {transition.gained.map(({ capabilityId, role: gainedRole }) => (
-            <p className="is-gained" key={`gained-${gainedRole}-${capabilityId}`}>
+            <p className="mt-2 text-attune-valid" key={`gained-${gainedRole}-${capabilityId}`}>
               + {gainedRole}: {formatCapability(capabilityId)}
             </p>
           ))}
           {transition.lost.map(({ capabilityId, role: lostRole }) => (
-            <p className="is-lost" key={`lost-${lostRole}-${capabilityId}`}>
+            <p className="mt-2 text-attune-conflict" key={`lost-${lostRole}-${capabilityId}`}>
               − {lostRole}: {formatCapability(capabilityId)}
             </p>
           ))}
@@ -562,29 +640,40 @@ export function CommerceInspector({
     { label: 'Shopify verified', complete: Boolean(exactCommerce) },
   ];
   return (
-    <div className="inspector-section commerce-inspector">
-      <div className="commerce-lot">
-        <span>One revision-bound fabrication lot</span>
-        <strong>₹2,400</strong>
-        <div>
+    <div className="space-y-4 p-4">
+      <div className="rounded-xl border border-kumo-line bg-kumo-recessed p-4">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+          One revision-bound fabrication lot
+        </span>
+        <strong className="mt-1 block text-2xl">₹2,400</strong>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-kumo-subtle">
           <span>4 fabricated panels</span>
           <span>Shopify cart quantity 1</span>
         </div>
       </div>
-      <div className="commerce-contract-state">
-        <span>Request visibility</span>
-        <strong>{exactRequest?.visibility ?? 'PRIVATE'}</strong>
-        <p>
+      <div className="rounded-lg border border-kumo-line p-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">
+          Request visibility
+        </span>
+        <strong className="mt-1 block text-sm">{exactRequest?.visibility ?? 'PRIVATE'}</strong>
+        <p className="mt-1 text-xs leading-5 text-kumo-subtle">
           {draftOrder
             ? `Shopify Draft Order is ${draftOrder.syncState.toLowerCase().replaceAll('_', ' ')}.`
             : 'No Shopify Draft Order exists for an unquoted editing draft.'}
         </p>
       </div>
-      <ol className="commerce-steps">
+      <ol className="space-y-1.5">
         {steps.map((step, index) => (
-          <li className={step.complete ? 'is-complete' : undefined} key={step.label}>
-            <span>{step.complete ? '✓' : index + 1}</span>
-            <strong>{step.label}</strong>
+          <li
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${step.complete ? 'border-attune-valid/25 bg-attune-valid/5' : 'border-kumo-line'}`}
+            key={step.label}
+          >
+            <span
+              className={`grid size-5 place-items-center rounded-full text-[10px] font-bold ${step.complete ? 'bg-attune-valid text-white' : 'bg-kumo-recessed text-kumo-subtle'}`}
+            >
+              {step.complete ? <AppIcons.Check size={12} weight="bold" /> : index + 1}
+            </span>
+            <strong className="font-medium">{step.label}</strong>
           </li>
         ))}
       </ol>
@@ -593,7 +682,7 @@ export function CommerceInspector({
           type="button"
           variant="primary"
           size="sm"
-          className="primary-action commerce-next-action"
+          className="w-full"
           disabled={disabled}
           onClick={() => onWorkflow(workflowAction)}
         >
@@ -601,27 +690,34 @@ export function CommerceInspector({
         </Button>
       ) : null}
       {exactCommerce ? (
-        <div className="shopify-handoff-ready">
-          <span>Independent storefront verified</span>
-          <strong>{exactCommerce.verification.title}</strong>
-          <p>
+        <div className="rounded-xl border border-attune-valid/30 bg-attune-valid/5 p-4">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-attune-valid">
+            Independent storefront verified
+          </span>
+          <strong className="mt-1 block text-sm">{exactCommerce.verification.title}</strong>
+          <p className="mt-2 text-xs leading-5 text-kumo-subtle">
             Attune's page-scoped tools yield after top-level navigation. Shopify-native WebMCP then
             controls the visible shopper session.
           </p>
-          <a href={exactCommerce.verification.storefrontUrl}>
-            Continue on Shopify <span>↗</span>
+          <a
+            className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-kumo-brand no-underline hover:underline"
+            href={exactCommerce.verification.storefrontUrl}
+          >
+            Continue on Shopify <AppIcons.OpenExternal size={16} weight="bold" />
           </a>
         </div>
       ) : historicalCommerce ? (
-        <div className="commerce-revoked">
-          <span>Current authority revoked</span>
-          <p>
+        <div className="rounded-lg border border-attune-conflict/25 bg-attune-conflict/5 p-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-attune-conflict">
+            Current authority revoked
+          </span>
+          <p className="mt-1 text-xs leading-5 text-kumo-subtle">
             {historicalCommerce.revisionId} remains immutable and materialized. Draft r
             {view.workspace.draftVersion} requires a new quote and acceptance.
           </p>
         </div>
       ) : (
-        <p className="commerce-awaiting">
+        <p className="rounded-lg border border-dashed border-kumo-line p-3 text-xs leading-5 text-kumo-subtle">
           Shopify Admin, publication, inventory and Storefront evidence will appear here without
           requiring judge access to Shopify Admin.
         </p>
@@ -658,17 +754,30 @@ export function InspectorPanel({
   readonly onWorkflow: (action: WorkflowAction) => void;
 }) {
   return (
-    <Surface render={<aside />} className="workspace-inspector">
-      <header className="inspector-heading">
-        <div>
-          <span>Inspector</span>
-          <strong>{selectedEntity.replaceAll(':', ' / ')}</strong>
+    <Surface
+      render={<aside />}
+      className="absolute top-[124px] right-3 bottom-14 z-40 hidden w-[320px] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base/95 shadow-md backdrop-blur lg:flex"
+    >
+      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-kumo-line px-3">
+        <div className="min-w-0">
+          <span className="block text-[11px] font-semibold uppercase tracking-wider text-kumo-subtle">
+            Inspector
+          </span>
+          <strong className="block truncate text-xs font-semibold">
+            {selectedEntity.replaceAll(':', ' / ')}
+          </strong>
         </div>
-        <button type="button" onClick={onCollapse} aria-label="Collapse inspector">
-          ›
-        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          shape="square"
+          icon={<AppIcons.CollapseRight size={16} weight="bold" />}
+          onClick={onCollapse}
+          aria-label="Collapse inspector"
+        />
       </header>
-      <div className="inspector-tabs" aria-label="Inspector modes">
+      <div className="shrink-0 border-b border-kumo-line px-2 pt-1" aria-label="Inspector modes">
         <Tabs
           variant="underline"
           size="sm"
@@ -680,7 +789,7 @@ export function InspectorPanel({
           onValueChange={(next) => isInspectorTab(next) && onTab(next)}
         />
       </div>
-      <div className="inspector-scroll">
+      <AppScrollArea className="min-h-0 flex-1" ariaLabel="Inspector content">
         {tab === 'design' ? (
           <SelectionProperties view={view} selectedEntity={selectedEntity} />
         ) : null}
@@ -703,7 +812,7 @@ export function InspectorPanel({
             onWorkflow={onWorkflow}
           />
         ) : null}
-      </div>
+      </AppScrollArea>
     </Surface>
   );
 }
@@ -735,21 +844,26 @@ export function LifecycleStrip({ view }: { readonly view: AttuneApiView }) {
     'Verified product is ready for native storefront handoff.',
   ];
   return (
-    <section className="lifecycle-strip" aria-label="Manufacturing lifecycle">
-      <div className="lifecycle-track">
+    <section
+      className="absolute top-[72px] left-1/2 z-40 w-[min(760px,calc(100%-24px))] -translate-x-1/2 rounded-xl border border-kumo-line bg-kumo-base/95 px-3 py-2 shadow-sm backdrop-blur md:flex md:items-center md:gap-5 md:px-4"
+      aria-label="Manufacturing lifecycle"
+    >
+      <div className="flex min-w-0 items-center overflow-hidden">
         {stages.map((stage, index) => (
           <div
-            className={
-              index === current ? 'is-current' : index < current ? 'is-complete' : undefined
-            }
+            className={`relative flex min-w-0 flex-1 items-center gap-1.5 text-[10px] font-medium after:mx-2 after:h-px after:min-w-2 after:flex-1 after:bg-kumo-line last:after:hidden md:text-xs ${index === current ? 'text-kumo-brand' : index < current ? 'text-attune-valid' : 'text-kumo-subtle'}`}
             key={stage}
           >
-            <span>{index < current ? '✓' : index + 1}</span>
-            <strong>{stage}</strong>
+            <span
+              className={`grid size-5 shrink-0 place-items-center rounded-full border text-[9px] font-bold ${index === current ? 'border-kumo-brand bg-kumo-brand text-white' : index < current ? 'border-attune-valid bg-attune-valid text-white' : 'border-kumo-line bg-kumo-recessed'}`}
+            >
+              {index < current ? <AppIcons.Check size={11} weight="bold" /> : index + 1}
+            </span>
+            <strong className="hidden truncate font-medium sm:block">{stage}</strong>
           </div>
         ))}
       </div>
-      <p>
+      <p className="mt-1 truncate text-[11px] text-kumo-subtle md:mt-0 md:max-w-sm md:text-right">
         <strong>{stages[current]}:</strong> {explanations[current]}
       </p>
     </section>
@@ -777,7 +891,7 @@ function RestoreYjsVersion({ versionId }: { readonly versionId: string }) {
       type="button"
       variant="secondary"
       size="sm"
-      icon={<ArrowUUpLeft size={16} weight="bold" />}
+      icon={<AppIcons.Restore size={16} weight="bold" />}
       onClick={restore}
       disabled={!version.data}
     >
@@ -792,9 +906,12 @@ export function CollaborationHeader() {
   useEffect(() => setMounted(true), []);
   const synchronized = mounted && syncStatus === 'synchronized';
   return (
-    <div className="workspace-collaborators">
-      <span className={synchronized ? 'sync-state is-synced' : 'sync-state'}>
-        <i /> {synchronized ? 'Synced' : 'Connecting'}
+    <div className="attune-liveblocks-bridge hidden items-center gap-2 lg:flex">
+      <span className="inline-flex items-center gap-1.5 text-xs text-kumo-subtle">
+        <i
+          className={`size-1.5 rounded-full ${synchronized ? 'bg-attune-valid' : 'bg-kumo-contrast/35'}`}
+        />{' '}
+        {synchronized ? 'Synced' : 'Connecting'}
       </span>
       <AvatarStack max={4} size={26} />
     </div>
@@ -836,70 +953,85 @@ function CollaborationDock({
   if (tab === 'comments') {
     const anchor = commentAnchor(view, selectedEntity);
     return (
-      <div className="dock-collaboration-content">
-        <header>
+      <div className="space-y-3 p-3">
+        <header className="flex items-center justify-between text-[11px] text-kumo-subtle">
           <span>{threads.length} discussions</span>
           <span>{notificationResult.count ?? 0} unread</span>
         </header>
-        <div className="dock-thread-grid">
+        <div className="grid gap-3 lg:grid-cols-2">
           {threads.slice(0, 4).map((thread) => (
-            <article className="spatial-thread" key={thread.id}>
+            <article className="min-w-0 space-y-2 rounded-lg bg-kumo-recessed p-3" key={thread.id}>
               <Button
                 type="button"
                 variant="ghost"
                 size="xs"
-                icon={<ChatCircle size={16} weight="fill" />}
+                icon={<AppIcons.Comments size={16} weight="fill" />}
                 onClick={() => onSelectEntity(thread.metadata.entityId)}
               >
                 Show {thread.metadata.entityId.replaceAll(':', ' ')} on canvas
               </Button>
-              <span>{thread.metadata.revisionId}</span>
-              <Thread thread={thread} showComposer="collapsed" />
+              <span className="block text-[10px] text-kumo-subtle">
+                {thread.metadata.revisionId}
+              </span>
+              <div className="attune-liveblocks-bridge attune-liveblocks-bridge--surface">
+                <Thread thread={thread} showComposer="collapsed" />
+              </div>
             </article>
           ))}
-          <div className="spatial-comment-composer">
-            <p>
+          <div className="space-y-2 rounded-lg bg-kumo-recessed p-3">
+            <p className="text-xs leading-5 text-kumo-subtle">
               New comment will stay attached to{' '}
               <strong>{selectedEntity.replaceAll(':', ' ')}</strong> on draft r
               {view.workspace.draftVersion}.
             </p>
-            <Composer
-              metadata={{
-                workspaceId,
-                entityId: selectedEntity,
-                ...anchor,
-                revisionId: `draft:r${view.workspace.draftVersion}`,
-                specHash: view.specHash,
-              }}
-            />
+            <div className="attune-liveblocks-bridge attune-liveblocks-bridge--surface">
+              <Composer
+                metadata={{
+                  workspaceId,
+                  entityId: selectedEntity,
+                  ...anchor,
+                  revisionId: `draft:r${view.workspace.draftVersion}`,
+                  specHash: view.specHash,
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
     );
   }
   return (
-    <div className="dock-history-content">
-      <header>
-        <ClockCounterClockwise size={20} weight="bold" />
-        <p>
+    <div className="space-y-2 p-3">
+      <header className="flex items-start gap-2 rounded-lg bg-kumo-recessed p-3">
+        <AppIcons.History className="shrink-0" size={20} weight="bold" />
+        <p className="text-xs leading-5 text-kumo-subtle">
           Liveblocks versions change the mutable draft only. Frozen Attune revisions remain
           immutable.
         </p>
       </header>
       {versions.slice(0, 4).map((version) => (
-        <article key={version.id}>
-          <div>
-            <strong>Collaborative draft snapshot</strong>
-            <span>Restore creates a current draft; it never rewrites a frozen revision.</span>
+        <article
+          className="flex items-center justify-between gap-4 rounded-lg px-3 py-2 hover:bg-kumo-fill-hover"
+          key={version.id}
+        >
+          <div className="min-w-0">
+            <strong className="block text-xs">Collaborative draft snapshot</strong>
+            <span className="mt-0.5 block truncate text-[11px] text-kumo-subtle">
+              Restore creates a current draft; it never rewrites a frozen revision.
+            </span>
             <details>
-              <summary>Trace details</summary>
-              <code>{version.id}</code>
+              <summary className="mt-1 cursor-pointer text-[10px] text-kumo-subtle">
+                Trace details
+              </summary>
+              <code className="text-[10px]">{version.id}</code>
             </details>
           </div>
           <RestoreYjsVersion versionId={version.id} />
         </article>
       ))}
-      {versions.length === 0 ? <span>No collaboration snapshots yet.</span> : null}
+      {versions.length === 0 ? (
+        <span className="block p-3 text-xs text-kumo-subtle">No collaboration snapshots yet.</span>
+      ) : null}
     </div>
   );
 }
@@ -907,22 +1039,26 @@ function CollaborationDock({
 function ActivityDock({ view }: { readonly view: AttuneApiView }) {
   const receipts = view.records.receipts.toReversed().slice(0, 6);
   return (
-    <div className="activity-dock-content">
+    <div className="space-y-1 p-3">
       {receipts.length === 0 ? (
-        <p>No semantic commands yet. The seeded requirement is authoritative state.</p>
+        <p className="text-xs text-kumo-subtle">
+          No semantic commands yet. The seeded requirement is authoritative state.
+        </p>
       ) : (
         receipts.map((receipt) => (
-          <details key={receipt.receiptId}>
-            <summary>
-              <span>{receipt.origin.replaceAll('_', ' ')}</span>
-              <strong>{formatCapability(receipt.command)}</strong>
-              <time>
+          <details className="rounded-lg px-3 py-2 open:bg-kumo-recessed" key={receipt.receiptId}>
+            <summary className="grid cursor-pointer grid-cols-[120px_minmax(0,1fr)_auto] items-center gap-3 text-xs">
+              <span className="capitalize text-kumo-subtle">
+                {receipt.origin.replaceAll('_', ' ')}
+              </span>
+              <strong className="truncate capitalize">{formatCapability(receipt.command)}</strong>
+              <time className="text-[10px] text-kumo-subtle">
                 {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(
                   new Date(receipt.createdAt),
                 )}
               </time>
             </summary>
-            <div>
+            <div className="mt-2 grid gap-1 text-[10px] text-kumo-subtle sm:grid-cols-2">
               <code>receipt #{receipt.receiptSeq}</code>
               <code>
                 draft r{receipt.draftVersion} · capability epoch {receipt.capabilityEpoch}
@@ -946,50 +1082,68 @@ function AgentDock({
 }) {
   const changed = status.interventions > 0 || view.observation.interventions.length > 0;
   return (
-    <div className="agent-dock-content">
-      <section className="agent-identity-card">
-        <Robot size={24} weight="fill" />
+    <div className="grid gap-2 p-3 md:grid-cols-4">
+      <section className="flex gap-3 rounded-lg bg-attune-agent/5 p-3 md:col-span-2">
+        <AppIcons.Agent className="shrink-0 text-attune-agent" size={24} weight="fill" />
         <div>
-          <span>{view.perspective} delegated agent</span>
-          <strong>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-attune-agent">
+            {view.perspective} delegated agent
+          </span>
+          <strong className="mt-1 block text-sm">
             {status.registration === 'registered' ? 'Agent connected' : status.registration}
           </strong>
-          <p>Native WebMCP · authority follows the active server delegation.</p>
+          <p className="mt-1 text-xs text-kumo-subtle">
+            Native WebMCP · authority follows the active server delegation.
+          </p>
         </div>
       </section>
-      <section>
-        <span>Last observed</span>
-        <strong>
+      <section className="rounded-lg bg-kumo-recessed p-3">
+        <span className="text-[10px] uppercase tracking-wider text-kumo-subtle">Last observed</span>
+        <strong className="mt-1 block text-xs">
           {status.draftVersion ? `Draft r${status.draftVersion}` : 'Awaiting observation'}
         </strong>
-        <p>
+        <p className="mt-1 text-[11px] text-kumo-subtle">
           {status.workspaceSeq === null
             ? 'No sequence observed'
             : `Authoritative workspace sequence ${status.workspaceSeq}`}
         </p>
       </section>
-      <section className={changed ? 'is-alert' : undefined}>
-        <span>Human intervention</span>
-        <strong>{changed ? 'Automatically detected' : 'No unseen change'}</strong>
-        <p>
+      <section
+        className={`rounded-lg p-3 ${changed ? 'bg-attune-conflict/5' : 'bg-kumo-recessed'}`}
+      >
+        <span className="text-[10px] uppercase tracking-wider text-kumo-subtle">
+          Human intervention
+        </span>
+        <strong className="mt-1 block text-xs">
+          {changed ? 'Automatically detected' : 'No unseen change'}
+        </strong>
+        <p className="mt-1 text-[11px] text-kumo-subtle">
           {changed
             ? 'The next consequential action must revalidate or replan.'
             : 'Observation cursor matches current state.'}
         </p>
       </section>
-      <section>
-        <span>Last execution</span>
-        <strong>{status.execution.replaceAll('_', ' ')}</strong>
-        <p>
+      <section className="rounded-lg bg-kumo-recessed p-3">
+        <span className="text-[10px] uppercase tracking-wider text-kumo-subtle">
+          Last execution
+        </span>
+        <strong className="mt-1 block text-xs capitalize">
+          {status.execution.replaceAll('_', ' ')}
+        </strong>
+        <p className="mt-1 text-[11px] text-kumo-subtle">
           {status.lastAction
             ? formatCapability(status.lastAction)
             : 'No tool executed in this tab.'}
         </p>
       </section>
-      <div className="agent-tool-list">
-        <span>Available now</span>
+      <div className="rounded-lg bg-kumo-recessed p-3">
+        <span className="block text-[10px] uppercase tracking-wider text-kumo-subtle">
+          Available now
+        </span>
         {status.availableTools.map((tool) => (
-          <code key={tool}>{tool}</code>
+          <code className="mt-1 block truncate text-[10px]" key={tool}>
+            {tool}
+          </code>
         ))}
       </div>
     </div>
@@ -1015,14 +1169,14 @@ function OutcomeDock({ view }: { readonly view: AttuneApiView }) {
     ],
   ] as const;
   return (
-    <div className="outcome-dock-content">
+    <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
       {rows.map(([label, value]) => (
-        <div key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
+        <div className="rounded-lg bg-kumo-recessed p-3" key={label}>
+          <span className="block text-[10px] text-kumo-subtle">{label}</span>
+          <strong className="mt-1 block text-sm">{value}</strong>
         </div>
       ))}
-      <p>
+      <p className="col-span-full text-[10px] text-kumo-subtle">
         Measured from authoritative receipts and verification records. No estimated improvement
         claims.
       </p>
@@ -1064,32 +1218,41 @@ export function BottomDock({
     'outcome',
   ];
   const icon = {
-    activity: <ListChecks size={16} weight="bold" />,
-    agent: <Robot size={16} weight="fill" />,
-    comments: <ChatCircle size={16} weight="fill" />,
-    history: <ClockCounterClockwise size={16} weight="bold" />,
-    commerce: <ShoppingBagOpen size={16} weight="bold" />,
-    outcome: <ChartLineUp size={16} weight="bold" />,
+    activity: <AppIcons.Activity size={16} weight="bold" />,
+    agent: <AppIcons.Agent size={16} weight="fill" />,
+    comments: <AppIcons.Comments size={16} weight="fill" />,
+    history: <AppIcons.History size={16} weight="bold" />,
+    commerce: <AppIcons.Commerce size={16} weight="bold" />,
+    outcome: <AppIcons.Outcome size={16} weight="bold" />,
   } as const;
   return (
-    <section className={tab ? 'workspace-bottom-dock is-open' : 'workspace-bottom-dock'}>
-      <nav aria-label="Workspace detail dock">
+    <section
+      className={`absolute right-2 bottom-2 left-2 z-50 mx-auto overflow-hidden rounded-xl border border-kumo-line bg-kumo-base/95 shadow-md backdrop-blur transition-[height,max-width] duration-100 ${tab ? 'h-[min(300px,42vh)] max-w-5xl' : 'h-10 max-w-3xl'}`}
+    >
+      <nav
+        className="flex h-10 items-center gap-0.5 overflow-x-auto px-1 no-scrollbar"
+        aria-label="Workspace detail dock"
+      >
         {tabs.map((candidate) => (
           <Button
             type="button"
-            variant="ghost"
+            variant={tab === candidate ? 'secondary' : 'ghost'}
             size="xs"
             icon={icon[candidate]}
             key={candidate}
             aria-pressed={tab === candidate}
             onClick={() => onTab(tab === candidate ? null : candidate)}
           >
-            {candidate}
+            <span className="hidden sm:inline">{candidate}</span>
             {candidate === 'activity' && view.receiptCount > 0 ? (
-              <span>{view.receiptCount}</span>
+              <span className="grid min-w-4 place-items-center rounded-full bg-kumo-fill px-1 text-[9px]">
+                {view.receiptCount}
+              </span>
             ) : null}
             {candidate === 'agent' ? (
-              <i className={webMcpStatus.registration === 'registered' ? 'is-online' : undefined} />
+              <i
+                className={`size-1.5 rounded-full ${webMcpStatus.registration === 'registered' ? 'bg-attune-valid' : 'bg-kumo-contrast/30'}`}
+              />
             ) : null}
           </Button>
         ))}
@@ -1098,14 +1261,17 @@ export function BottomDock({
           variant="ghost"
           size="xs"
           shape="square"
-          icon={<CaretDown size={16} weight="bold" />}
-          className="dock-collapse"
+          icon={<AppIcons.CollapseDown size={16} weight="bold" />}
+          className="ml-auto shrink-0"
           onClick={() => onTab(null)}
           aria-label="Collapse dock"
         />
       </nav>
       {tab ? (
-        <div className="dock-body">
+        <AppScrollArea
+          className="h-[calc(100%-2.5rem)] border-t border-kumo-line"
+          ariaLabel={`${tab} panel`}
+        >
           {tab === 'activity' ? <ActivityDock view={view} /> : null}
           {tab === 'agent' ? <AgentDock status={webMcpStatus} view={view} /> : null}
           {(tab === 'comments' || tab === 'history') && collaboration ? (
@@ -1118,7 +1284,7 @@ export function BottomDock({
             />
           ) : null}
           {(tab === 'comments' || tab === 'history') && !collaboration ? (
-            <p className="dock-empty">
+            <p className="p-4 text-xs text-kumo-subtle">
               Realtime collaboration is not configured in this environment.
             </p>
           ) : null}
@@ -1131,7 +1297,7 @@ export function BottomDock({
             />
           ) : null}
           {tab === 'outcome' ? <OutcomeDock view={view} /> : null}
-        </div>
+        </AppScrollArea>
       ) : null}
     </section>
   );

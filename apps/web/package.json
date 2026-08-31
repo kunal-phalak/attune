@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "next build",
+    "build": "next build --webpack",
     "dev": "next dev",
     "start": "next start"
   },
@@ -26,9 +26,12 @@
     "yjs": "13.6.32"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
     "@types/node": "24.10.1",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "postcss": "8.5.26",
+    "tailwindcss": "4.3.3",
     "typescript": "5.9.2"
   }
 }

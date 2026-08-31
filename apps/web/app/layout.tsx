@@ -1,8 +1,6 @@
 import type { Metadata } from 'next';
-import '@cloudflare/kumo/styles/standalone';
 
 import './globals.css';
-import '@liveblocks/react-ui/styles.css';
 
 import { AttuneUiProvider } from '../components/attune-ui-provider';
 
@@ -15,7 +13,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>
+      <body className="min-h-dvh bg-kumo-canvas text-kumo-contrast antialiased">
         <AttuneUiProvider>{children}</AttuneUiProvider>
       </body>
     </html>

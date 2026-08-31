@@ -79,6 +79,7 @@ export default defineConfig({
       '**/.next/**',
       '**/node_modules/**',
       'coverage/**',
+      'apps/web/public/canvaskit/**',
       'playwright-report/**',
       'test-results/**',
     ],
@@ -90,6 +91,7 @@ export default defineConfig({
     sortPackageJson: true,
     ignorePatterns: [
       'ATTUNE_CODEX_MASTER_BUILD_SPEC.md',
+      'apps/web/public/canvaskit/**',
       'apps/web/next-env.d.ts',
       'docs/attune-ui-reference-pack/**',
       'packages/database/drizzle/**',

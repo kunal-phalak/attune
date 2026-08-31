@@ -1,211 +1,736 @@
 @layer components {
-  .attune-canvas {
-    position: absolute;
-    inset: 0;
+  .workspace-shell {
+    position: relative;
+    width: 100%;
+    height: 100dvh;
     min-width: 0;
-    min-height: 0;
+    min-height: 520px;
     overflow: hidden;
-    background: var(--color-kumo-recessed);
+    background: #f7f8f9;
   }
 
-  .canvas-viewport {
+  .attune-sketch-canvas,
+  .attune-sketch-canvas > canvas {
     position: absolute;
     inset: 0;
-    overflow: hidden;
-  }
-
-  .canvas-viewport > svg:not(.lb-cursors) {
     width: 100%;
     height: 100%;
-    min-width: 680px;
   }
 
-  .canvas-grid {
-    fill: url('#attune-grid-major');
+  .attune-sketch-canvas {
+    overflow: hidden;
+    background: #f7f8f9;
   }
 
-  .attune-canvas pattern path {
-    fill: none;
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 9%, transparent);
-    stroke-width: 0.65;
+  .attune-sketch-canvas > canvas {
+    display: block;
+    cursor: grab;
+    touch-action: none;
   }
 
-  .attune-canvas pattern rect + path {
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 15%, transparent);
-    stroke-width: 0.8;
+  .attune-sketch-canvas > canvas.is-panning {
+    cursor: grabbing;
   }
 
-  .attune-panel {
-    fill: color-mix(in oklch, var(--color-kumo-base) 88%, transparent);
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 66%, transparent);
-    stroke-width: 1.5;
-  }
-
-  .attune-panel.is-selected {
-    stroke: var(--color-kumo-brand);
-    stroke-width: 2.25;
-  }
-
-  .attune-hole,
-  .attune-slot,
-  .attune-cutout {
-    cursor: pointer;
-    fill: var(--color-kumo-recessed);
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 62%, transparent);
-    stroke-width: 1.5;
-    transition:
-      stroke 100ms ease,
-      fill 100ms ease;
-  }
-
-  .attune-cutout.is-selected,
-  .geometry-feature.is-selected .attune-hole,
-  .attune-slot.is-selected {
-    stroke: var(--color-kumo-brand);
-    stroke-width: 2.4;
-  }
-
-  .attune-hole.is-locked {
-    fill: color-mix(in oklch, var(--color-kumo-brand) 9%, var(--color-kumo-base));
-  }
-
-  .geometry-lock {
-    pointer-events: none;
-    fill: var(--color-kumo-brand);
-    stroke: var(--color-kumo-brand);
-    stroke-width: 1.25;
-  }
-
-  .geometry-lock path {
-    fill: none;
-  }
-
-  .attune-slot.is-conflict {
-    fill: color-mix(in oklch, var(--color-attune-conflict) 13%, var(--color-kumo-base));
-    stroke: var(--color-attune-conflict);
-  }
-
-  .attune-slot.is-valid {
-    fill: color-mix(in oklch, var(--color-attune-valid) 12%, var(--color-kumo-base));
-    stroke: var(--color-attune-valid);
-  }
-
-  .canvas-dimensions path {
-    fill: none;
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 52%, transparent);
-    stroke-width: 1;
-  }
-
-  .canvas-dimensions text {
-    fill: color-mix(in oklch, var(--color-kumo-contrast) 68%, transparent);
-    font-size: 11px;
-  }
-
-  .canvas-dimensions .clearance-dimension.is-conflict {
-    stroke: var(--color-attune-conflict);
-    stroke-width: 1.75;
-  }
-
-  .canvas-dimensions .clearance-dimension.is-valid {
-    stroke: var(--color-attune-valid);
-    stroke-width: 1.75;
-  }
-
-  .canvas-comment-pins {
+  .sketch-surface-status {
     position: absolute;
-    inset: 0;
+    inset: 50% auto auto 50%;
+    translate: -50% -50%;
+    color: var(--color-kumo-subtle);
+    font-size: 0.75rem;
+  }
+
+  .workspace-header {
+    position: absolute;
+    z-index: 60;
+    inset: 0 0 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    height: 56px;
+    padding: 0 12px;
+    border-bottom: 1px solid color-mix(in oklch, var(--color-kumo-line) 85%, transparent);
+    background: color-mix(in oklch, var(--color-kumo-base) 94%, transparent);
+    backdrop-filter: blur(14px);
+  }
+
+  .workspace-header-left,
+  .workspace-header-right {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .workspace-header-left > a,
+  .workspace-project-icon {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    color: var(--color-kumo-subtle);
+    text-decoration: none;
+  }
+
+  .workspace-header-left > a:hover {
+    color: var(--color-kumo-contrast);
+    background: var(--color-kumo-fill-hover);
+  }
+
+  .workspace-project-icon {
+    color: white;
+    background: #27313f;
+  }
+
+  .workspace-header-left > strong {
+    overflow: hidden;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .workspace-header-right {
+    justify-content: flex-end;
+  }
+
+  .workspace-draft-menu {
+    position: relative;
+  }
+
+  .workspace-draft-control {
+    display: inline-flex;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--color-kumo-contrast);
+    background: transparent;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .workspace-draft-control:not(:disabled):hover,
+  .workspace-draft-control[aria-expanded='true'] {
+    background: var(--color-kumo-fill-hover);
+  }
+
+  .workspace-draft-popover {
+    position: absolute;
+    z-index: 80;
+    inset: calc(100% + 8px) auto auto 50%;
+    width: 274px;
+    translate: -50% 0;
+    padding: 12px;
+    border: 1px solid var(--color-kumo-line);
+    border-radius: 12px;
+    background: var(--color-kumo-base);
+    box-shadow: 0 14px 40px rgb(23 30 40 / 14%);
+  }
+
+  .workspace-draft-popover > strong {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 0.75rem;
+  }
+
+  .workspace-presence {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .workspace-sync-icon {
+    width: 8px;
+    height: 8px;
+    border: 2px solid color-mix(in oklch, var(--color-kumo-contrast) 28%, transparent);
+    border-radius: 999px;
+  }
+
+  .workspace-sync-icon.is-ready {
+    border: 0;
+    background: #438576;
+  }
+
+  .workspace-tool-island {
+    position: absolute;
+    z-index: 45;
+    top: 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px;
+    border: 1px solid color-mix(in oklch, var(--color-kumo-line) 88%, transparent);
+    border-radius: 12px;
+    background: color-mix(in oklch, var(--color-kumo-base) 94%, transparent);
+    box-shadow: 0 5px 18px rgb(23 30 40 / 8%);
+    backdrop-filter: blur(12px);
+  }
+
+  .workspace-tool-island.is-left {
+    left: 12px;
+  }
+
+  .workspace-tool-island.is-right {
+    right: 12px;
+  }
+
+  .workspace-tool-divider {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--color-kumo-line);
+  }
+
+  .workspace-overlay-panel {
+    position: absolute;
+    z-index: 36;
+    top: 72px;
+    bottom: 18px;
+    display: flex;
+    width: 276px;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklch, var(--color-kumo-line) 90%, transparent);
+    border-radius: 13px;
+    background: color-mix(in oklch, var(--color-kumo-base) 96%, transparent);
+    box-shadow: 0 12px 34px rgb(23 30 40 / 10%);
+    backdrop-filter: blur(14px);
+  }
+
+  .workspace-overlay-panel.is-left {
+    left: 68px;
+  }
+
+  .workspace-overlay-panel.is-right {
+    right: 68px;
+  }
+
+  .workspace-overlay-panel > header {
+    display: flex;
+    height: 48px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px 0 14px;
+    border-bottom: 1px solid var(--color-kumo-line);
+  }
+
+  .workspace-overlay-panel > header > strong {
+    font-size: 0.78rem;
+    font-weight: 650;
+  }
+
+  .workspace-overlay-panel-content {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .sketch-axis-indicator {
+    position: absolute;
     z-index: 24;
-    pointer-events: none;
-  }
-
-  .canvas-comment-pin {
-    position: absolute;
-    pointer-events: auto;
-    transform: translate(-50%, -50%);
-  }
-
-  .canvas-comment-pin.is-historic {
-    opacity: 0.62;
-  }
-
-  .canvas-axis {
-    position: absolute;
-    inset-inline-start: 24px;
-    inset-block-end: 24px;
-    width: 42px;
-    height: 42px;
-    color: color-mix(in oklch, var(--color-kumo-contrast) 48%, transparent);
-    font-size: 10px;
+    bottom: 22px;
+    width: 44px;
+    height: 44px;
+    color: #5c6879;
+    font-size: 9px;
     font-weight: 700;
+    transition: left 140ms ease;
   }
 
-  .canvas-axis::before,
-  .canvas-axis::after {
+  .sketch-axis-indicator::before,
+  .sketch-axis-indicator::after {
     content: '';
     position: absolute;
-    inset-inline-start: 8px;
-    inset-block-end: 8px;
+    left: 9px;
+    bottom: 9px;
+    transform-origin: bottom left;
     background: currentColor;
   }
 
-  .canvas-axis::before {
-    width: 26px;
+  .sketch-axis-indicator::before {
+    width: 27px;
     height: 1px;
   }
 
-  .canvas-axis::after {
+  .sketch-axis-indicator::after {
     width: 1px;
-    height: 26px;
+    height: 27px;
   }
 
-  .canvas-axis span {
+  .sketch-axis-indicator .axis-x,
+  .sketch-axis-indicator .axis-y {
     position: absolute;
   }
 
-  .canvas-axis .axis-x {
-    inset-inline-end: 0;
-    inset-block-end: 3px;
+  .sketch-axis-indicator .axis-x {
+    right: 0;
+    bottom: 4px;
+    color: #bd594b;
   }
 
-  .canvas-axis .axis-y {
-    inset-inline-start: 4px;
-    inset-block-start: 0;
+  .sketch-axis-indicator .axis-y {
+    top: 0;
+    left: 5px;
+    color: #397f6e;
   }
 
-  .library-preview-grid {
-    fill: var(--color-kumo-recessed);
+  .sketch-view-status {
+    position: absolute;
+    z-index: 24;
+    bottom: 22px;
+    padding: 5px 8px;
+    border: 1px solid color-mix(in oklch, var(--color-kumo-line) 80%, transparent);
+    border-radius: 7px;
+    color: var(--color-kumo-subtle);
+    background: color-mix(in oklch, var(--color-kumo-base) 88%, transparent);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    transition: right 140ms ease;
+    backdrop-filter: blur(8px);
   }
 
-  .library-panel-outline {
-    fill: var(--color-kumo-base);
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 42%, transparent);
-    stroke-width: 1.5;
+  .sketch-tree-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 7px 12px;
+    border-bottom: 1px solid var(--color-kumo-line);
   }
 
-  .library-mount,
-  .library-feature,
-  .library-slot {
-    fill: var(--color-kumo-recessed);
-    stroke: color-mix(in oklch, var(--color-kumo-contrast) 54%, transparent);
-    stroke-width: 1.5;
+  .sketch-tree-heading > span,
+  .sketch-item-list li > span {
+    min-width: 0;
   }
 
-  .library-lock-tick,
-  .library-conflict-gap {
+  .sketch-tree-heading strong,
+  .sketch-tree-heading small,
+  .sketch-item-list strong,
+  .sketch-item-list small {
+    display: block;
+  }
+
+  .sketch-tree-heading strong,
+  .sketch-item-list strong {
+    font-size: 0.75rem;
+  }
+
+  .sketch-tree-heading small,
+  .sketch-item-list small {
+    margin-top: 2px;
+    color: var(--color-kumo-subtle);
+    font-size: 0.67rem;
+  }
+
+  .sketch-item-list,
+  .sketch-version-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .sketch-item-list li,
+  .sketch-version-list li {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+    padding: 8px;
+    border-radius: 8px;
+  }
+
+  .sketch-item-list li:hover,
+  .sketch-version-list li:hover {
+    background: var(--color-kumo-fill-hover);
+  }
+
+  .sketch-item-icon {
+    display: grid;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    place-items: center;
+    color: var(--color-kumo-subtle);
+    font-size: 8px;
+  }
+
+  .sketch-item-icon.is-circle {
+    border: 1.4px solid currentColor;
+    border-radius: 50%;
+  }
+
+  .sketch-item-icon.is-line::before {
+    content: '';
+    width: 16px;
+    height: 1px;
+    rotate: -30deg;
+    background: currentColor;
+  }
+
+  .sketch-item-icon.is-group {
+    border: 1px solid var(--color-kumo-line);
+    border-radius: 5px;
+  }
+
+  .workspace-panel-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+  }
+
+  .sketch-view-list {
+    display: grid;
+    gap: 0;
+    margin: 14px 0 0;
+  }
+
+  .sketch-view-list > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 2px;
+    border-bottom: 1px solid var(--color-kumo-line);
+    font-size: 0.7rem;
+  }
+
+  .sketch-view-list dt {
+    color: var(--color-kumo-subtle);
+  }
+
+  .sketch-view-list dd {
+    margin: 0;
+    text-align: right;
+  }
+
+  .sketch-panel-note {
+    margin: 2px 0 12px;
+    color: var(--color-kumo-subtle);
+    font-size: 0.7rem;
+    line-height: 1.55;
+  }
+
+  .sketch-panel-subtitle {
+    margin: 18px 2px 8px;
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .sketch-constraint-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .sketch-constraint-grid button {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid var(--color-kumo-line);
+    border-radius: 8px;
+    color: var(--color-kumo-subtle);
+    background: var(--color-kumo-base);
+    font-size: 0.66rem;
+    text-align: left;
+  }
+
+  .sketch-version-list {
+    margin: 0;
+  }
+
+  .sketch-version-list li {
+    justify-content: space-between;
+    border-bottom: 1px solid var(--color-kumo-line);
+    border-radius: 0;
+  }
+
+  .sketch-version-list li > span {
+    min-width: 0;
+  }
+
+  .sketch-version-list strong,
+  .sketch-version-list small {
+    display: block;
+  }
+
+  .sketch-version-list strong {
+    font-size: 0.7rem;
+  }
+
+  .sketch-version-list small {
+    margin-top: 3px;
+    color: var(--color-kumo-subtle);
+    font-size: 0.64rem;
+  }
+
+  .sketch-version-list.is-compact li {
+    padding-inline: 4px;
+  }
+
+  .workspace-comment-list {
+    display: grid;
+    gap: 10px;
+    padding-bottom: 10px;
+  }
+
+  .workspace-comment-composer {
+    flex: 0 0 auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-kumo-line);
+  }
+
+  .workspace-comment-pins {
+    position: absolute;
+    z-index: 28;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .workspace-comment-pins .lb-comment-pin {
+    position: absolute;
+    pointer-events: auto;
+    translate: -50% -50%;
+  }
+
+  .dashboard-shell {
+    display: grid;
+    min-height: 100dvh;
+    grid-template-columns: 224px minmax(0, 1fr);
+    color: var(--color-kumo-contrast);
+    background: var(--color-kumo-canvas);
+  }
+
+  .dashboard-sidebar {
+    display: flex;
+    min-height: 100dvh;
+    flex-direction: column;
+    gap: 18px;
+    padding: 16px 12px;
+    border-right: 1px solid var(--color-kumo-line);
+    background: var(--color-kumo-base);
+  }
+
+  .dashboard-wordmark {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 5px;
+    text-decoration: none;
+  }
+
+  .dashboard-wordmark > span {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    border-radius: 8px;
+    color: white;
+    background: #27313f;
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+  }
+
+  .dashboard-wordmark > strong {
+    font-size: 0.9rem;
+  }
+
+  .dashboard-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    color: var(--color-kumo-subtle);
+  }
+
+  .dashboard-search > svg {
+    position: absolute;
+    z-index: 1;
+    left: 9px;
+  }
+
+  .dashboard-search input {
+    padding-left: 32px;
+  }
+
+  .dashboard-sidebar nav {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .dashboard-sidebar > button:last-child {
+    margin-top: auto;
+  }
+
+  .dashboard-library {
+    min-width: 0;
+    padding: 34px clamp(24px, 4vw, 64px);
+  }
+
+  .dashboard-library > header {
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--color-kumo-line);
+  }
+
+  .dashboard-library h1 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 650;
+  }
+
+  .dashboard-project-grid {
+    display: grid;
+    max-width: 820px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 18px;
+    margin-top: 24px;
+  }
+
+  .dashboard-project-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--color-kumo-line);
+    border-radius: 13px;
+    background: var(--color-kumo-base);
+    text-decoration: none;
+    transition:
+      border-color 120ms ease,
+      box-shadow 120ms ease,
+      translate 120ms ease;
+  }
+
+  .dashboard-project-card:hover {
+    translate: 0 -1px;
+    border-color: var(--color-kumo-interact);
+    box-shadow: 0 10px 28px rgb(23 30 40 / 8%);
+  }
+
+  .dashboard-project-thumbnail {
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-bottom: 1px solid var(--color-kumo-line);
+  }
+
+  .dashboard-project-thumbnail > svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .spoke-thumbnail-background {
+    fill: #f7f8f9;
+  }
+
+  .spoke-thumbnail-grid {
+    fill: url('#spoke-thumbnail-grid');
+  }
+
+  #spoke-thumbnail-grid path {
     fill: none;
-    stroke: var(--color-kumo-brand);
-    stroke-width: 1.4;
+    stroke: rgb(64 75 90 / 8%);
+    stroke-width: 0.7;
   }
 
-  .library-slot.is-conflict,
-  .library-conflict-gap {
-    stroke: var(--color-attune-conflict);
+  .spoke-thumbnail-geometry {
+    fill: none;
+    stroke: #344050;
+    stroke-width: 1.5;
+  }
+
+  .dashboard-project-meta {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px;
+  }
+
+  .dashboard-project-meta h2 {
+    margin: 0 0 5px;
+    font-size: 0.82rem;
+    font-weight: 650;
+  }
+
+  .dashboard-draft-label {
+    color: var(--color-kumo-subtle);
+    font-size: 0.68rem;
+  }
+
+  .dashboard-project-activity {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .dashboard-project-activity time {
+    color: var(--color-kumo-subtle);
+    font-size: 0.64rem;
+    white-space: nowrap;
+  }
+
+  .dashboard-empty {
+    color: var(--color-kumo-subtle);
+    font-size: 0.78rem;
   }
 }
 
-@media (max-width: 767px) {
-  .canvas-viewport > svg:not(.lb-cursors) {
-    min-width: 600px;
-    transform: translateX(-70px);
+@media (max-width: 720px) {
+  .workspace-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .workspace-header > .workspace-draft-menu,
+  .workspace-header > .workspace-draft-control {
+    display: none;
+  }
+
+  .workspace-presence .workspace-sync-icon {
+    display: none;
+  }
+
+  .workspace-overlay-panel {
+    inset: 128px 12px 12px !important;
+    width: auto;
+  }
+
+  .workspace-tool-island {
+    top: 66px;
+    flex-direction: row;
+  }
+
+  .workspace-tool-divider {
+    width: 1px;
+    height: auto;
+    margin: 2px 4px;
+  }
+
+  .dashboard-shell {
+    display: block;
+  }
+
+  .dashboard-sidebar {
+    min-height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-kumo-line);
+  }
+
+  .dashboard-sidebar nav {
+    flex-direction: row;
+    overflow-x: auto;
   }
 }

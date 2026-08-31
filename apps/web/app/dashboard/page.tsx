@@ -3,8 +3,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashboard-library';
-import { inspectForHuman } from '../../lib/attune-runtime';
 import { currentAttuneUser } from '../../lib/auth/session';
+import { liveblocksConfigured } from '../../lib/liveblocks/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,35 +33,18 @@ export default async function DashboardPage() {
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
   const projectRows = await listProjectsForUser(user.userId);
-  const files: AttuneLibraryFile[] = await Promise.all(
-    projectRows.map(async (row) => {
-      const view = await inspectForHuman(row.workspaceId);
-      const currentRevisionId = `r${view.workspace.draftVersion}`;
-      return {
-        workspaceId: row.workspaceId,
-        projectName: row.projectName,
-        projectCode: row.projectCode,
-        workspaceName: row.workspaceName,
-        fileName: row.fileName,
-        draftVersion: row.draftVersion,
-        updatedAt: row.updatedAt,
-        valid: view.validation.valid,
-        frozen: view.workspace.frozenRevisions.some(
-          ({ revisionId, specHash }) =>
-            revisionId === currentRevisionId && specHash === view.specHash,
-        ),
-        accepted: view.workspace.acceptances.some(
-          ({ revisionId, specHash }) =>
-            revisionId === currentRevisionId && specHash === view.specHash,
-        ),
-        verified: view.workspace.commerceLinks.some(
-          ({ revisionId, specHash }) =>
-            revisionId === currentRevisionId && specHash === view.specHash,
-        ),
-        collaborators: [user.displayName, 'Provider', 'Attune agent'],
-      };
-    }),
-  );
+  const files: AttuneLibraryFile[] = projectRows.slice(0, 1).map((row) => ({
+    workspaceId: row.workspaceId,
+    roomId: row.liveblocksRoomId,
+    projectName: 'Spoke sketch',
+    updatedAt: row.updatedAt,
+  }));
 
-  return <DashboardLibrary files={files} displayName={user.displayName} />;
+  return (
+    <DashboardLibrary
+      files={files}
+      collaboration={liveblocksConfigured()}
+      user={{ id: user.userId, name: user.displayName }}
+    />
+  );
 }

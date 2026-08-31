@@ -4,11 +4,15 @@ Attune is licensed under Apache-2.0. Dependencies retain their own licenses.
 
 ## Current foundation dependencies
 
-| Dependency        | Version | License | Source                                    | Modified |
-| ----------------- | ------: | ------- | ----------------------------------------- | -------- |
-| Next.js           |  16.3.3 | MIT     | https://github.com/vercel/next.js         | No       |
-| React / React DOM |  19.2.8 | MIT     | https://github.com/facebook/react         | No       |
-| Vite+             |   0.2.7 | MIT     | https://github.com/voidzero-dev/vite-plus | No       |
+| Dependency        | Version | License      | Source                                                     | Modified |
+| ----------------- | ------: | ------------ | ---------------------------------------------------------- | -------- |
+| Next.js           |  16.3.3 | MIT          | https://github.com/vercel/next.js                          | No       |
+| React / React DOM |  19.2.8 | MIT          | https://github.com/facebook/react                          | No       |
+| CanvasKit WASM    |  0.42.0 | BSD-3-Clause | https://github.com/google/skia/tree/main/modules/canvaskit | No       |
+| Vite+             |   0.2.7 | MIT          | https://github.com/voidzero-dev/vite-plus                  | No       |
+
+The unmodified CanvasKit browser runtime and WASM binary are served from
+`apps/web/public/canvaskit` so the default Turbopack browser bundle does not need Node.js shims.
 
 ## Planned P0 solver dependency
 

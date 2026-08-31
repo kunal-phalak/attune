@@ -15,6 +15,7 @@ export {
   readWorkspaceBundle,
   resetJudgeWorkspace,
   reserveExternalMaterialization,
+  usersForLiveblocksRoom,
   workspaceRoles,
 } from './repository';
 export type {

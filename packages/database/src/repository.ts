@@ -20,7 +20,7 @@ import {
   type AttuneRole,
   type AttuneWorkspace,
 } from '@attune/domain';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import { getDatabase } from './client';
 import {
@@ -412,19 +412,19 @@ export async function ensureJudgeWorkspace(): Promise<void> {
       .values({
         id: initial.projectId,
         organizationId: 'organization:attune-demo',
-        name: 'Custom equipment enclosure',
+        name: 'Spoke sketch',
         code: initial.commitmentId,
       })
       .onConflictDoUpdate({
         target: projects.id,
-        set: { name: 'Custom equipment enclosure' },
+        set: { name: 'Spoke sketch' },
       });
     await transaction
       .insert(workspaces)
       .values({
         id: JUDGE_WORKSPACE_ID,
         projectId: initial.projectId,
-        name: 'Control-enclosure faceplate specification',
+        name: 'Spoke sketch',
         commitmentId: initial.commitmentId,
         liveblocksRoomId: 'attune:workspace:at-1042',
         currentSpecification: initial,
@@ -435,19 +435,19 @@ export async function ensureJudgeWorkspace(): Promise<void> {
       })
       .onConflictDoUpdate({
         target: workspaces.id,
-        set: { name: 'Control-enclosure faceplate specification' },
+        set: { name: 'Spoke sketch' },
       });
     await transaction
       .insert(workspaceFiles)
       .values({
         id: 'file:at-1042-panel',
         workspaceId: JUDGE_WORKSPACE_ID,
-        name: 'Control faceplate.attune',
+        name: 'Spoke sketch.attune',
         kind: 'executable-specification',
       })
       .onConflictDoUpdate({
         target: workspaceFiles.id,
-        set: { name: 'Control faceplate.attune' },
+        set: { name: 'Spoke sketch.attune' },
       });
     await transaction
       .insert(workspaceMemberships)
@@ -650,6 +650,19 @@ export async function identityForLiveblocksRoom(
   return row ? { ...row, principalId } : null;
 }
 
+export async function usersForLiveblocksRoom(
+  roomId: string,
+  userIds: readonly string[],
+): Promise<readonly { readonly id: string; readonly name: string }[]> {
+  if (userIds.length === 0) return [];
+  return getDatabase()
+    .select({ id: users.id, name: users.displayName })
+    .from(workspaces)
+    .innerJoin(workspaceMemberships, eq(workspaceMemberships.workspaceId, workspaces.id))
+    .innerJoin(users, eq(users.id, workspaceMemberships.userId))
+    .where(and(eq(workspaces.liveblocksRoomId, roomId), inArray(users.id, [...userIds])));
+}
+
 export async function ensureAuthenticatedUser(input: {
   readonly authUserId: string;
   readonly email?: string;
@@ -680,6 +693,7 @@ export async function listProjectsForUser(userId: string) {
       workspaceId: workspaces.id,
       workspaceName: workspaces.name,
       fileName: workspaceFiles.name,
+      liveblocksRoomId: workspaces.liveblocksRoomId,
       workspaceSeq: workspaces.workspaceSeq,
       draftVersion: workspaces.draftVersion,
       capabilityEpoch: workspaces.capabilityEpoch,

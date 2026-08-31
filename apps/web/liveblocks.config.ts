@@ -28,6 +28,7 @@ declare global {
       id: string;
       info: {
         name: string;
+        avatar?: string;
         role: AttuneRole;
         color: string;
       };

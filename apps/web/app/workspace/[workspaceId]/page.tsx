@@ -33,8 +33,10 @@ function PersistenceGate() {
 
 export default async function WorkspacePage({
   params,
+  searchParams,
 }: {
   readonly params: Promise<{ readonly workspaceId: string }>;
+  readonly searchParams: Promise<{ readonly perspective?: string }>;
 }) {
   if (!databaseConfigured()) return <PersistenceGate />;
   const user = await currentAttuneUser();
@@ -44,16 +46,21 @@ export default async function WorkspacePage({
   const workspaceId = decodeURIComponent(encodedWorkspaceId);
   const identity = await identityForWorkspace(workspaceId, user.userId, user.principalId);
   if (!identity) notFound();
+  const requestedPerspective = (await searchParams).perspective;
+  const perspective = requestedPerspective === 'provider' ? 'provider' : 'buyer';
+  if (!identity.roles.includes(perspective)) notFound();
   const bundle = await readWorkspaceBundle(workspaceId);
   return (
     <WorkspaceProduct
       workspaceId={workspaceId}
       roomId={bundle.liveblocksRoomId}
       collaboration={liveblocksConfigured()}
+      perspective={perspective}
+      judgeMode={user.judge}
       actor={{
         id: user.userId,
         name: user.displayName,
-        role: identity.roles[0] ?? 'buyer',
+        role: perspective,
       }}
     />
   );

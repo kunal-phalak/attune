@@ -57,16 +57,21 @@ function draftFrom(view: AttuneApiView): AttuneCollaborativeDraft {
   };
 }
 
-function YjsDraftBridge({ workspaceId }: { readonly workspaceId: string }) {
+function YjsDraftBridge({
+  workspaceId,
+  perspective,
+}: {
+  readonly workspaceId: string;
+  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+}) {
   const room = useRoom();
   const provider = useMemo(() => getYjsProviderForRoom(room), [room]);
 
   useEffect(() => {
     let active = true;
     const synchronize = async () => {
-      const view = await requestAttuneView(
-        attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
-      );
+      const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
+      const view = await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId));
       if (!active) return;
       const map = provider.getYDoc().getMap('attune');
       const next = draftFrom(view);
@@ -79,7 +84,7 @@ function YjsDraftBridge({ workspaceId }: { readonly workspaceId: string }) {
       active = false;
       window.removeEventListener('attune:workspace-changed', onChange);
     };
-  }, [provider, workspaceId]);
+  }, [perspective, provider, workspaceId]);
 
   return null;
 }
@@ -90,35 +95,39 @@ function workflowAction(view: AttuneApiView): WorkflowAction | null {
       candidate.revisionId === `r${view.workspace.draftVersion}` &&
       candidate.specHash === view.specHash,
   );
-  if (available(view, 'buyer', 'request_quote'))
+  if (view.perspective === 'buyer' && available(view, 'buyer', 'request_quote'))
     return {
       label: 'Request exact quote',
       path: '/api/attune/human',
       prefix: 'buyer',
       command: { type: 'request_quote' },
     };
-  if (available(view, 'provider', 'freeze_and_quote_revision'))
+  if (view.perspective === 'provider' && available(view, 'provider', 'freeze_and_quote_revision'))
     return {
       label: `Freeze + quote exact r${view.workspace.draftVersion}`,
       path: '/api/attune/provider',
       prefix: 'provider',
       command: { type: 'freeze_and_quote_revision' },
     };
-  if (available(view, 'buyer', 'accept_revision') && quote)
+  if (view.perspective === 'buyer' && available(view, 'buyer', 'accept_revision') && quote)
     return {
       label: `Accept exact ${quote.revisionId}`,
       path: '/api/attune/human',
       prefix: 'buyer',
       command: { type: 'accept_revision', revisionId: quote.revisionId, quoteId: quote.quoteId },
     };
-  if (available(view, 'agent', 'materialize_for_commerce'))
+  if (view.perspective === 'provider' && available(view, 'provider', 'materialize_for_commerce'))
     return {
       label: 'Materialize + verify Shopify',
       path: '/api/attune/webmcp',
       prefix: 'agent',
       command: { type: 'materialize_for_commerce', revisionId: `r${view.workspace.draftVersion}` },
     };
-  if (available(view, 'agent', 'navigate_to_storefront') && view.workspace.draftVersion === 7)
+  if (
+    view.perspective === 'buyer' &&
+    available(view, 'buyer', 'navigate_to_storefront') &&
+    view.workspace.draftVersion === 7
+  )
     return {
       label: 'Continue work as draft r8',
       path: '/api/attune/human',
@@ -239,6 +248,7 @@ function ResetDialog({
 
 function WorkspaceHeader({
   view,
+  judgeMode,
   collaboration,
   webMcpStatus,
   onAgent,
@@ -246,6 +256,7 @@ function WorkspaceHeader({
   onReset,
 }: {
   readonly view: AttuneApiView;
+  readonly judgeMode: boolean;
   readonly collaboration: boolean;
   readonly webMcpStatus: AttuneWebMcpStatus;
   readonly onAgent: () => void;
@@ -267,6 +278,26 @@ function WorkspaceHeader({
         </div>
       </div>
       <div className="editor-state-group">
+        {judgeMode ? (
+          <nav className="perspective-switcher" aria-label="Judge workspace perspective">
+            <Link
+              href={`/workspace/${encodeURIComponent(view.product.workspaceId)}?perspective=buyer`}
+              aria-current={view.perspective === 'buyer' ? 'page' : undefined}
+            >
+              Buyer workspace
+            </Link>
+            <Link
+              href={`/workspace/${encodeURIComponent(view.product.workspaceId)}?perspective=provider`}
+              aria-current={view.perspective === 'provider' ? 'page' : undefined}
+            >
+              Provider workspace
+            </Link>
+          </nav>
+        ) : (
+          <span className={`perspective-badge is-${view.perspective}`}>
+            {view.perspective} workspace
+          </span>
+        )}
         <span className="revision-pill">Draft r{view.workspace.draftVersion}</span>
         <span
           className={
@@ -313,9 +344,13 @@ function WorkspaceHeader({
 function WorkspaceShell({
   workspaceId,
   collaboration,
+  perspective,
+  judgeMode,
 }: {
   readonly workspaceId: string;
   readonly collaboration: boolean;
+  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly judgeMode: boolean;
 }) {
   const [view, setView] = useState<AttuneApiView | null>(null);
   const [state, setState] = useState<ProductState>('loading');
@@ -332,12 +367,13 @@ function WorkspaceShell({
 
   const refresh = useCallback(async () => {
     try {
-      setView(await requestAttuneView(attuneWorkspaceEndpoint('/api/attune/human', workspaceId)));
+      const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
+      setView(await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId)));
       setState('ready');
     } catch {
       setState('failed');
     }
-  }, [workspaceId]);
+  }, [perspective, workspaceId]);
 
   useEffect(() => {
     void refresh();
@@ -422,9 +458,14 @@ function WorkspaceShell({
 
   return (
     <main className="attune-workspace-shell">
-      <AttuneWebMcp workspaceId={workspaceId} onStatus={setWebMcpStatus} />
+      <AttuneWebMcp
+        workspaceId={workspaceId}
+        perspective={perspective}
+        onStatus={setWebMcpStatus}
+      />
       <WorkspaceHeader
         view={view}
+        judgeMode={judgeMode}
         collaboration={collaboration}
         webMcpStatus={webMcpStatus}
         onAgent={askAgent}
@@ -525,22 +566,39 @@ export function WorkspaceProduct({
   workspaceId,
   roomId,
   collaboration,
+  perspective,
+  judgeMode,
   actor,
 }: {
   readonly workspaceId: string;
   readonly roomId: string;
   readonly collaboration: boolean;
+  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly judgeMode: boolean;
   readonly actor: { readonly id: string; readonly name: string; readonly role: CapabilityRole };
 }) {
-  if (!collaboration) return <WorkspaceShell workspaceId={workspaceId} collaboration={false} />;
+  if (!collaboration)
+    return (
+      <WorkspaceShell
+        workspaceId={workspaceId}
+        collaboration={false}
+        perspective={perspective}
+        judgeMode={judgeMode}
+      />
+    );
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth">
       <RoomProvider
         id={roomId}
         initialPresence={{ cursor: null, selection: [], currentTool: 'select', activeActor: actor }}
       >
-        <YjsDraftBridge workspaceId={workspaceId} />
-        <WorkspaceShell workspaceId={workspaceId} collaboration />
+        <YjsDraftBridge workspaceId={workspaceId} perspective={perspective} />
+        <WorkspaceShell
+          workspaceId={workspaceId}
+          collaboration
+          perspective={perspective}
+          judgeMode={judgeMode}
+        />
       </RoomProvider>
     </LiveblocksProvider>
   );

@@ -3,6 +3,7 @@ import type {
   ChangeReceipt,
   CommandRejection,
   CommandResult,
+  DelegationGrant,
 } from '@attune/command-bus';
 import type {
   Acceptance,
@@ -10,6 +11,7 @@ import type {
   AttuneWorkspace,
   CommerceLink,
   FrozenRevision,
+  ProviderCapabilityProfile,
   Quote,
   QuoteRequest,
 } from '@attune/domain';
@@ -132,6 +134,48 @@ export const workspaceMemberships = pgTable(
     createdAt,
   },
   (table) => [primaryKey({ columns: [table.workspaceId, table.userId] })],
+);
+
+export const providerCapabilityProfiles = pgTable(
+  'provider_capability_profiles',
+  {
+    profileId: text('profile_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    version: text('version').notNull(),
+    profile: jsonb('profile').$type<ProviderCapabilityProfile>().notNull(),
+    effectiveAt: timestamp('effective_at', { mode: 'string', withTimezone: true }).notNull(),
+    createdAt,
+  },
+  (table) => [
+    primaryKey({ columns: [table.profileId, table.version] }),
+    index('provider_capability_profiles_provider_index').on(table.providerId),
+  ],
+);
+
+export const delegationGrants = pgTable(
+  'delegation_grants',
+  {
+    grantId: text('grant_id').primaryKey(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id),
+    delegatingPrincipalId: text('delegating_principal_id').notNull(),
+    delegatedPrincipalId: text('delegated_principal_id').notNull(),
+    role: text('role').$type<AttuneRole>().notNull(),
+    capabilityIds: text('capability_ids')
+      .array()
+      .$type<DelegationGrant['capabilityIds']>()
+      .notNull(),
+    observationCursor: integer('observation_cursor').notNull().default(0),
+    issuedAt: timestamp('issued_at', { mode: 'string', withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { mode: 'string', withTimezone: true }),
+    createdAt,
+  },
+  (table) => [
+    index('delegation_grants_workspace_role_index').on(table.workspaceId, table.role),
+    index('delegation_grants_delegated_principal_index').on(table.delegatedPrincipalId),
+  ],
 );
 
 export const workspaceSnapshots = pgTable(

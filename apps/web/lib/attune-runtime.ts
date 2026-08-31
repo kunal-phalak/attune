@@ -2,10 +2,11 @@ import {
   AttuneCommandBus,
   AttuneCommandError,
   type CommandEnvelope,
+  type DelegationGrant,
   type TrustedExecutionContext,
-  type TrustedExecutionPath,
 } from '@attune/command-bus';
 import {
+  activeDelegationForWorkspace,
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
@@ -35,32 +36,43 @@ export interface CommerceMaterializationInput {
   readonly envelope: CommandEnvelope;
 }
 
-function principalPrefix(path: TrustedExecutionPath): string {
-  switch (path) {
-    case 'human':
-      return 'buyer:';
-    case 'provider':
-      return 'provider:';
-    case 'webmcp':
-      return 'agent:';
-    case 'solver':
-      return 'solver:';
-    case 'shopify':
-      return 'integration:shopify:';
-  }
-  throw new TypeError('Unsupported execution path.');
-}
-
-async function trustedContext(
+async function trustedHumanContext(
   workspaceId: string,
-  path: TrustedExecutionPath,
   role: AttuneRole,
 ): Promise<TrustedExecutionContext> {
   const identity = await requireWorkspaceIdentity(workspaceId, role);
   return {
-    path,
+    path: 'human',
+    workspaceId,
     role,
-    principalId: `${principalPrefix(path)}${identity.userId}`,
+    principalId: `${role}:${identity.userId}`,
+  };
+}
+
+async function trustedDelegatedContext(
+  workspaceId: string,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+): Promise<TrustedExecutionContext> {
+  const identity = await requireWorkspaceIdentity(workspaceId, role);
+  const delegation = await activeDelegationForWorkspace(workspaceId, role);
+  if (!delegation || delegation.delegatingPrincipalId !== `${role}:${identity.userId}`) {
+    throw new Error('ACTIVE_DELEGATION_REQUIRED');
+  }
+  return {
+    path: 'webmcp',
+    workspaceId,
+    role,
+    principalId: delegation.delegatedPrincipalId,
+    delegation,
+  };
+}
+
+function trustedSystemContext(workspaceId: string): TrustedExecutionContext {
+  return {
+    path: 'system',
+    workspaceId,
+    role: 'provider',
+    principalId: 'integration:shopify:attune',
   };
 }
 
@@ -105,11 +117,25 @@ function impactMetrics(bundle: WorkspaceBundle) {
   };
 }
 
-function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole) {
+function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole, delegation?: DelegationGrant) {
   const bus = new AttuneCommandBus(bundle.workspace);
   const inspection = bus.inspect(role);
+  const delegatedCapabilities = delegation
+    ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
+    : inspection.capabilities;
   return {
     ...inspection,
+    capabilities: delegatedCapabilities,
+    perspective: role,
+    delegation: delegation
+      ? {
+          grantId: delegation.grantId,
+          role: delegation.role,
+          capabilityIds: delegation.capabilityIds,
+          expiresAt: delegation.expiresAt,
+          observationCursor: delegation.observationCursor,
+        }
+      : null,
     observation: bundle.observation,
     product: {
       workspaceId: bundle.workspaceId,
@@ -120,7 +146,7 @@ function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole) {
     frontiers: {
       buyer: bus.inspect('buyer').frontier,
       provider: bus.inspect('provider').frontier,
-      agent: bus.inspect('agent').frontier,
+      reviewer: bus.inspect('reviewer').frontier,
     },
     repairs: compareValidChanges(bundle.workspace),
     records: {
@@ -136,39 +162,43 @@ function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole) {
   };
 }
 
-async function inspect(workspaceId: string, role: AttuneRole, observationCursor?: number) {
+async function inspectHuman(workspaceId: string, role: AttuneRole) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const path = role === 'provider' ? 'provider' : role === 'agent' ? 'webmcp' : 'human';
-  const context = await trustedContext(workspaceId, path, role);
-  const bundle = await readWorkspaceBundle(
-    workspaceId,
-    observationCursor,
-    role === 'agent' && observationCursor !== undefined ? context.principalId : undefined,
-  );
+  await trustedHumanContext(workspaceId, role);
+  const bundle = await readWorkspaceBundle(workspaceId);
   return viewForBundle(bundle, role);
 }
 
-export function inspectForAgent(workspaceId: string, observationCursor?: number) {
-  return inspect(workspaceId, 'agent', observationCursor);
+export async function inspectForDelegatedAgent(
+  workspaceId: string,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  observationCursor?: number,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const context = await trustedDelegatedContext(workspaceId, role);
+  const bundle = await readWorkspaceBundle(
+    workspaceId,
+    observationCursor,
+    observationCursor === undefined ? undefined : context.principalId,
+  );
+  return viewForBundle(bundle, role, context.delegation);
 }
 
-export function inspectForHuman(workspaceId: string) {
-  return inspect(workspaceId, 'buyer');
+export function inspectForHuman(workspaceId: string, role: AttuneRole = 'buyer') {
+  return inspectHuman(workspaceId, role);
 }
 
 export function inspectForProvider(workspaceId: string) {
-  return inspect(workspaceId, 'provider');
+  return inspectHuman(workspaceId, 'provider');
 }
 
 async function executeWithContext(
   workspaceId: string,
   input: CommandExecutionInput,
-  path: TrustedExecutionPath,
-  role: AttuneRole,
+  context: TrustedExecutionContext,
   liveblocksVersionId?: string,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const context = await trustedContext(workspaceId, path, role);
   await executePersistedCommand(
     { workspaceId, command: input.command, envelope: input.envelope, context },
     liveblocksVersionId,
@@ -176,45 +206,54 @@ async function executeWithContext(
   const bundle = await readWorkspaceBundle(
     workspaceId,
     input.envelope.observationCursor,
-    role === 'agent' ? context.principalId : undefined,
+    context.path === 'webmcp' ? context.principalId : undefined,
   );
-  return viewForBundle(bundle, role);
+  return viewForBundle(bundle, context.role, context.delegation);
 }
 
-export function executeAgentCommand(workspaceId: string, input: CommandExecutionInput) {
-  return executeWithContext(workspaceId, input, 'webmcp', 'agent');
+export async function executeAgentCommand(
+  workspaceId: string,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  input: CommandExecutionInput,
+) {
+  return executeWithContext(workspaceId, input, await trustedDelegatedContext(workspaceId, role));
 }
 
-export function executeHumanCommand(workspaceId: string, input: CommandExecutionInput) {
-  return executeWithContext(workspaceId, input, 'human', 'buyer');
+export async function executeHumanCommand(
+  workspaceId: string,
+  input: CommandExecutionInput,
+  role: AttuneRole = 'buyer',
+) {
+  return executeWithContext(workspaceId, input, await trustedHumanContext(workspaceId, role));
 }
 
 export async function executeProviderCommand(workspaceId: string, input: CommandExecutionInput) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  await trustedContext(workspaceId, 'provider', 'provider');
+  const context = await trustedHumanContext(workspaceId, 'provider');
   const current = await readWorkspaceBundle(workspaceId);
   const collaboration = await snapshotCollaborativeDraft(
     current.liveblocksRoomId,
     current.workspace,
   );
-  return executeWithContext(workspaceId, input, 'provider', 'provider', collaboration.versionId);
+  return executeWithContext(workspaceId, input, context, collaboration.versionId);
 }
 
 export async function executeCommerceMaterialization(
   workspaceId: string,
+  role: Extract<AttuneRole, 'provider'>,
   input: CommerceMaterializationInput,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  await trustedContext(workspaceId, 'webmcp', 'agent');
-  const context = await trustedContext(workspaceId, 'shopify', 'agent');
+  const delegatedContext = await trustedDelegatedContext(workspaceId, role);
+  const context = trustedSystemContext(workspaceId);
   const reservation = await reserveExternalMaterialization({
     workspaceId,
     revisionId: input.revisionId,
     envelope: input.envelope,
-    context,
+    context: delegatedContext,
   });
   if (reservation.status === 'completed') {
-    return viewForBundle(await readWorkspaceBundle(workspaceId), 'agent');
+    return viewForBundle(await readWorkspaceBundle(workspaceId), role, delegatedContext.delegation);
   }
   try {
     const verification = await materializeAt1042Revision(reservation.revision);
@@ -225,7 +264,7 @@ export async function executeCommerceMaterialization(
       context,
     });
     await finishExternalMaterialization(workspaceId, input.envelope.commandId, 'completed');
-    return viewForBundle(await readWorkspaceBundle(workspaceId), 'agent');
+    return viewForBundle(await readWorkspaceBundle(workspaceId), role, delegatedContext.delegation);
   } catch (error) {
     await finishExternalMaterialization(
       workspaceId,

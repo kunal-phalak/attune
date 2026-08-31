@@ -10,30 +10,62 @@ import {
   AttuneCommandBus,
   AttuneCommandError,
   type CommandEnvelope,
+  type DelegationGrant,
   type TrustedExecutionContext,
 } from './index';
 
 const FIXED_TIME = '2026-08-29T12:00:00.000Z';
+const WORKSPACE_ID = 'workspace:at-1042';
+
+function delegation(
+  role: DelegationGrant['role'],
+  capabilityIds: DelegationGrant['capabilityIds'],
+): DelegationGrant {
+  return {
+    grantId: `delegation:test:${role}`,
+    delegatingPrincipalId: `${role}:AT-1042`,
+    delegatedPrincipalId: `agent:judge-tab:${role}`,
+    role,
+    workspaceId: WORKSPACE_ID,
+    capabilityIds,
+    issuedAt: '2026-08-29T00:00:00.000Z',
+    expiresAt: '2026-09-23T00:00:00.000Z',
+    revokedAt: null,
+    observationCursor: 0,
+  };
+}
 
 const buyer: TrustedExecutionContext = {
   path: 'human',
+  workspaceId: WORKSPACE_ID,
   principalId: 'buyer:AT-1042',
   role: 'buyer',
 };
-const agent: TrustedExecutionContext = {
+const buyerAgent: TrustedExecutionContext = {
   path: 'webmcp',
-  principalId: 'agent:judge-tab',
-  role: 'agent',
+  workspaceId: WORKSPACE_ID,
+  principalId: 'agent:judge-tab:buyer',
+  role: 'buyer',
+  delegation: delegation('buyer', [
+    'compare_valid_changes',
+    'apply_deterministic_repair',
+    'edit_draft',
+    'request_quote',
+    'accept_revision',
+    'navigate_to_storefront',
+  ]),
 };
 const provider: TrustedExecutionContext = {
-  path: 'provider',
+  path: 'human',
+  workspaceId: WORKSPACE_ID,
   principalId: 'provider:fabricator',
   role: 'provider',
 };
 const shopify: TrustedExecutionContext = {
-  path: 'shopify',
+  path: 'system',
+  workspaceId: WORKSPACE_ID,
   principalId: 'integration:shopify',
-  role: 'agent',
+  role: 'provider',
 };
 
 function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
@@ -47,7 +79,7 @@ function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
     storefrontUrl: 'https://attune-demo.myshopify.com/products/at-1042-r7',
     commitmentId: 'AT-1042',
     revisionId: 'r7',
-    specHash: hashSpecification(bus.inspect('agent').workspace),
+    specHash: hashSpecification(bus.inspect('provider').workspace),
     title: 'Custom Equipment Panel — AT-1042 r7',
     sku: 'AT-1042-R7-LOT4',
     amountMinor: 240_000,
@@ -62,7 +94,7 @@ function envelope(
   commandId: string,
   observationCursor?: number,
 ): CommandEnvelope {
-  const { workspace } = bus.inspect('agent');
+  const { workspace } = bus.inspect('buyer');
   return {
     commandId,
     expectedWorkspaceSeq: workspace.workspaceSeq,
@@ -72,7 +104,7 @@ function envelope(
   };
 }
 
-function capabilityIds(bus: AttuneCommandBus, role: TrustedExecutionContext['role']) {
+function compiledIds(bus: AttuneCommandBus, role: TrustedExecutionContext['role']) {
   return bus.inspect(role).capabilities.map((candidate) => candidate.id);
 }
 
@@ -80,7 +112,7 @@ function runThroughAcceptance(bus: AttuneCommandBus) {
   bus.execute(
     { type: 'apply_deterministic_repair', repairId: 'move_slot_left_to_clearance' },
     envelope(bus, 'repair-r7'),
-    agent,
+    buyerAgent,
   );
   bus.execute({ type: 'request_quote' }, envelope(bus, 'request-r7'), buyer);
   bus.execute({ type: 'freeze_and_quote_revision' }, envelope(bus, 'quote-r7'), provider);
@@ -102,7 +134,7 @@ describe('shared Attune semantic command bus', () => {
     };
 
     const humanResult = humanBus.execute(command, envelope(humanBus, 'same-command'), buyer);
-    const agentResult = agentBus.execute(command, envelope(agentBus, 'same-command'), agent);
+    const agentResult = agentBus.execute(command, envelope(agentBus, 'same-command'), buyerAgent);
 
     expect(humanResult.receipt.afterHash).toBe(agentResult.receipt.afterHash);
     expect(humanResult.receipt.origin).toBe('human_ui');
@@ -119,7 +151,7 @@ describe('shared Attune semantic command bus', () => {
       buyer,
     );
 
-    const observed = bus.inspect('agent', 0);
+    const observed = bus.inspect('buyer', 0);
     expect(observed.observation).toEqual(
       expect.objectContaining({
         previousWorkspaceSeq: 0,
@@ -143,8 +175,8 @@ describe('shared Attune semantic command bus', () => {
       type: 'apply_deterministic_repair' as const,
       repairId: 'move_slot_left_to_clearance' as const,
     };
-    const first = bus.execute(command, request, agent);
-    const second = bus.execute(command, request, agent);
+    const first = bus.execute(command, request, buyerAgent);
+    const second = bus.execute(command, request, buyerAgent);
 
     expect(second).toBe(first);
     expect(bus.receipts()).toHaveLength(1);
@@ -154,10 +186,11 @@ describe('shared Attune semantic command bus', () => {
     expect(() =>
       bus.execute({ type: 'request_quote' }, envelope(bus, 'forged-role'), {
         path: 'webmcp',
-        principalId: 'browser-claim',
+        workspaceId: WORKSPACE_ID,
+        principalId: 'agent:missing-delegation',
         role: 'buyer',
       }),
-    ).toThrowError(expect.objectContaining({ code: 'ROLE_MISMATCH' }));
+    ).toThrowError(expect.objectContaining({ code: 'DELEGATION_REQUIRED' }));
     expect(() =>
       bus.execute(
         { type: 'move_slot', centerX: 194, centerY: 60 },
@@ -167,22 +200,22 @@ describe('shared Attune semantic command bus', () => {
           expectedWorkspaceSeq: 1,
           expectedCapabilityEpoch: 2,
         },
-        agent,
+        buyerAgent,
       ),
     ).toThrowError(expect.objectContaining({ code: 'SPEC_HASH_MISMATCH' }));
     expect(() =>
       bus.execute(
         { type: 'move_slot', centerX: 194, centerY: 60 },
         envelope(bus, 'forged-principal'),
-        { ...agent, principalId: 'buyer:forged-browser-claim' },
+        { ...buyerAgent, principalId: 'buyer:forged-browser-claim' },
       ),
     ).toThrowError(expect.objectContaining({ code: 'PRINCIPAL_MISMATCH' }));
     expect(() =>
-      bus.execute({ type: 'move_slot', centerX: 194, centerY: 60 }, request, agent),
+      bus.execute({ type: 'move_slot', centerX: 194, centerY: 60 }, request, buyerAgent),
     ).toThrowError(expect.objectContaining({ code: 'IDEMPOTENCY_CONFLICT' }));
     expect(bus.rejections().map(({ code }) => code)).toEqual([
       'STALE_WORKSPACE',
-      'ROLE_MISMATCH',
+      'DELEGATION_REQUIRED',
       'SPEC_HASH_MISMATCH',
       'PRINCIPAL_MISMATCH',
       'IDEMPOTENCY_CONFLICT',
@@ -190,15 +223,77 @@ describe('shared Attune semantic command bus', () => {
   });
 });
 
+describe('server-issued WebMCP delegation', () => {
+  it('denies capabilities outside the delegated subset', () => {
+    const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
+    const restricted = {
+      ...buyerAgent,
+      delegation: delegation('buyer', ['compare_valid_changes']),
+    } satisfies TrustedExecutionContext;
+
+    expect(() =>
+      bus.execute(
+        { type: 'move_slot', centerX: 194, centerY: 60 },
+        envelope(bus, 'restricted-agent'),
+        restricted,
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'DELEGATION_CAPABILITY_DENIED' }));
+  });
+
+  it('denies expired, revoked, wrong-role, and wrong-workspace grants', () => {
+    const cases = [
+      {
+        context: {
+          ...buyerAgent,
+          delegation: { ...buyerAgent.delegation!, expiresAt: FIXED_TIME },
+        },
+        code: 'DELEGATION_EXPIRED',
+      },
+      {
+        context: {
+          ...buyerAgent,
+          delegation: { ...buyerAgent.delegation!, revokedAt: FIXED_TIME },
+        },
+        code: 'DELEGATION_REVOKED',
+      },
+      {
+        context: {
+          ...buyerAgent,
+          delegation: { ...buyerAgent.delegation!, role: 'provider' as const },
+        },
+        code: 'DELEGATION_INVALID',
+      },
+      {
+        context: {
+          ...buyerAgent,
+          delegation: { ...buyerAgent.delegation!, workspaceId: 'workspace:other' },
+        },
+        code: 'DELEGATION_INVALID',
+      },
+    ];
+
+    for (const [index, candidate] of cases.entries()) {
+      const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
+      expect(() =>
+        bus.execute(
+          { type: 'move_slot', centerX: 194, centerY: 60 },
+          envelope(bus, `invalid-delegation-${index}`),
+          candidate.context,
+        ),
+      ).toThrowError(expect.objectContaining({ code: candidate.code }));
+    }
+  });
+});
+
 describe('AT-1042 r7 to r8 authority path', () => {
   it('freezes, accepts and materializes exact r7, then revokes current commerce authority at r8', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
-    expect(capabilityIds(bus, 'agent')).toContain('apply_deterministic_repair');
+    expect(compiledIds(bus, 'buyer')).toContain('apply_deterministic_repair');
 
     runThroughAcceptance(bus);
-    const accepted = bus.inspect('agent');
+    const accepted = bus.inspect('provider');
     expect(accepted.workspace.draftVersion).toBe(7);
-    expect(capabilityIds(bus, 'agent')).toContain('materialize_for_commerce');
+    expect(compiledIds(bus, 'provider')).toContain('materialize_for_commerce');
 
     const materializeEnvelope = envelope(bus, 'materialize-r7');
     bus.execute(
@@ -219,14 +314,14 @@ describe('AT-1042 r7 to r8 authority path', () => {
         status: 'VERIFIED',
       }),
     );
-    expect(compileCapabilities(materialized, 'agent').map(({ id }) => id)).toContain(
+    expect(compileCapabilities(materialized, 'buyer').map(({ id }) => id)).toContain(
       'navigate_to_storefront',
     );
 
     const staleEpoch = materialized.capabilityEpoch;
     bus.execute({ type: 'move_slot', centerX: 195, centerY: 60 }, envelope(bus, 'human-r8'), buyer);
-    const r8 = bus.inspect('agent').workspace;
-    const r8Capabilities = compileCapabilities(r8, 'agent').map(({ id }) => id);
+    const r8 = bus.inspect('buyer').workspace;
+    const r8Capabilities = compileCapabilities(r8, 'buyer').map(({ id }) => id);
 
     expect(r8.draftVersion).toBe(8);
     expect(r8.frozenRevisions[0]).toEqual(frozenR7);
@@ -273,7 +368,7 @@ describe('AT-1042 r7 to r8 authority path', () => {
     expect(receipts.map(({ origin }) => origin)).toEqual([
       'webmcp',
       'human_ui',
-      'provider',
+      'human_ui',
       'human_ui',
     ]);
     expect(receipts.every(({ beforeHash, afterHash }) => beforeHash !== afterHash)).toBe(true);
@@ -287,7 +382,7 @@ describe('AT-1042 r7 to r8 authority path', () => {
       capabilityId: 'freeze_and_quote_revision',
     });
     expect(bus.transitions()[3].gained).toContainEqual({
-      role: 'agent',
+      role: 'provider',
       capabilityId: 'materialize_for_commerce',
     });
     expect(Object.isFrozen(receipts[0])).toBe(true);

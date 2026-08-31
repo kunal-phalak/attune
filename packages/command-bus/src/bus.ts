@@ -82,6 +82,7 @@ export class AttuneCommandBus {
     envelope: CommandEnvelope,
     context: TrustedExecutionContext,
   ): CommandResult {
+    const now = this.#clock();
     const fingerprint = commandFingerprint(command, envelope, context);
     const idempotent = this.#idempotency.get(envelope.commandId);
     if (idempotent) {
@@ -95,10 +96,9 @@ export class AttuneCommandBus {
       });
     }
 
-    this.#validateEnvelope(envelope, context, command.type);
+    this.#validateEnvelope(envelope, context, command.type, now);
     const before = this.#workspace;
     const validationBefore = validateWorkspace(before);
-    const now = this.#clock();
     let transition;
 
     try {
@@ -154,7 +154,7 @@ export class AttuneCommandBus {
     envelope: CommandEnvelope,
     context: TrustedExecutionContext,
   ): AttuneWorkspace {
-    this.#validateEnvelope(envelope, context, commandType);
+    this.#validateEnvelope(envelope, context, commandType, this.#clock());
     return immutableCopy(this.#workspace);
   }
 
@@ -162,8 +162,9 @@ export class AttuneCommandBus {
     envelope: CommandEnvelope,
     context: TrustedExecutionContext,
     commandType: AttuneCommand['type'],
+    now: string,
   ): void {
-    const authorization = authorizationFailure(context);
+    const authorization = authorizationFailure(context, commandType, now);
     if (authorization) {
       this.#reject({ ...authorization, commandType, envelope, context });
     }

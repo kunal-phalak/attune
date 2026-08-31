@@ -2624,6 +2624,44 @@ input {
   justify-content: center;
 }
 
+.perspective-switcher {
+  align-items: center;
+  background: #e9eae7;
+  border: 1px solid #d6d8d2;
+  border-radius: 8px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+}
+
+.perspective-switcher a,
+.perspective-badge {
+  border-radius: 6px;
+  color: var(--shell-muted);
+  font-size: 9px;
+  font-weight: 720;
+  padding: 5px 8px;
+  text-decoration: none;
+  text-transform: capitalize;
+}
+
+.perspective-switcher a[aria-current='page'] {
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(30 34 31 / 12%);
+  color: var(--shell-ink);
+}
+
+.perspective-switcher a:last-child[aria-current='page'],
+.perspective-badge.is-provider {
+  background: #e6eefb;
+  color: #285388;
+}
+
+.perspective-badge.is-buyer {
+  background: #e5f2ea;
+  color: #2d6649;
+}
+
 .revision-pill,
 .buildability-pill {
   border-radius: 999px;

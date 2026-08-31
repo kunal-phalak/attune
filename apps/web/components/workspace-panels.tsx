@@ -13,7 +13,7 @@ import { getYjsProviderForRoom } from '@liveblocks/yjs';
 import { useEffect, useState } from 'react';
 import * as Y from 'yjs';
 
-import type { AttuneApiView, CapabilityRole, CapabilityView } from '../lib/attune-view';
+import type { AttuneApiView, CapabilityView } from '../lib/attune-view';
 import type { AttuneWebMcpStatus } from './attune-webmcp';
 
 export type InspectorTab = 'design' | 'constraints' | 'capability' | 'commerce';
@@ -322,14 +322,21 @@ function ConstraintsInspector({
         <p>Every offered repair keeps the buyer-locked mount geometry unchanged.</p>
       </div>
       {!view.validation.valid ? (
-        <div className="constraint-actions">
-          <button type="button" className="primary-action" onClick={onCompare}>
-            Compare valid changes
-          </button>
-          <button type="button" onClick={onAskAgent}>
-            Ask agent
-          </button>
-        </div>
+        view.perspective === 'buyer' ? (
+          <div className="constraint-actions">
+            <button type="button" className="primary-action" onClick={onCompare}>
+              Compare valid changes
+            </button>
+            <button type="button" onClick={onAskAgent}>
+              Ask buyer agent
+            </button>
+          </div>
+        ) : (
+          <div className="authority-note">
+            <span>Provider review</span>
+            <p>The buyer must resolve this provider-specific conflict before requesting review.</p>
+          </div>
+        )
       ) : (
         <div className="unlocked-action">
           <span>New consequence</span>
@@ -387,25 +394,17 @@ function CapabilityRow({ capability }: { readonly capability: CapabilityView }) 
 }
 
 function CapabilityInspector({ view }: { readonly view: AttuneApiView }) {
-  const [role, setRole] = useState<CapabilityRole>('buyer');
   const transition = view.latestCapabilityTransition;
   return (
     <div className="inspector-section">
-      <div className="role-switcher" aria-label="Inspect capabilities by role">
-        {(['buyer', 'provider', 'agent'] as const).map((candidate) => (
-          <button
-            type="button"
-            key={candidate}
-            aria-pressed={role === candidate}
-            onClick={() => setRole(candidate)}
-          >
-            {candidate}
-          </button>
-        ))}
+      <div className="role-switcher" aria-label="Active capability perspective">
+        <strong>{view.perspective} workspace</strong>
       </div>
-      <p className="server-authority-note">View only · server membership determines authority.</p>
+      <p className="server-authority-note">
+        Server membership and delegation determine this authority.
+      </p>
       <div className="capability-frontier-list">
-        {view.frontiers[role].map((capability) => (
+        {view.frontiers[view.perspective].map((capability) => (
           <CapabilityRow capability={capability} key={capability.id} />
         ))}
       </div>

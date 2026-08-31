@@ -1,5 +1,5 @@
 import { compileCapabilities } from '@attune/capabilities';
-import type { AttuneWorkspace } from '@attune/domain';
+import type { AttuneRole, AttuneWorkspace } from '@attune/domain';
 
 export type AttuneWebMcpToolName =
   | 'inspect_attune_workspace'
@@ -117,8 +117,11 @@ export const PROBABILISTIC_WEBMCP_EVALS: readonly ProbabilisticWebMcpEval[] = [
   },
 ];
 
-export function contextualToolNames(workspace: AttuneWorkspace): readonly AttuneWebMcpToolName[] {
-  const capabilities = new Set(compileCapabilities(workspace, 'agent').map(({ id }) => id));
+export function contextualToolNames(
+  workspace: AttuneWorkspace,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+): readonly AttuneWebMcpToolName[] {
+  const capabilities = new Set(compileCapabilities(workspace, role).map(({ id }) => id));
   const tools: AttuneWebMcpToolName[] = ['inspect_attune_workspace'];
   if (capabilities.has('compare_valid_changes')) tools.push('compare_valid_changes');
   if (capabilities.has('apply_deterministic_repair')) tools.push('apply_attune_repair');

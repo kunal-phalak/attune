@@ -6,6 +6,8 @@ import {
   compareValidChanges,
   createAt1042Workspace,
   hashSpecification,
+  validateProviderCapability,
+  validateUniversalGeometry,
   validateWorkspace,
 } from './index';
 
@@ -16,6 +18,8 @@ describe('AT-1042 deterministic geometry', () => {
 
     expect(calculateSlotRightClearance(workspace.geometry)).toBe(8.1);
     expect(validation.valid).toBe(false);
+    expect(validation.universal.valid).toBe(true);
+    expect(validation.provider.valid).toBe(false);
     expect(validation.issues).toEqual([
       expect.objectContaining({
         id: 'slot_clearance',
@@ -25,6 +29,30 @@ describe('AT-1042 deterministic geometry', () => {
       }),
     ]);
     expect(validation.evidence.lockedMountsPreserved).toBe(4);
+  });
+
+  it('separates universal validity from the selected provider profile and respects unspecified limits', () => {
+    const workspace = createAt1042Workspace();
+    const unrestrictedProfile = {
+      ...workspace.providerCapabilityProfile,
+      processes: [],
+      materials: 'UNSPECIFIED' as const,
+      minimums: {
+        featureMm: 'UNSPECIFIED' as const,
+        holeDiameterMm: 'UNSPECIFIED' as const,
+        slotWidthMm: 'UNSPECIFIED' as const,
+        edgeClearanceMm: 'UNSPECIFIED' as const,
+        spacingWebMm: 'UNSPECIFIED' as const,
+        toolRadiusMm: 'UNSPECIFIED' as const,
+        kerfMm: 'UNSPECIFIED' as const,
+      },
+    };
+
+    expect(validateUniversalGeometry(workspace.geometry)).toEqual([]);
+    expect(validateProviderCapability(workspace.geometry, unrestrictedProfile)).toEqual([]);
+    expect(validateProviderCapability(workspace.geometry, workspace.providerCapabilityProfile)).toEqual([
+      expect.objectContaining({ id: 'slot_clearance', source: 'provider' }),
+    ]);
   });
 
   it('offers two deterministic repairs with exact predicted hashes and lock preservation', () => {

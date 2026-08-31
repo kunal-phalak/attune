@@ -13,12 +13,12 @@ function requireRole(context: CompilerContext, roles: readonly AttuneRole[]) {
 }
 
 export function editBlockers(context: CompilerContext) {
-  return requireRole(context, ['buyer', 'agent']);
+  return requireRole(context, ['buyer']);
 }
 
 export function conflictBlockers(context: CompilerContext) {
   return [
-    ...requireRole(context, ['buyer', 'agent']),
+    ...requireRole(context, ['buyer']),
     ...(context.valid
       ? [blocker('NO_HARD_CONFLICT', 'The current specification has no hard conflict to repair.')]
       : []),
@@ -80,7 +80,7 @@ export function acceptanceBlockers(context: CompilerContext) {
 export function commerceBlockers(context: CompilerContext) {
   const { authority } = context;
   return [
-    ...requireRole(context, ['agent']),
+    ...requireRole(context, ['provider']),
     ...(!authority.acceptance
       ? [
           blocker(
@@ -101,12 +101,15 @@ export function commerceBlockers(context: CompilerContext) {
 }
 
 export function navigationBlockers(context: CompilerContext) {
-  return context.authority.commerce
-    ? []
-    : [
-        blocker(
-          'COMMERCE_VERIFICATION_MISSING',
-          'No exact Admin, publication, and Storefront verification exists for the current revision.',
-        ),
-      ];
+  return [
+    ...requireRole(context, ['buyer']),
+    ...(context.authority.commerce
+      ? []
+      : [
+          blocker(
+            'COMMERCE_VERIFICATION_MISSING',
+            'No exact Admin, publication, and Storefront verification exists for the current revision.',
+          ),
+        ]),
+  ];
 }

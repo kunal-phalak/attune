@@ -1,5 +1,10 @@
 import type { CommandEnvelope } from '@attune/command-bus';
-import type { AttuneCommand, AttuneCommandType, DeterministicRepair } from '@attune/domain';
+import type {
+  AttuneCommand,
+  AttuneCommandType,
+  AttuneRole,
+  DeterministicRepair,
+} from '@attune/domain';
 
 import type { CommandExecutionInput } from './attune-runtime';
 
@@ -157,6 +162,13 @@ export function parseObservationCursor(value: string | null): number | undefined
 
 export function parseWorkspaceId(value: string | null): string {
   return requiredIdentifier(value, 'workspace_id');
+}
+
+export function parseDelegatedRole(
+  value: string | null,
+): Extract<AttuneRole, 'buyer' | 'provider'> {
+  if (value === 'buyer' || value === 'provider') return value;
+  throw new TypeError('perspective must be buyer or provider.');
 }
 
 export function parseCommandExecutionInput(

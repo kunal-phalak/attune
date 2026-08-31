@@ -1,5 +1,6 @@
 export { databaseConfigured, getDatabase } from './client';
 export {
+  activeDelegationForWorkspace,
   currentFrozenRevision,
   ensureAuthenticatedUser,
   ensureJudgeWorkspace,

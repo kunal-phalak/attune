@@ -64,7 +64,7 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     description: () => 'Accept the exact quoted frozen revision.',
     predictedConsequences: ({ authority }) => [
       `Accepts ${authority.revisionId} and its exact specification hash.`,
-      'Accrues commerce materialization authority for an agent.',
+      'Accrues commerce preparation authority for the selected provider.',
     ],
     blockers: acceptanceBlockers,
     reason: () => 'The provider quote and immutable revision match the current specification.',

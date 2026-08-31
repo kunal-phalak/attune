@@ -2,6 +2,7 @@ import { compileCapabilities } from '@attune/capabilities';
 import {
   AttuneCommandBus,
   type CommandEnvelope,
+  type DelegationGrant,
   type TrustedExecutionContext,
 } from '@attune/command-bus';
 import {
@@ -14,29 +15,61 @@ import { describe, expect, it } from 'vitest';
 import { contextualToolNames, PROBABILISTIC_WEBMCP_EVALS } from './index';
 
 const FIXED_TIME = '2026-08-30T00:00:00.000Z';
+const WORKSPACE_ID = 'workspace:at-1042';
+
+function delegation(
+  role: DelegationGrant['role'],
+  capabilityIds: DelegationGrant['capabilityIds'],
+): DelegationGrant {
+  return {
+    grantId: `delegation:eval:${role}`,
+    delegatingPrincipalId: `${role}:eval`,
+    delegatedPrincipalId: `agent:eval:${role}`,
+    role,
+    workspaceId: WORKSPACE_ID,
+    capabilityIds,
+    issuedAt: '2026-08-29T00:00:00.000Z',
+    expiresAt: '2026-09-23T00:00:00.000Z',
+    revokedAt: null,
+    observationCursor: 0,
+  };
+}
+
 const buyer: TrustedExecutionContext = {
   path: 'human',
+  workspaceId: WORKSPACE_ID,
   principalId: 'buyer:eval',
   role: 'buyer',
 };
 const provider: TrustedExecutionContext = {
-  path: 'provider',
+  path: 'human',
+  workspaceId: WORKSPACE_ID,
   principalId: 'provider:eval',
   role: 'provider',
 };
-const agent: TrustedExecutionContext = {
+const buyerAgent: TrustedExecutionContext = {
   path: 'webmcp',
-  principalId: 'agent:eval',
-  role: 'agent',
+  workspaceId: WORKSPACE_ID,
+  principalId: 'agent:eval:buyer',
+  role: 'buyer',
+  delegation: delegation('buyer', [
+    'compare_valid_changes',
+    'apply_deterministic_repair',
+    'edit_draft',
+    'request_quote',
+    'accept_revision',
+    'navigate_to_storefront',
+  ]),
 };
 const shopify: TrustedExecutionContext = {
-  path: 'shopify',
+  path: 'system',
+  workspaceId: WORKSPACE_ID,
   principalId: 'integration:eval',
-  role: 'agent',
+  role: 'provider',
 };
 
 function envelope(bus: AttuneCommandBus, commandId: string, cursor?: number): CommandEnvelope {
-  const workspace = bus.inspect('agent').workspace;
+  const workspace = bus.inspect('buyer').workspace;
   return {
     commandId,
     expectedWorkspaceSeq: workspace.workspaceSeq,
@@ -57,7 +90,7 @@ function verification(bus: AttuneCommandBus, storefrontUrl = 'https://shop.test/
     storefrontUrl,
     commitmentId: 'AT-1042',
     revisionId: 'r7',
-    specHash: hashSpecification(bus.inspect('agent').workspace),
+    specHash: hashSpecification(bus.inspect('provider').workspace),
     title: 'Custom Equipment Panel — AT-1042 r7',
     sku: 'AT-1042-R7-LOT4',
     amountMinor: 240_000,
@@ -71,7 +104,7 @@ function runToAcceptance(bus: AttuneCommandBus) {
   bus.execute(
     { type: 'apply_deterministic_repair', repairId: 'move_slot_left_to_clearance' },
     envelope(bus, 'eval-repair'),
-    agent,
+    buyerAgent,
   );
   bus.execute({ type: 'request_quote' }, envelope(bus, 'eval-request'), buyer);
   bus.execute({ type: 'freeze_and_quote_revision' }, envelope(bus, 'eval-quote'), provider);
@@ -86,14 +119,14 @@ function runToAcceptance(bus: AttuneCommandBus) {
 describe('deterministic WebMCP surface evals', () => {
   it('changes the contextual tool set only when authoritative capabilities change', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
-    expect(contextualToolNames(bus.inspect('agent').workspace)).toEqual([
+    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toEqual([
       'inspect_attune_workspace',
       'compare_valid_changes',
       'apply_attune_repair',
       'move_attune_slot',
     ]);
     runToAcceptance(bus);
-    expect(contextualToolNames(bus.inspect('agent').workspace)).toContain(
+    expect(contextualToolNames(bus.inspect('provider').workspace, 'provider')).toContain(
       'materialize_attune_revision',
     );
     bus.execute(
@@ -105,11 +138,11 @@ describe('deterministic WebMCP surface evals', () => {
       envelope(bus, 'eval-commerce'),
       shopify,
     );
-    expect(contextualToolNames(bus.inspect('agent').workspace)).toContain(
+    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toContain(
       'open_verified_shopify_product',
     );
     bus.execute({ type: 'move_slot', centerX: 195, centerY: 60 }, envelope(bus, 'eval-r8'), buyer);
-    expect(contextualToolNames(bus.inspect('agent').workspace)).not.toContain(
+    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).not.toContain(
       'open_verified_shopify_product',
     );
   });
@@ -121,7 +154,7 @@ describe('deterministic WebMCP surface evals', () => {
       envelope(bus, 'human-edit'),
       buyer,
     );
-    expect(bus.inspect('agent', 0).observation.interventions).toEqual([
+    expect(bus.inspect('buyer', 0).observation.interventions).toEqual([
       expect.objectContaining({ origin: 'human_ui', command: 'move_slot' }),
     ]);
   });
@@ -157,7 +190,7 @@ describe('deterministic WebMCP surface evals', () => {
       envelope(bus, 'hostile-commerce'),
       shopify,
     );
-    const navigation = compileCapabilities(bus.inspect('agent').workspace, 'agent').find(
+    const navigation = compileCapabilities(bus.inspect('buyer').workspace, 'buyer').find(
       ({ id }) => id === 'navigate_to_storefront',
     );
     expect(navigation?.description).not.toContain('IGNORE_PREVIOUS_INSTRUCTIONS');
@@ -169,7 +202,7 @@ describe('deterministic WebMCP surface evals', () => {
     const repair = bus.execute(
       { type: 'apply_deterministic_repair', repairId: 'narrow_slot_to_clearance' },
       envelope(bus, 'result-repair'),
-      agent,
+      buyerAgent,
     );
     const next = envelope(bus, 'result-quote');
     expect(next.expectedSpecHash).toBe(repair.receipt.specHashAfter);

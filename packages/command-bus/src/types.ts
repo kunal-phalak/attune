@@ -13,12 +13,32 @@ import type {
 
 import type { AttuneCommandErrorCode } from './errors';
 
-export type TrustedExecutionPath = 'human' | 'webmcp' | 'solver' | 'provider' | 'shopify';
+export type TrustedExecutionPath =
+  | 'human'
+  | 'webmcp'
+  | 'system'
+  | 'shopify_webhook'
+  | 'shopify_reconciliation';
+
+export interface DelegationGrant {
+  readonly grantId: string;
+  readonly delegatingPrincipalId: string;
+  readonly delegatedPrincipalId: string;
+  readonly role: AttuneRole;
+  readonly workspaceId: string;
+  readonly capabilityIds: readonly CapabilityId[];
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly revokedAt: string | null;
+  readonly observationCursor: number;
+}
 
 export interface TrustedExecutionContext {
   readonly path: TrustedExecutionPath;
+  readonly workspaceId: string;
   readonly principalId: string;
   readonly role: AttuneRole;
+  readonly delegation?: DelegationGrant;
 }
 
 export interface CommandEnvelope {
@@ -51,6 +71,7 @@ export interface ChangeReceipt {
   readonly origin: CommandOrigin;
   readonly principalId: string;
   readonly role: AttuneRole;
+  readonly delegationGrantId: string | null;
   readonly beforeHash: string;
   readonly afterHash: string;
   readonly specHashBefore: string;

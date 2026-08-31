@@ -3,7 +3,7 @@ import type { AttuneRole, AttuneWorkspace } from '@attune/domain';
 
 import type { CapabilityReference, CapabilityTransition } from './types';
 
-const ROLES: readonly AttuneRole[] = ['buyer', 'provider', 'agent'];
+const ROLES: readonly AttuneRole[] = ['buyer', 'provider', 'reviewer'];
 
 function capabilityReferences(workspace: AttuneWorkspace): readonly CapabilityReference[] {
   return ROLES.flatMap((role) =>

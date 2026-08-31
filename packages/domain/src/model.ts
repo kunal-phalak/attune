@@ -1,6 +1,67 @@
-export type CommandOrigin = 'human_ui' | 'webmcp' | 'solver' | 'provider' | 'shopify_verification';
+export type CommandOrigin =
+  | 'human_ui'
+  | 'webmcp'
+  | 'system'
+  | 'shopify_webhook'
+  | 'shopify_reconciliation';
 
-export type AttuneRole = 'buyer' | 'provider' | 'agent';
+export type AttuneRole = 'buyer' | 'provider' | 'reviewer';
+
+export type CapabilityLimit = number | 'ANY' | 'UNSPECIFIED';
+
+export interface ProviderCapabilityProfile {
+  readonly profileId: string;
+  readonly providerId: string;
+  readonly providerName: string;
+  readonly version: string;
+  readonly processes: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly machine: string;
+    readonly workEnvelopeMm: {
+      readonly width: CapabilityLimit;
+      readonly height: CapabilityLimit;
+      readonly thickness: CapabilityLimit;
+    };
+  }[];
+  readonly materials:
+    | readonly {
+        readonly material: PanelGeometry['material'];
+        readonly thicknessesMm: readonly number[] | 'ANY' | 'UNSPECIFIED';
+      }[]
+    | 'ANY'
+    | 'UNSPECIFIED';
+  readonly toleranceMm: CapabilityLimit;
+  readonly minimums: {
+    readonly featureMm: CapabilityLimit;
+    readonly holeDiameterMm: CapabilityLimit;
+    readonly slotWidthMm: CapabilityLimit;
+    readonly edgeClearanceMm: CapabilityLimit;
+    readonly spacingWebMm: CapabilityLimit;
+    readonly toolRadiusMm: CapabilityLimit;
+    readonly kerfMm: CapabilityLimit;
+  };
+  readonly topology: {
+    readonly closedContour: boolean | 'UNSPECIFIED';
+    readonly noSelfIntersection: boolean | 'UNSPECIFIED';
+    readonly cutoutContainment: boolean | 'UNSPECIFIED';
+    readonly noInvalidOverlap: boolean | 'UNSPECIFIED';
+  };
+  readonly supportedOperations: readonly string[] | 'ANY' | 'UNSPECIFIED';
+  readonly surfaceFinish?: Readonly<Record<string, string>>;
+  readonly customRules: readonly {
+    readonly id: string;
+    readonly description: string;
+    readonly limit: CapabilityLimit;
+  }[];
+  readonly effectiveAt: string;
+}
+
+export interface ProviderBinding {
+  readonly providerId: string;
+  readonly profileId: string;
+  readonly profileVersion: string;
+}
 
 export interface PointMm {
   readonly x: number;
@@ -37,23 +98,49 @@ export interface PanelGeometry {
   };
 }
 
-export interface ValidationIssue {
-  readonly id: 'slot_clearance';
+export interface UniversalValidationIssue {
+  readonly id: 'invalid_panel' | 'feature_outside_profile';
   readonly severity: 'hard';
+  readonly source: 'universal';
   readonly message: string;
-  readonly observedMm: number;
-  readonly requiredMm: number;
+  readonly affectedEntities: readonly string[];
+}
+
+export interface ProviderValidationIssue {
+  readonly id:
+    | 'provider_work_envelope'
+    | 'provider_material'
+    | 'provider_thickness'
+    | 'slot_clearance';
+  readonly severity: 'hard';
+  readonly source: 'provider';
+  readonly message: string;
+  readonly observedMm?: number;
+  readonly requiredMm?: number;
   readonly affectedEntities: readonly string[];
 }
 
 export interface ValidationResult {
   readonly valid: boolean;
-  readonly issues: readonly ValidationIssue[];
+  readonly issues: readonly (UniversalValidationIssue | ProviderValidationIssue)[];
+  readonly universal: {
+    readonly valid: boolean;
+    readonly issues: readonly UniversalValidationIssue[];
+  };
+  readonly provider: {
+    readonly valid: boolean;
+    readonly providerId: string;
+    readonly profileId: string;
+    readonly profileVersion: string;
+    readonly issues: readonly ProviderValidationIssue[];
+  };
   readonly evidence: {
     readonly slotRightClearanceMm: number;
     readonly requiredSlotClearanceMm: number;
     readonly lockedMountsPreserved: number;
     readonly lockedMountsTotal: number;
+    readonly providerId: string;
+    readonly providerProfileVersion: string;
   };
 }
 
@@ -61,6 +148,8 @@ export interface QuoteRequest {
   readonly id: string;
   readonly draftVersion: number;
   readonly specHash: string;
+  readonly specRevision: string;
+  readonly provider: ProviderBinding;
   readonly requestedAt: string;
 }
 
@@ -68,6 +157,7 @@ export interface FrozenRevision {
   readonly revisionId: string;
   readonly draftVersion: number;
   readonly specHash: string;
+  readonly provider: ProviderBinding;
   readonly geometry: PanelGeometry;
   readonly frozenAt: string;
 }
@@ -76,6 +166,7 @@ export interface Quote {
   readonly quoteId: string;
   readonly revisionId: string;
   readonly specHash: string;
+  readonly provider: ProviderBinding;
   readonly amountMinor: 240_000;
   readonly currency: 'INR';
   readonly panelCount: 4;
@@ -88,6 +179,7 @@ export interface Acceptance {
   readonly quoteId: string;
   readonly revisionId: string;
   readonly specHash: string;
+  readonly provider: ProviderBinding;
   readonly acceptedAt: string;
 }
 
@@ -125,6 +217,7 @@ export interface AttuneWorkspace {
   readonly draftVersion: number;
   readonly capabilityEpoch: number;
   readonly fabricationQuantity: 4;
+  readonly providerCapabilityProfile: ProviderCapabilityProfile;
   readonly geometry: PanelGeometry;
   readonly quoteRequests: readonly QuoteRequest[];
   readonly frozenRevisions: readonly FrozenRevision[];

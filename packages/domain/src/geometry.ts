@@ -3,6 +3,9 @@ import type {
   AttuneWorkspace,
   DeterministicRepair,
   PanelGeometry,
+  ProviderCapabilityProfile,
+  ProviderValidationIssue,
+  UniversalValidationIssue,
   ValidationResult,
 } from './model';
 
@@ -22,34 +25,163 @@ export function calculateSlotRightClearance(geometry: PanelGeometry): number {
   return roundMillimetres(geometry.width - slotRightEdge);
 }
 
-export function validateGeometry(geometry: PanelGeometry): ValidationResult {
+export function validateUniversalGeometry(
+  geometry: PanelGeometry,
+): readonly UniversalValidationIssue[] {
+  const panelValid =
+    Number.isFinite(geometry.width) &&
+    Number.isFinite(geometry.height) &&
+    Number.isFinite(geometry.thickness) &&
+    geometry.width > 0 &&
+    geometry.height > 0 &&
+    geometry.thickness > 0;
+  const circles = [...geometry.mounts, ...geometry.auxiliaryHoles];
+  const circlesContained = circles.every(({ center, diameter }) => {
+    const radius = diameter / 2;
+    return (
+      diameter > 0 &&
+      center.x - radius >= 0 &&
+      center.y - radius >= 0 &&
+      center.x + radius <= geometry.width &&
+      center.y + radius <= geometry.height
+    );
+  });
+  const slot = geometry.slot;
+  const slotContained =
+    slot.width > 0 &&
+    slot.height > 0 &&
+    slot.center.x - slot.width / 2 >= 0 &&
+    slot.center.y - slot.height / 2 >= 0 &&
+    slot.center.x + slot.width / 2 <= geometry.width &&
+    slot.center.y + slot.height / 2 <= geometry.height;
+  return [
+    ...(!panelValid
+      ? [
+          {
+            id: 'invalid_panel' as const,
+            severity: 'hard' as const,
+            source: 'universal' as const,
+            message: 'The sheet profile must have finite, positive dimensions.',
+            affectedEntities: ['panel:outer-profile'],
+          },
+        ]
+      : []),
+    ...(!circlesContained || !slotContained
+      ? [
+          {
+            id: 'feature_outside_profile' as const,
+            severity: 'hard' as const,
+            source: 'universal' as const,
+            message: 'Every cut feature must remain inside the closed outer profile.',
+            affectedEntities: ['panel:outer-profile'],
+          },
+        ]
+      : []),
+  ];
+}
+
+function exceeds(value: number, limit: ProviderCapabilityProfile['minimums']['featureMm']) {
+  return typeof limit === 'number' && value > limit;
+}
+
+export function validateProviderCapability(
+  geometry: PanelGeometry,
+  profile: ProviderCapabilityProfile,
+): readonly ProviderValidationIssue[] {
+  const process = profile.processes[0];
+  const material = Array.isArray(profile.materials)
+    ? profile.materials.find((candidate) => candidate.material === geometry.material)
+    : undefined;
+  const thicknesses = material?.thicknessesMm;
   const observedMm = calculateSlotRightClearance(geometry);
-  const requiredMm = geometry.constraints.requiredSlotClearance;
-  const lockedMountsPreserved = geometry.mounts.filter(
-    (mount) => mount.locked && LOCKED_MOUNT_IDS.includes(mount.id),
-  ).length;
-  const issues =
-    observedMm < requiredMm
+  const requiredMm = profile.minimums.edgeClearanceMm;
+  const envelopeExceeded =
+    process !== undefined &&
+    (exceeds(geometry.width, process.workEnvelopeMm.width) ||
+      exceeds(geometry.height, process.workEnvelopeMm.height) ||
+      exceeds(geometry.thickness, process.workEnvelopeMm.thickness));
+  return [
+    ...(envelopeExceeded
+      ? [
+          {
+            id: 'provider_work_envelope' as const,
+            severity: 'hard' as const,
+            source: 'provider' as const,
+            message: `The part exceeds ${profile.providerName}'s declared work envelope.`,
+            affectedEntities: ['panel:outer-profile'],
+          },
+        ]
+      : []),
+    ...(Array.isArray(profile.materials) && !material
+      ? [
+          {
+            id: 'provider_material' as const,
+            severity: 'hard' as const,
+            source: 'provider' as const,
+            message: `${profile.providerName} has not declared support for ${geometry.material}.`,
+            affectedEntities: ['specification:material'],
+          },
+        ]
+      : []),
+    ...(Array.isArray(thicknesses) && !thicknesses.includes(geometry.thickness)
+      ? [
+          {
+            id: 'provider_thickness' as const,
+            severity: 'hard' as const,
+            source: 'provider' as const,
+            message: `${profile.providerName} does not support ${geometry.thickness} mm ${geometry.material}.`,
+            observedMm: geometry.thickness,
+            affectedEntities: ['specification:thickness'],
+          },
+        ]
+      : []),
+    ...(typeof requiredMm === 'number' && observedMm < requiredMm
       ? [
           {
             id: 'slot_clearance' as const,
             severity: 'hard' as const,
-            message: `Slot clearance ${observedMm} mm is below the required ${requiredMm} mm.`,
+            source: 'provider' as const,
+            message: `Slot clearance ${observedMm} mm is below ${profile.providerName}'s required ${requiredMm} mm.`,
             observedMm,
             requiredMm,
             affectedEntities: ['slot:connector', 'panel:right-edge'],
           },
         ]
-      : [];
+      : []),
+  ];
+}
+
+export function validateGeometry(
+  geometry: PanelGeometry,
+  profile: ProviderCapabilityProfile,
+): ValidationResult {
+  const universalIssues = validateUniversalGeometry(geometry);
+  const providerIssues = validateProviderCapability(geometry, profile);
+  const observedMm = calculateSlotRightClearance(geometry);
+  const requiredLimit = profile.minimums.edgeClearanceMm;
+  const requiredMm = typeof requiredLimit === 'number' ? requiredLimit : observedMm;
+  const lockedMountsPreserved = geometry.mounts.filter(
+    (mount) => mount.locked && LOCKED_MOUNT_IDS.includes(mount.id),
+  ).length;
 
   return {
-    valid: issues.length === 0,
-    issues,
+    valid: universalIssues.length === 0 && providerIssues.length === 0,
+    issues: [...universalIssues, ...providerIssues],
+    universal: { valid: universalIssues.length === 0, issues: universalIssues },
+    provider: {
+      valid: providerIssues.length === 0,
+      providerId: profile.providerId,
+      profileId: profile.profileId,
+      profileVersion: profile.version,
+      issues: providerIssues,
+    },
     evidence: {
       slotRightClearanceMm: observedMm,
       requiredSlotClearanceMm: requiredMm,
       lockedMountsPreserved,
       lockedMountsTotal: LOCKED_MOUNT_IDS.length,
+      providerId: profile.providerId,
+      providerProfileVersion: profile.version,
     },
   };
 }
@@ -71,8 +203,9 @@ function withSlot(geometry: PanelGeometry, slot: PanelGeometry['slot']): PanelGe
 export function applyRepairToGeometry(
   geometry: PanelGeometry,
   repairId: DeterministicRepair['id'],
+  requiredClearanceMm = geometry.constraints.requiredSlotClearance,
 ): PanelGeometry {
-  const required = geometry.constraints.requiredSlotClearance;
+  const required = requiredClearanceMm;
 
   if (repairId === 'move_slot_left_to_clearance') {
     return withSlot(geometry, {
@@ -89,12 +222,13 @@ export function applyRepairToGeometry(
 }
 
 export function compareValidChanges(workspace: AttuneWorkspace): readonly DeterministicRepair[] {
-  if (validateGeometry(workspace.geometry).valid) {
-    return [];
-  }
+  const validation = validateGeometry(workspace.geometry, workspace.providerCapabilityProfile);
+  if (!validation.provider.issues.some(({ id }) => id === 'slot_clearance')) return [];
+  const required = workspace.providerCapabilityProfile.minimums.edgeClearanceMm;
+  if (typeof required !== 'number') return [];
 
   return (['move_slot_left_to_clearance', 'narrow_slot_to_clearance'] as const).map((id) => {
-    const geometry = applyRepairToGeometry(workspace.geometry, id);
+    const geometry = applyRepairToGeometry(workspace.geometry, id, required);
 
     return {
       id,

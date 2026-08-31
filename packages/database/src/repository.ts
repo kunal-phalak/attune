@@ -6,13 +6,16 @@ import {
   type CommandEnvelope,
   type CommandRejection,
   type CommandResult,
+  type DelegationGrant,
   type InterventionSummary,
   type TrustedExecutionContext,
 } from '@attune/command-bus';
 import {
   createAt1042Workspace,
+  createJudgeProviderCapabilityProfile,
   hashCanonical,
   hashSpecification,
+  providerBinding,
   type AttuneCommand,
   type AttuneRole,
   type AttuneWorkspace,
@@ -28,11 +31,13 @@ import {
   commandIdempotencyRecords,
   commandRejections,
   commerceVerificationRecords,
+  delegationGrants,
   externalActionAttempts,
   frozenRevisions,
   organizationMemberships,
   organizations,
   projects,
+  providerCapabilityProfiles,
   quoteRequests,
   quotes,
   users,
@@ -107,6 +112,39 @@ function externalFingerprint(input: ExternalMaterializationInput): string {
 
 function immutableCopy<T>(value: T): T {
   return structuredClone(value);
+}
+
+function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspace {
+  if (workspace.providerCapabilityProfile) return workspace;
+  const current = {
+    ...workspace,
+    providerCapabilityProfile: createJudgeProviderCapabilityProfile(),
+  };
+  const provider = providerBinding(current);
+  return {
+    ...current,
+    quoteRequests: current.quoteRequests.map((request) => ({
+      ...request,
+      specRevision: Reflect.get(request, 'specRevision') ?? `r${request.draftVersion}`,
+      provider: Reflect.get(request, 'provider') ?? provider,
+    })),
+    frozenRevisions: current.frozenRevisions.map((revision) => ({
+      ...revision,
+      provider: Reflect.get(revision, 'provider') ?? provider,
+    })),
+    quotes: current.quotes.map((quote) => ({
+      ...quote,
+      provider: Reflect.get(quote, 'provider') ?? provider,
+    })),
+    acceptances: current.acceptances.map((acceptance) => ({
+      acceptanceId: acceptance.acceptanceId,
+      quoteId: acceptance.quoteId,
+      revisionId: acceptance.revisionId,
+      specHash: acceptance.specHash,
+      provider: Reflect.get(acceptance, 'provider') ?? provider,
+      acceptedAt: acceptance.acceptedAt,
+    })),
+  };
 }
 
 function interventionSummary(
@@ -232,6 +270,7 @@ async function persistRejection(
 export async function ensureJudgeWorkspace(): Promise<void> {
   const database = getDatabase();
   const initial = createAt1042Workspace();
+  const providerProfile = createJudgeProviderCapabilityProfile();
   const now = new Date().toISOString();
 
   await database.transaction(async (transaction) => {
@@ -252,9 +291,12 @@ export async function ensureJudgeWorkspace(): Promise<void> {
       .values({
         organizationId: 'organization:attune-demo',
         userId: JUDGE_USER_ID,
-        roles: ['buyer', 'provider', 'agent'],
+        roles: ['buyer', 'provider'],
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [organizationMemberships.organizationId, organizationMemberships.userId],
+        set: { roles: ['buyer', 'provider'] },
+      });
     await transaction
       .insert(projects)
       .values({
@@ -293,8 +335,55 @@ export async function ensureJudgeWorkspace(): Promise<void> {
       .values({
         workspaceId: JUDGE_WORKSPACE_ID,
         userId: JUDGE_USER_ID,
-        roles: ['buyer', 'provider', 'agent'],
+        roles: ['buyer', 'provider'],
       })
+      .onConflictDoUpdate({
+        target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
+        set: { roles: ['buyer', 'provider'] },
+      });
+    await transaction
+      .insert(providerCapabilityProfiles)
+      .values({
+        profileId: providerProfile.profileId,
+        providerId: providerProfile.providerId,
+        version: providerProfile.version,
+        profile: providerProfile,
+        effectiveAt: providerProfile.effectiveAt,
+      })
+      .onConflictDoNothing();
+    await transaction
+      .insert(delegationGrants)
+      .values([
+        {
+          grantId: 'delegation:judge:buyer:v1',
+          workspaceId: JUDGE_WORKSPACE_ID,
+          delegatingPrincipalId: `buyer:${JUDGE_USER_ID}`,
+          delegatedPrincipalId: `agent:judge:buyer`,
+          role: 'buyer',
+          capabilityIds: [
+            'compare_valid_changes',
+            'apply_deterministic_repair',
+            'edit_draft',
+            'request_quote',
+            'accept_revision',
+            'navigate_to_storefront',
+          ],
+          observationCursor: 0,
+          issuedAt: now,
+          expiresAt: '2026-09-23T00:00:00.000Z',
+        },
+        {
+          grantId: 'delegation:judge:provider:v1',
+          workspaceId: JUDGE_WORKSPACE_ID,
+          delegatingPrincipalId: `provider:${JUDGE_USER_ID}`,
+          delegatedPrincipalId: `agent:judge:provider`,
+          role: 'provider',
+          capabilityIds: ['freeze_and_quote_revision', 'materialize_for_commerce'],
+          observationCursor: 0,
+          issuedAt: now,
+          expiresAt: '2026-09-23T00:00:00.000Z',
+        },
+      ])
       .onConflictDoNothing();
     await transaction
       .insert(workspaceSnapshots)
@@ -306,7 +395,51 @@ export async function ensureJudgeWorkspace(): Promise<void> {
         specHash: hashSpecification(initial),
       })
       .onConflictDoNothing();
+    const existing = await transaction
+      .select({ workspace: workspaces.currentSpecification })
+      .from(workspaces)
+      .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
+      .limit(1);
+    const stored = existing[0]?.workspace;
+    if (stored && !stored.providerCapabilityProfile) {
+      await transaction
+        .update(workspaces)
+        .set({ currentSpecification: workspaceWithCurrentContract(stored), updatedAt: now })
+        .where(eq(workspaces.id, JUDGE_WORKSPACE_ID));
+    }
   });
+}
+
+export async function activeDelegationForWorkspace(
+  workspaceId: string,
+  role: AttuneRole,
+): Promise<DelegationGrant | null> {
+  const now = new Date().toISOString();
+  const rows = await getDatabase()
+    .select({
+      grantId: delegationGrants.grantId,
+      workspaceId: delegationGrants.workspaceId,
+      delegatingPrincipalId: delegationGrants.delegatingPrincipalId,
+      delegatedPrincipalId: delegationGrants.delegatedPrincipalId,
+      role: delegationGrants.role,
+      capabilityIds: delegationGrants.capabilityIds,
+      observationCursor: delegationGrants.observationCursor,
+      issuedAt: delegationGrants.issuedAt,
+      expiresAt: delegationGrants.expiresAt,
+      revokedAt: delegationGrants.revokedAt,
+    })
+    .from(delegationGrants)
+    .where(
+      and(
+        eq(delegationGrants.workspaceId, workspaceId),
+        eq(delegationGrants.role, role),
+        sql`${delegationGrants.revokedAt} is null`,
+        sql`${delegationGrants.expiresAt} > ${now}::timestamptz`,
+      ),
+    )
+    .orderBy(desc(delegationGrants.issuedAt))
+    .limit(1);
+  return rows[0] ? immutableCopy(rows[0]) : null;
 }
 
 export async function resetJudgeWorkspace(): Promise<void> {
@@ -473,6 +606,7 @@ export async function readWorkspaceBundle(
     .limit(1);
   const row = workspaceRows[0];
   if (!row) throw new Error(`Attune workspace ${workspaceId} was not found.`);
+  const authoritativeWorkspace = workspaceWithCurrentContract(row.workspace);
 
   const [receiptRows, transitionRows, rejectionRows] = await Promise.all([
     database
@@ -492,7 +626,11 @@ export async function readWorkspaceBundle(
       .orderBy(asc(commandRejections.createdAt)),
   ]);
   const receipts = receiptRows.map(({ receipt }) => receipt);
-  const observation = interventionSummary(receipts, observationCursor, row.workspace.workspaceSeq);
+  const observation = interventionSummary(
+    receipts,
+    observationCursor,
+    authoritativeWorkspace.workspaceSeq,
+  );
 
   if (observingAgentPrincipal && observation.interventions.length > 0) {
     const humanReceiptIds = receipts
@@ -527,7 +665,7 @@ export async function readWorkspaceBundle(
     fileName: row.fileName,
     liveblocksRoomId: row.liveblocksRoomId,
     needStartedAt: row.needStartedAt,
-    workspace: row.workspace,
+    workspace: authoritativeWorkspace,
     receipts,
     transitions: transitionRows.map(({ transition }) => transition),
     rejections: rejectionRows.map(({ rejection }) => rejection),
@@ -540,6 +678,12 @@ export async function executePersistedCommand(
   input: ExecutePersistedCommandInput,
   liveblocksVersionId?: string,
 ): Promise<CommandResult> {
+  if (input.context.workspaceId !== input.workspaceId) {
+    throw new AttuneCommandError(
+      'DELEGATION_INVALID',
+      'The trusted execution context does not match the target workspace.',
+    );
+  }
   const database = getDatabase();
   const fingerprint = commandFingerprint(input);
   let rejection: CommandRejection | undefined;
@@ -573,7 +717,8 @@ export async function executePersistedCommand(
         .where(eq(workspaces.id, input.workspaceId))
         .for('update')
         .limit(1);
-      const current = rows[0]?.workspace;
+      const stored = rows[0]?.workspace;
+      const current = stored ? workspaceWithCurrentContract(stored) : undefined;
       if (!current) throw new Error(`Attune workspace ${input.workspaceId} was not found.`);
 
       const bus = new AttuneCommandBus(current);
@@ -717,7 +862,8 @@ export async function reserveExternalMaterialization(
         .where(eq(workspaces.id, input.workspaceId))
         .for('update')
         .limit(1);
-      const workspace = rows[0]?.workspace;
+      const stored = rows[0]?.workspace;
+      const workspace = stored ? workspaceWithCurrentContract(stored) : undefined;
       if (!workspace) throw new Error(`Attune workspace ${input.workspaceId} was not found.`);
       const bus = new AttuneCommandBus(workspace);
       try {

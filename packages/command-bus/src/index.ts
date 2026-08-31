@@ -8,6 +8,7 @@ export type {
   CommandEnvelope,
   CommandRejection,
   CommandResult,
+  DelegationGrant,
   InterventionSummary,
   TrustedExecutionContext,
   TrustedExecutionPath,

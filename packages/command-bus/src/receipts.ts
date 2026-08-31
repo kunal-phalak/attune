@@ -51,6 +51,7 @@ export function createReceipt(input: ReceiptInput): ChangeReceipt {
     origin: originForPath(context.path),
     principalId: context.principalId,
     role: context.role,
+    delegationGrantId: context.delegation?.grantId ?? null,
     beforeHash: hashCanonical(before),
     afterHash: hashCanonical(after),
     specHashBefore: hashSpecification(before),

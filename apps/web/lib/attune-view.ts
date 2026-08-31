@@ -1,6 +1,6 @@
 import type { PanelGeometry } from '@attune/domain';
 
-export type CapabilityRole = 'buyer' | 'provider' | 'agent';
+export type CapabilityRole = 'buyer' | 'provider' | 'reviewer';
 
 export interface CapabilityView {
   readonly id: string;
@@ -13,6 +13,14 @@ export interface CapabilityView {
 }
 
 export interface AttuneApiView {
+  readonly perspective: CapabilityRole;
+  readonly delegation: {
+    readonly grantId: string;
+    readonly role: CapabilityRole;
+    readonly capabilityIds: readonly string[];
+    readonly expiresAt: string;
+    readonly observationCursor: number;
+  } | null;
   readonly product: {
     readonly workspaceId: string;
     readonly projectName: string;
@@ -26,15 +34,27 @@ export interface AttuneApiView {
     readonly draftVersion: number;
     readonly capabilityEpoch: number;
     readonly fabricationQuantity: 4;
+    readonly providerCapabilityProfile: {
+      readonly profileId: string;
+      readonly providerId: string;
+      readonly providerName: string;
+      readonly version: string;
+    };
     readonly geometry: PanelGeometry;
     readonly quoteRequests: readonly {
       readonly id: string;
       readonly draftVersion: number;
       readonly specHash: string;
+      readonly specRevision: string;
     }[];
     readonly frozenRevisions: readonly {
       readonly revisionId: string;
       readonly specHash: string;
+      readonly provider: {
+        readonly providerId: string;
+        readonly profileId: string;
+        readonly profileVersion: string;
+      };
       readonly frozenAt: string;
     }[];
     readonly quotes: readonly {
@@ -56,12 +76,26 @@ export interface AttuneApiView {
   };
   readonly validation: {
     readonly valid: boolean;
-    readonly issues: readonly { readonly id: string; readonly message: string }[];
+    readonly issues: readonly {
+      readonly id: string;
+      readonly source: 'universal' | 'provider';
+      readonly message: string;
+    }[];
+    readonly universal: { readonly valid: boolean; readonly issues: readonly unknown[] };
+    readonly provider: {
+      readonly valid: boolean;
+      readonly providerId: string;
+      readonly profileId: string;
+      readonly profileVersion: string;
+      readonly issues: readonly unknown[];
+    };
     readonly evidence: {
       readonly slotRightClearanceMm: number;
       readonly requiredSlotClearanceMm: number;
       readonly lockedMountsPreserved: number;
       readonly lockedMountsTotal: number;
+      readonly providerId: string;
+      readonly providerProfileVersion: string;
     };
   };
   readonly capabilities: readonly CapabilityView[];

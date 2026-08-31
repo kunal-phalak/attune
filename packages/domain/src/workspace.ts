@@ -1,5 +1,11 @@
 import { applyRepairToGeometry, hashSpecification, validateGeometry } from './geometry';
-import type { AttuneCommand, AttuneWorkspace, PanelGeometry } from './model';
+import type {
+  AttuneCommand,
+  AttuneWorkspace,
+  PanelGeometry,
+  ProviderBinding,
+  ProviderCapabilityProfile,
+} from './model';
 
 export interface TransitionMetadata {
   readonly commandId: string;
@@ -46,6 +52,52 @@ function seedGeometry(): PanelGeometry {
   };
 }
 
+export function createJudgeProviderCapabilityProfile(): ProviderCapabilityProfile {
+  return {
+    profileId: 'profile:attune-fabrication:laser:v1',
+    providerId: 'provider:attune-fabrication',
+    providerName: 'Attune Demo Fabrication',
+    version: 'v1',
+    processes: [
+      {
+        id: 'process:laser-cutting',
+        name: '2D laser cutting',
+        machine: 'Demo laser cell',
+        workEnvelopeMm: { width: 600, height: 400, thickness: 12 },
+      },
+    ],
+    materials: [{ material: 'acrylic', thicknessesMm: [3, 5, 6] }],
+    toleranceMm: 0.2,
+    minimums: {
+      featureMm: 2,
+      holeDiameterMm: 3,
+      slotWidthMm: 3,
+      edgeClearanceMm: 12,
+      spacingWebMm: 3,
+      toolRadiusMm: 'ANY',
+      kerfMm: 0.2,
+    },
+    topology: {
+      closedContour: true,
+      noSelfIntersection: true,
+      cutoutContainment: true,
+      noInvalidOverlap: true,
+    },
+    supportedOperations: ['outer_profile', 'through_cut', 'hole', 'slot'],
+    customRules: [],
+    effectiveAt: '2026-08-29T00:00:00.000Z',
+  };
+}
+
+export function providerBinding(workspace: AttuneWorkspace): ProviderBinding {
+  const profile = workspace.providerCapabilityProfile;
+  return {
+    providerId: profile.providerId,
+    profileId: profile.profileId,
+    profileVersion: profile.version,
+  };
+}
+
 export function createAt1042Workspace(): AttuneWorkspace {
   return {
     projectId: 'project:attune',
@@ -54,6 +106,7 @@ export function createAt1042Workspace(): AttuneWorkspace {
     draftVersion: 6,
     capabilityEpoch: 1,
     fabricationQuantity: 4,
+    providerCapabilityProfile: createJudgeProviderCapabilityProfile(),
     geometry: seedGeometry(),
     quoteRequests: [],
     frozenRevisions: [],
@@ -100,6 +153,7 @@ function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata
         revisionId,
         draftVersion: workspace.draftVersion,
         specHash,
+        provider: providerBinding(workspace),
         geometry: structuredClone(workspace.geometry),
         frozenAt: metadata.now,
       },
@@ -110,6 +164,7 @@ function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata
         quoteId: `quote:${metadata.commandId}`,
         revisionId,
         specHash,
+        provider: providerBinding(workspace),
         amountMinor: 240_000,
         currency: 'INR',
         panelCount: 4,
@@ -142,6 +197,7 @@ function acceptRevision(
         quoteId: quote.quoteId,
         revisionId: quote.revisionId,
         specHash: quote.specHash,
+        provider: quote.provider,
         acceptedAt: metadata.now,
       },
     ],
@@ -192,7 +248,13 @@ export function transitionWorkspace(
       return {
         workspace: mutateDraft(
           workspace,
-          applyRepairToGeometry(workspace.geometry, command.repairId),
+          applyRepairToGeometry(
+            workspace.geometry,
+            command.repairId,
+            typeof workspace.providerCapabilityProfile.minimums.edgeClearanceMm === 'number'
+              ? workspace.providerCapabilityProfile.minimums.edgeClearanceMm
+              : workspace.geometry.constraints.requiredSlotClearance,
+          ),
         ),
         affectedEntities: ['slot:connector'],
       };
@@ -216,6 +278,8 @@ export function transitionWorkspace(
               id: `quote-request:${metadata.commandId}`,
               draftVersion: workspace.draftVersion,
               specHash: hashSpecification(workspace),
+              specRevision: `r${workspace.draftVersion}`,
+              provider: providerBinding(workspace),
               requestedAt: metadata.now,
             },
           ],
@@ -243,5 +307,5 @@ export function transitionWorkspace(
 }
 
 export function validateWorkspace(workspace: AttuneWorkspace) {
-  return validateGeometry(workspace.geometry);
+  return validateGeometry(workspace.geometry, workspace.providerCapabilityProfile);
 }

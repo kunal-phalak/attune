@@ -7,6 +7,7 @@ import {
   commandRequestBody,
   requestAttuneView,
   type AttuneApiView,
+  type CapabilityRole,
   type RepairId,
 } from '../lib/attune-view';
 
@@ -90,6 +91,9 @@ function summarize(view: AttuneApiView) {
     draft_version: view.workspace.draftVersion,
     capability_epoch: view.workspace.capabilityEpoch,
     spec_hash: view.specHash,
+    delegated_role: view.delegation?.role ?? null,
+    provider_id: view.validation.provider.providerId,
+    provider_profile_version: view.validation.provider.profileVersion,
     valid: view.validation.valid,
     clearance_mm: view.validation.evidence.slotRightClearanceMm,
     required_clearance_mm: view.validation.evidence.requiredSlotClearanceMm,
@@ -108,13 +112,17 @@ function summarize(view: AttuneApiView) {
 
 function createToolRuntime(
   workspaceId: string,
+  perspective: Extract<CapabilityRole, 'buyer' | 'provider'>,
   cursor: { current: number },
   updateView: (view: AttuneApiView) => void,
   report: (status: RuntimeStatus) => void,
 ): ToolRuntime {
   const loadObservation = async () => {
     const next = await requestAttuneView(
-      attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, { cursor: cursor.current }),
+      attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, {
+        cursor: cursor.current,
+        perspective,
+      }),
     );
     cursor.current = next.workspace.workspaceSeq;
     updateView(next);
@@ -148,7 +156,7 @@ function createToolRuntime(
         };
       }
       const next = await requestAttuneView(
-        attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId),
+        attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, { perspective }),
         {
           method: 'POST',
           body: commandRequestBody(observed, command, 'webmcp', cursor.current),
@@ -342,9 +350,11 @@ async function registerTools(
 
 export function AttuneWebMcp({
   workspaceId,
+  perspective,
   onStatus,
 }: {
   readonly workspaceId: string;
+  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly onStatus?: (status: AttuneWebMcpStatus) => void;
 }) {
   const [registrationState, setRegistrationState] = useState<RegistrationState>('checking');
@@ -356,8 +366,12 @@ export function AttuneWebMcp({
   const observationCursor = useRef(0);
   const refresh = useCallback(
     async () =>
-      setView(await requestAttuneView(attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId))),
-    [workspaceId],
+      setView(
+        await requestAttuneView(
+          attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, { perspective }),
+        ),
+      ),
+    [perspective, workspaceId],
   );
   const capabilityKey =
     view?.capabilities
@@ -381,14 +395,20 @@ export function AttuneWebMcp({
     }
     if (!workspaceReady) return undefined;
     const lifecycle = new AbortController();
-    const runtime = createToolRuntime(workspaceId, observationCursor, setView, setRuntimeStatus);
+    const runtime = createToolRuntime(
+      workspaceId,
+      perspective,
+      observationCursor,
+      setView,
+      setRuntimeStatus,
+    );
     setRegistrationState('checking');
     void registerTools(context, new Set(capabilityKey.split('|')), runtime, lifecycle.signal).then(
       () => setRegistrationState('registered'),
       () => setRegistrationState('failed'),
     );
     return () => lifecycle.abort();
-  }, [capabilityKey, workspaceId, workspaceReady]);
+  }, [capabilityKey, perspective, workspaceId, workspaceReady]);
 
   useEffect(() => {
     onStatus?.({

@@ -1,5 +1,8 @@
 'use client';
 
+import { Button } from '@cloudflare/kumo/components/button';
+import { Surface } from '@cloudflare/kumo/components/surface';
+import { Tabs } from '@cloudflare/kumo/components/tabs';
 import {
   useHistoryVersionYjsData,
   useHistoryVersions,
@@ -10,6 +13,18 @@ import {
 } from '@liveblocks/react';
 import { AvatarStack, Composer, Thread } from '@liveblocks/react-ui';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
+import {
+  ArrowUUpLeft,
+  CaretDown,
+  ChartLineUp,
+  ChatCircle,
+  ClockCounterClockwise,
+  Lightning,
+  ListChecks,
+  LockSimple,
+  Robot,
+  ShoppingBagOpen,
+} from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 import * as Y from 'yjs';
 
@@ -18,6 +33,12 @@ import type { AttuneWebMcpStatus } from './attune-webmcp';
 
 export type InspectorTab = 'design' | 'constraints' | 'capability' | 'commerce';
 export type DockTab = 'activity' | 'agent' | 'comments' | 'history' | 'commerce' | 'outcome';
+
+function isInspectorTab(value: string): value is InspectorTab {
+  return (
+    value === 'design' || value === 'constraints' || value === 'capability' || value === 'commerce'
+  );
+}
 
 export interface WorkflowAction {
   readonly label: string;
@@ -64,12 +85,7 @@ function TreeIcon({ kind }: { readonly kind: 'panel' | 'hole' | 'slot' | 'constr
 }
 
 function LockMark() {
-  return (
-    <svg className="tree-lock" viewBox="0 0 16 16" aria-label="Buyer locked">
-      <path d="M5 7V5a3 3 0 0 1 6 0v2" />
-      <rect x="3.5" y="7" width="9" height="7" rx="2" />
-    </svg>
-  );
+  return <LockSimple className="tree-lock" size={16} weight="fill" aria-label="Buyer locked" />;
 }
 
 export function ItemsPanel({
@@ -85,7 +101,7 @@ export function ItemsPanel({
 }) {
   const geometry = view.workspace.geometry;
   return (
-    <aside className="workspace-left-panel">
+    <Surface render={<aside />} className="workspace-left-panel">
       <header className="rail-heading">
         <div>
           <span>Items</span>
@@ -247,7 +263,7 @@ export function ItemsPanel({
         <span>Aluminium</span>
         <span>{geometry.thickness} mm</span>
       </footer>
-    </aside>
+    </Surface>
   );
 }
 
@@ -379,12 +395,12 @@ function ConstraintsInspector({
       {!view.validation.valid ? (
         view.perspective === 'buyer' ? (
           <div className="constraint-actions">
-            <button type="button" className="primary-action" onClick={onCompare}>
+            <Button type="button" variant="primary" size="sm" onClick={onCompare}>
               Compare valid changes
-            </button>
-            <button type="button" onClick={onAskAgent}>
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={onAskAgent}>
               Ask buyer agent
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="authority-note">
@@ -412,9 +428,15 @@ function ConstraintsInspector({
                 <span>{repair.predictedClearanceMm} mm</span>
               </div>
               <p>Preserves {repair.preservedLockedEntities.length} protected mounts.</p>
-              <button type="button" disabled={disabled} onClick={() => onRepair(repair.id)}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={disabled}
+                onClick={() => onRepair(repair.id)}
+              >
                 Apply exact repair
-              </button>
+              </Button>
             </article>
           ))}
         </div>
@@ -450,6 +472,7 @@ function CapabilityRow({ capability }: { readonly capability: CapabilityView }) 
 
 function CapabilityInspector({ view }: { readonly view: AttuneApiView }) {
   const transition = view.latestCapabilityTransition;
+  const next = view.frontiers[view.perspective].find(({ available }) => available);
   return (
     <div className="inspector-section">
       <div className="role-switcher" aria-label="Active capability perspective">
@@ -458,6 +481,17 @@ function CapabilityInspector({ view }: { readonly view: AttuneApiView }) {
       <p className="server-authority-note">
         Server membership and delegation determine this authority.
       </p>
+      {next ? (
+        <div className="contextual-capability">
+          <Lightning size={20} weight="fill" />
+          <div>
+            <span>Available consequence</span>
+            <strong>{formatCapability(next.id)}</strong>
+            <p>{next.reason}</p>
+            <small>{next.predictedConsequences[0]}</small>
+          </div>
+        </div>
+      ) : null}
       <div className="capability-frontier-list">
         {view.frontiers[view.perspective].map((capability) => (
           <CapabilityRow capability={capability} key={capability.id} />
@@ -555,14 +589,16 @@ export function CommerceInspector({
         ))}
       </ol>
       {workflowAction && view.validation.valid ? (
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size="sm"
           className="primary-action commerce-next-action"
           disabled={disabled}
           onClick={() => onWorkflow(workflowAction)}
         >
           {workflowAction.label}
-        </button>
+        </Button>
       ) : null}
       {exactCommerce ? (
         <div className="shopify-handoff-ready">
@@ -622,7 +658,7 @@ export function InspectorPanel({
   readonly onWorkflow: (action: WorkflowAction) => void;
 }) {
   return (
-    <aside className="workspace-inspector">
+    <Surface render={<aside />} className="workspace-inspector">
       <header className="inspector-heading">
         <div>
           <span>Inspector</span>
@@ -632,18 +668,17 @@ export function InspectorPanel({
           ›
         </button>
       </header>
-      <div className="inspector-tabs" role="tablist" aria-label="Inspector modes">
-        {(['design', 'constraints', 'capability', 'commerce'] as const).map((candidate) => (
-          <button
-            type="button"
-            role="tab"
-            key={candidate}
-            aria-selected={tab === candidate}
-            onClick={() => onTab(candidate)}
-          >
-            {candidate === 'design' ? 'Design' : candidate}
-          </button>
-        ))}
+      <div className="inspector-tabs" aria-label="Inspector modes">
+        <Tabs
+          variant="underline"
+          size="sm"
+          value={tab}
+          tabs={(['design', 'constraints', 'capability', 'commerce'] as const).map((candidate) => ({
+            value: candidate,
+            label: candidate === 'design' ? 'Design' : candidate,
+          }))}
+          onValueChange={(next) => isInspectorTab(next) && onTab(next)}
+        />
       </div>
       <div className="inspector-scroll">
         {tab === 'design' ? (
@@ -669,7 +704,7 @@ export function InspectorPanel({
           />
         ) : null}
       </div>
-    </aside>
+    </Surface>
   );
 }
 
@@ -738,9 +773,16 @@ function RestoreYjsVersion({ versionId }: { readonly versionId: string }) {
     }
   };
   return (
-    <button type="button" onClick={restore} disabled={!version.data}>
+    <Button
+      type="button"
+      variant="secondary"
+      size="sm"
+      icon={<ArrowUUpLeft size={16} weight="bold" />}
+      onClick={restore}
+      disabled={!version.data}
+    >
       Load as draft
-    </button>
+    </Button>
   );
 }
 
@@ -759,12 +801,32 @@ export function CollaborationHeader() {
   );
 }
 
+function commentAnchor(view: AttuneApiView, entityId: string) {
+  const geometry = view.workspace.geometry;
+  const point =
+    geometry.mounts.find(({ id }) => id === entityId)?.center ??
+    geometry.auxiliaryHoles.find(({ id }) => id === entityId)?.center ??
+    geometry.circularCutouts.find(({ id }) => id === entityId)?.center ??
+    geometry.rectangularCutouts.find(({ id }) => id === entityId)?.center ??
+    geometry.ventSlots.find(({ id }) => id === entityId)?.center ??
+    (entityId === 'slot:connector' || entityId === 'constraint:slot-clearance'
+      ? geometry.slot.center
+      : { x: geometry.width / 2, y: geometry.height / 2 });
+  return { x: 96 + point.x * 1.25, y: 48 + point.y * 1.25 };
+}
+
 function CollaborationDock({
   workspaceId,
   tab,
+  view,
+  selectedEntity,
+  onSelectEntity,
 }: {
   readonly workspaceId: string;
   readonly tab: 'comments' | 'history';
+  readonly view: AttuneApiView;
+  readonly selectedEntity: string;
+  readonly onSelectEntity: (entityId: string) => void;
 }) {
   const threadResult = useThreads({ query: { metadata: { workspaceId } } });
   const historyResult = useHistoryVersions();
@@ -772,6 +834,7 @@ function CollaborationDock({
   const threads = threadResult.threads ?? [];
   const versions = historyResult.versions ?? [];
   if (tab === 'comments') {
+    const anchor = commentAnchor(view, selectedEntity);
     return (
       <div className="dock-collaboration-content">
         <header>
@@ -779,24 +842,62 @@ function CollaborationDock({
           <span>{notificationResult.count ?? 0} unread</span>
         </header>
         <div className="dock-thread-grid">
-          {threads.slice(0, 2).map((thread) => (
-            <Thread thread={thread} key={thread.id} showComposer="collapsed" />
+          {threads.slice(0, 4).map((thread) => (
+            <article className="spatial-thread" key={thread.id}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                icon={<ChatCircle size={16} weight="fill" />}
+                onClick={() => onSelectEntity(thread.metadata.entityId)}
+              >
+                Show {thread.metadata.entityId.replaceAll(':', ' ')} on canvas
+              </Button>
+              <span>{thread.metadata.revisionId}</span>
+              <Thread thread={thread} showComposer="collapsed" />
+            </article>
           ))}
-          <Composer metadata={{ workspaceId, entityId: 'workspace', x: 0, y: 0 }} />
+          <div className="spatial-comment-composer">
+            <p>
+              New comment will stay attached to{' '}
+              <strong>{selectedEntity.replaceAll(':', ' ')}</strong> on draft r
+              {view.workspace.draftVersion}.
+            </p>
+            <Composer
+              metadata={{
+                workspaceId,
+                entityId: selectedEntity,
+                ...anchor,
+                revisionId: `draft:r${view.workspace.draftVersion}`,
+                specHash: view.specHash,
+              }}
+            />
+          </div>
         </div>
       </div>
     );
   }
   return (
     <div className="dock-history-content">
-      <p>
-        Liveblocks versions change the mutable draft only. Frozen Attune revisions remain immutable.
-      </p>
+      <header>
+        <ClockCounterClockwise size={20} weight="bold" />
+        <p>
+          Liveblocks versions change the mutable draft only. Frozen Attune revisions remain
+          immutable.
+        </p>
+      </header>
       {versions.slice(0, 4).map((version) => (
-        <div key={version.id}>
-          <code>{version.id}</code>
+        <article key={version.id}>
+          <div>
+            <strong>Collaborative draft snapshot</strong>
+            <span>Restore creates a current draft; it never rewrites a frozen revision.</span>
+            <details>
+              <summary>Trace details</summary>
+              <code>{version.id}</code>
+            </details>
+          </div>
           <RestoreYjsVersion versionId={version.id} />
-        </div>
+        </article>
       ))}
       {versions.length === 0 ? <span>No collaboration snapshots yet.</span> : null}
     </div>
@@ -846,12 +947,15 @@ function AgentDock({
   const changed = status.interventions > 0 || view.observation.interventions.length > 0;
   return (
     <div className="agent-dock-content">
-      <section>
-        <span>Native WebMCP</span>
-        <strong>
-          {status.registration === 'registered' ? 'Agent connected' : status.registration}
-        </strong>
-        <p>Uses this document's current contextual tool surface.</p>
+      <section className="agent-identity-card">
+        <Robot size={24} weight="fill" />
+        <div>
+          <span>{view.perspective} delegated agent</span>
+          <strong>
+            {status.registration === 'registered' ? 'Agent connected' : status.registration}
+          </strong>
+          <p>Native WebMCP · authority follows the active server delegation.</p>
+        </div>
       </section>
       <section>
         <span>Last observed</span>
@@ -936,6 +1040,8 @@ export function BottomDock({
   disabled,
   onTab,
   onWorkflow,
+  selectedEntity,
+  onSelectEntity,
 }: {
   readonly view: AttuneApiView;
   readonly workspaceId: string;
@@ -946,6 +1052,8 @@ export function BottomDock({
   readonly disabled: boolean;
   readonly onTab: (tab: DockTab | null) => void;
   readonly onWorkflow: (action: WorkflowAction) => void;
+  readonly selectedEntity: string;
+  readonly onSelectEntity: (entityId: string) => void;
 }) {
   const tabs: readonly DockTab[] = [
     'activity',
@@ -955,12 +1063,23 @@ export function BottomDock({
     'commerce',
     'outcome',
   ];
+  const icon = {
+    activity: <ListChecks size={16} weight="bold" />,
+    agent: <Robot size={16} weight="fill" />,
+    comments: <ChatCircle size={16} weight="fill" />,
+    history: <ClockCounterClockwise size={16} weight="bold" />,
+    commerce: <ShoppingBagOpen size={16} weight="bold" />,
+    outcome: <ChartLineUp size={16} weight="bold" />,
+  } as const;
   return (
     <section className={tab ? 'workspace-bottom-dock is-open' : 'workspace-bottom-dock'}>
       <nav aria-label="Workspace detail dock">
         {tabs.map((candidate) => (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
+            icon={icon[candidate]}
             key={candidate}
             aria-pressed={tab === candidate}
             onClick={() => onTab(tab === candidate ? null : candidate)}
@@ -972,23 +1091,31 @@ export function BottomDock({
             {candidate === 'agent' ? (
               <i className={webMcpStatus.registration === 'registered' ? 'is-online' : undefined} />
             ) : null}
-          </button>
+          </Button>
         ))}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
+          shape="square"
+          icon={<CaretDown size={16} weight="bold" />}
           className="dock-collapse"
           onClick={() => onTab(null)}
           aria-label="Collapse dock"
-        >
-          ⌄
-        </button>
+        />
       </nav>
       {tab ? (
         <div className="dock-body">
           {tab === 'activity' ? <ActivityDock view={view} /> : null}
           {tab === 'agent' ? <AgentDock status={webMcpStatus} view={view} /> : null}
           {(tab === 'comments' || tab === 'history') && collaboration ? (
-            <CollaborationDock workspaceId={workspaceId} tab={tab} />
+            <CollaborationDock
+              workspaceId={workspaceId}
+              tab={tab}
+              view={view}
+              selectedEntity={selectedEntity}
+              onSelectEntity={onSelectEntity}
+            />
           ) : null}
           {(tab === 'comments' || tab === 'history') && !collaboration ? (
             <p className="dock-empty">

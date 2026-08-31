@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
+import '@cloudflare/kumo/styles/standalone';
 
 import './globals.css';
 import '@liveblocks/react-ui/styles.css';
+
+import { AttuneUiProvider } from '../components/attune-ui-provider';
 
 export const metadata: Metadata = {
   title: 'Attune — Create what does not exist yet',
@@ -12,7 +15,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AttuneUiProvider>{children}</AttuneUiProvider>
+      </body>
     </html>
   );
 }

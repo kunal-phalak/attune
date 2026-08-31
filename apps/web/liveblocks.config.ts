@@ -38,6 +38,8 @@ declare global {
       entityId: string;
       x: number;
       y: number;
+      revisionId: string;
+      specHash: string;
     };
   }
 }

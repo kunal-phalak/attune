@@ -1,7 +1,10 @@
 'use client';
 
-import { useUpdateMyPresence } from '@liveblocks/react';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import { useThreads, useUpdateMyPresence } from '@liveblocks/react';
 import { Cursors } from '@liveblocks/react-ui';
+import { ChatCircle, CursorClick } from '@phosphor-icons/react';
 
 import type { AttuneApiView } from '../lib/attune-view';
 
@@ -10,6 +13,11 @@ type PresencePatch = {
   readonly selection?: string[];
   readonly currentTool?: string;
 };
+
+interface RevisionContext {
+  readonly revisionId: string;
+  readonly specHash: string;
+}
 
 function DraftingIcon({ name }: { readonly name: 'select' | 'slot' | 'constraint' | 'measure' }) {
   if (name === 'slot') {
@@ -50,6 +58,8 @@ function GeometryDrawing({
   onAskAgent,
   updatePresence,
   showCursors,
+  commentsMode,
+  commentPins,
 }: {
   readonly view: AttuneApiView;
   readonly selectedEntity: string;
@@ -58,6 +68,8 @@ function GeometryDrawing({
   readonly onAskAgent: () => void;
   readonly updatePresence?: (patch: PresencePatch) => void;
   readonly showCursors: boolean;
+  readonly commentsMode: boolean;
+  readonly commentPins?: React.ReactNode;
 }) {
   const geometry = view.workspace.geometry;
   const scale = 1.25;
@@ -90,34 +102,78 @@ function GeometryDrawing({
         </span>
         <span>Top view · millimetres</span>
       </div>
+      <output className="canvas-usage-tip">
+        <CursorClick size={16} weight="bold" />
+        <span>
+          {commentsMode
+            ? 'Comments mode: select a pin to reveal its referenced geometry.'
+            : selectedEntity === 'slot:connector'
+              ? 'Connector slot selected: compare provider-valid clearance repairs.'
+              : 'Select a feature to inspect its manufacturing properties and constraints.'}
+        </span>
+      </output>
       <div className="canvas-tool-rail" aria-label="Workspace tools">
-        <button type="button" className="is-active" title="Select" aria-label="Select">
-          <DraftingIcon name="select" />
-        </button>
-        <button
-          type="button"
-          className={selectedEntity === 'slot:connector' ? 'is-selected' : undefined}
-          title="Select connector slot"
-          aria-label="Select connector slot"
-          onClick={() => select('slot:connector')}
-        >
-          <DraftingIcon name="slot" />
-        </button>
+        <Tooltip
+          content="Select features"
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              shape="square"
+              className="is-active"
+              icon={<DraftingIcon name="select" />}
+              aria-label="Select features"
+            />
+          }
+        />
+        <Tooltip
+          content="Select connector slot"
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              shape="square"
+              className={selectedEntity === 'slot:connector' ? 'is-selected' : undefined}
+              icon={<DraftingIcon name="slot" />}
+              aria-label="Select connector slot"
+              onClick={() => select('slot:connector')}
+            />
+          }
+        />
         <span />
-        <button
-          type="button"
-          title="Inspect constraints"
-          aria-label="Inspect constraints"
-          onClick={() => select('constraint:slot-clearance')}
-        >
-          <DraftingIcon name="constraint" />
-        </button>
-        <button type="button" title="Measurements" aria-label="Measurements">
-          <DraftingIcon name="measure" />
-        </button>
+        <Tooltip
+          content="Inspect constraints"
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              shape="square"
+              icon={<DraftingIcon name="constraint" />}
+              aria-label="Inspect constraints"
+              onClick={() => select('constraint:slot-clearance')}
+            />
+          }
+        />
+        <Tooltip
+          content="Inspect measurements"
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              shape="square"
+              icon={<DraftingIcon name="measure" />}
+              aria-label="Inspect measurements"
+            />
+          }
+        />
       </div>
       <div className="canvas-viewport">
         {showCursors ? <Cursors /> : null}
+        {commentPins}
         <svg viewBox="0 0 720 440" aria-labelledby="attune-geometry-title attune-geometry-desc">
           <title id="attune-geometry-title">AT-1042 custom control-enclosure faceplate</title>
           <desc id="attune-geometry-desc">
@@ -267,12 +323,12 @@ function GeometryDrawing({
           <small>4 / 4 buyer mounts protected</small>
           {conflict ? (
             <div>
-              <button type="button" onClick={onCompare}>
+              <Button type="button" variant="primary" size="sm" onClick={onCompare}>
                 Compare valid changes
-              </button>
-              <button type="button" onClick={onAskAgent}>
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={onAskAgent}>
                 Ask agent
-              </button>
+              </Button>
             </div>
           ) : (
             <p>+ Request quote available</p>
@@ -287,21 +343,81 @@ function GeometryDrawing({
   );
 }
 
+function SpatialCommentPins({
+  view,
+  revisionContext,
+  onSelect,
+}: {
+  readonly view: AttuneApiView;
+  readonly revisionContext: RevisionContext;
+  readonly onSelect: (entityId: string) => void;
+}) {
+  const result = useThreads({ query: { metadata: { workspaceId: view.product.workspaceId } } });
+  return (
+    <div className="canvas-comment-pins" aria-label="Spatial comment pins">
+      {(result.threads ?? []).map((thread, index) => {
+        const current = thread.metadata.specHash === revisionContext.specHash;
+        return (
+          <Button
+            type="button"
+            variant={current ? 'primary' : 'secondary'}
+            size="xs"
+            shape="circle"
+            className={current ? 'canvas-comment-pin' : 'canvas-comment-pin is-historic'}
+            style={{
+              left: `${Math.max(3, Math.min(97, (thread.metadata.x / 720) * 100))}%`,
+              top: `${Math.max(5, Math.min(95, (thread.metadata.y / 440) * 100))}%`,
+            }}
+            icon={<ChatCircle size={16} weight="fill" />}
+            aria-label={`Comment ${index + 1} on ${thread.metadata.entityId}`}
+            title={`${thread.metadata.entityId} · ${thread.metadata.revisionId}`}
+            key={thread.id}
+            onClick={() => onSelect(thread.metadata.entityId)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function CollaborativeCanvas(
-  props: Omit<React.ComponentProps<typeof GeometryDrawing>, 'updatePresence' | 'showCursors'>,
+  props: Omit<
+    React.ComponentProps<typeof GeometryDrawing>,
+    'updatePresence' | 'showCursors' | 'commentPins'
+  > & {
+    readonly revisionContext: RevisionContext;
+  },
 ) {
   const updatePresence = useUpdateMyPresence();
-  return <GeometryDrawing {...props} updatePresence={updatePresence} showCursors />;
+  const { revisionContext, ...drawingProps } = props;
+  return (
+    <GeometryDrawing
+      {...drawingProps}
+      updatePresence={updatePresence}
+      showCursors
+      commentPins={
+        props.commentsMode ? (
+          <SpatialCommentPins
+            view={props.view}
+            revisionContext={revisionContext}
+            onSelect={props.onSelect}
+          />
+        ) : null
+      }
+    />
+  );
 }
 
 export function WorkspaceCanvas({
   collaboration,
+  revisionContext,
   ...props
 }: Omit<React.ComponentProps<typeof GeometryDrawing>, 'updatePresence' | 'showCursors'> & {
   readonly collaboration: boolean;
+  readonly revisionContext: RevisionContext;
 }) {
   return collaboration ? (
-    <CollaborativeCanvas {...props} />
+    <CollaborativeCanvas {...props} revisionContext={revisionContext} />
   ) : (
     <GeometryDrawing {...props} showCursors={false} />
   );

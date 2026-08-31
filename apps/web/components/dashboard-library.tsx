@@ -1,5 +1,17 @@
 'use client';
 
+import { Button } from '@cloudflare/kumo/components/button';
+import { Input } from '@cloudflare/kumo/components/input';
+import { Surface } from '@cloudflare/kumo/components/surface';
+import {
+  ClockCounterClockwise,
+  DotsThree,
+  FileText,
+  Folders,
+  MagnifyingGlass,
+  SealCheck,
+  UsersThree,
+} from '@phosphor-icons/react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
@@ -28,50 +40,15 @@ const navigation: readonly { readonly id: LibraryFilter; readonly label: string 
 ];
 
 function LibraryIcon({ name }: { readonly name: LibraryFilter | 'space' | 'search' }) {
-  if (name === 'search') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <circle cx="8.5" cy="8.5" r="5.5" />
-        <path d="m12.5 12.5 4 4" />
-      </svg>
-    );
-  }
-  if (name === 'space') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <path d="M3 5.5h5l1.4 1.8H17v8.2H3z" />
-      </svg>
-    );
-  }
-  if (name === 'drafts') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <path d="M4 3.5h8l4 4v9H4zM12 3.5v4h4" />
-      </svg>
-    );
-  }
-  if (name === 'shared') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <circle cx="7" cy="7" r="2.5" />
-        <circle cx="14" cy="8" r="2" />
-        <path d="M2.8 16c.4-3 2-4.5 4.3-4.5s4 1.5 4.3 4.5M11.5 12.4c2.8-.6 4.6.6 5.1 3.6" />
-      </svg>
-    );
-  }
-  if (name === 'accepted') {
-    return (
-      <svg aria-hidden="true" viewBox="0 0 20 20">
-        <path d="M10 2.8 16 6v5.5c0 3-2.1 5-6 6.2-3.9-1.2-6-3.2-6-6.2V6z" />
-        <path d="m7 10.3 2 2 4-4.2" />
-      </svg>
-    );
-  }
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="M4 4.5h12v11H4zM7 2.5v4M13 2.5v4" />
-    </svg>
-  );
+  const Icon = {
+    accepted: SealCheck,
+    drafts: FileText,
+    recents: ClockCounterClockwise,
+    search: MagnifyingGlass,
+    shared: UsersThree,
+    space: Folders,
+  }[name];
+  return <Icon aria-hidden size={20} weight="regular" />;
 }
 
 function fileStage(file: AttuneLibraryFile): string {
@@ -152,46 +129,59 @@ export function DashboardLibrary({
 
   return (
     <main className="library-shell">
-      <aside className="library-sidebar">
+      <Surface render={<aside />} className="library-sidebar">
         <Link className="library-wordmark" href="/">
           <span>AT</span>
           <strong>Attune</strong>
         </Link>
-        <label className="library-search">
+        <div className="library-search">
           <LibraryIcon name="search" />
-          <span className="visually-hidden">Search files</span>
-          <input
+          <Input
+            aria-label="Search files"
+            size="sm"
             type="search"
             placeholder="Search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
           <kbd>/</kbd>
-        </label>
+        </div>
         <nav className="library-navigation" aria-label="Project library">
           {navigation.map((item) => (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               key={item.id}
               className={filter === item.id ? 'is-active' : undefined}
               onClick={() => setFilter(item.id)}
+              icon={<LibraryIcon name={item.id} />}
             >
-              <LibraryIcon name={item.id} />
               <span>{item.label}</span>
-            </button>
+            </Button>
           ))}
         </nav>
         <div className="library-space-list">
           <div className="library-section-label">
             <span>Spaces</span>
-            <button type="button" aria-label="Space actions">
-              ···
-            </button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              shape="square"
+              icon={<DotsThree size={16} weight="bold" />}
+              aria-label="Space actions"
+            />
           </div>
-          <button type="button" className="is-current">
-            <LibraryIcon name="space" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="is-current"
+            icon={<LibraryIcon name="space" />}
+          >
             <span>Demo fabrication</span>
-          </button>
+          </Button>
         </div>
         <div className="library-user">
           <span className="library-avatar">{displayName.slice(0, 1).toUpperCase()}</span>
@@ -200,7 +190,7 @@ export function DashboardLibrary({
             <span>Attune workspace</span>
           </div>
         </div>
-      </aside>
+      </Surface>
 
       <section className="library-content">
         <header className="library-header">

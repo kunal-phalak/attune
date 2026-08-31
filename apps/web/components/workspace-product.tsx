@@ -1,8 +1,20 @@
 'use client';
 
+import { Button } from '@cloudflare/kumo/components/button';
+import { Dialog } from '@cloudflare/kumo/components/dialog';
+import { Tabs } from '@cloudflare/kumo/components/tabs';
 import { LiveblocksProvider, RoomProvider, useRoom } from '@liveblocks/react';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
+import {
+  ArrowCounterClockwise,
+  ArrowLeft,
+  Robot,
+  ShareNetwork,
+  UserCircle,
+  X,
+} from '@phosphor-icons/react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
@@ -14,6 +26,7 @@ import {
   type CapabilityRole,
 } from '../lib/attune-view';
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
+import { attuneToastManager } from './attune-ui-provider';
 import { AttuneWebMcp, type AttuneWebMcpStatus } from './attune-webmcp';
 import { WorkspaceCanvas } from './workspace-canvas';
 import {
@@ -28,6 +41,40 @@ import {
 } from './workspace-panels';
 
 type ProductState = 'loading' | 'ready' | 'applying' | 'failed';
+
+function transitionNotice(command: Readonly<Record<string, unknown>>, view: AttuneApiView) {
+  const type = typeof command.type === 'string' ? command.type : 'command';
+  const notices: Readonly<Record<string, { title: string; description: string }>> = {
+    accept_revision: {
+      title: 'Exact revision accepted',
+      description: `Buyer acceptance now binds draft r${view.workspace.draftVersion} and its provider profile.`,
+    },
+    apply_deterministic_repair: {
+      title: 'Design is buildable',
+      description: 'Provider clearance now passes. All four protected mounts remain unchanged.',
+    },
+    freeze_and_quote_revision: {
+      title: 'Provider quote recorded',
+      description: `Draft r${view.workspace.draftVersion} is frozen and quoted as one fabrication lot.`,
+    },
+    materialize_for_commerce: {
+      title: 'Shopify verification passed',
+      description: 'The external commerce identity matches the exact accepted specification.',
+    },
+    move_slot: {
+      title: 'New draft revision created',
+      description:
+        'Prior accepted commerce authority does not carry into the changed specification.',
+    },
+    request_quote: {
+      title: 'Provider review requested',
+      description: 'The private request is bound to this exact specification and provider profile.',
+    },
+  };
+  return (
+    notices[type] ?? { title: 'Specification updated', description: 'Authoritative state saved.' }
+  );
+}
 
 const initialWebMcpStatus: AttuneWebMcpStatus = {
   registration: 'checking',
@@ -149,51 +196,56 @@ function ProjectMark() {
 
 function ShareDialog({ onClose }: { readonly onClose: () => void }) {
   return (
-    <div className="workspace-modal-backdrop" role="presentation" onPointerDown={onClose}>
-      <dialog
-        open
-        className="workspace-modal"
-        aria-labelledby="share-dialog-title"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
+    <Dialog.Root defaultOpen onOpenChange={(open) => !open && onClose()}>
+      <Dialog className="workspace-modal" size="lg">
         <header>
           <div>
             <span>Workspace access</span>
-            <h2 id="share-dialog-title">Share AT-1042</h2>
+            <Dialog.Title id="share-dialog-title">Share AT-1042</Dialog.Title>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close share dialog">
-            ×
-          </button>
+          <Dialog.Close
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<X size={20} weight="bold" />}
+                aria-label="Close share dialog"
+              />
+            }
+          />
         </header>
         <div className="share-dialog-body">
-          <p>
+          <Dialog.Description>
             Membership and business roles are verified by the server. Sharing this browser URL does
             not grant quote, acceptance, or commerce authority.
-          </p>
+          </Dialog.Description>
           <div className="share-member-row">
-            <span>CJ</span>
+            <span className="is-human">
+              <UserCircle size={20} weight="fill" />
+            </span>
             <div>
               <strong>Challenge Judge</strong>
-              <small>Buyer · Provider · Agent evaluation</small>
+              <small>Human member · Buyer and provider perspectives</small>
             </div>
             <b>Member</b>
           </div>
           <div className="share-member-row">
-            <span>AA</span>
+            <span className="is-agent">
+              <Robot size={20} weight="fill" />
+            </span>
             <div>
-              <strong>Attune agent</strong>
-              <small>Contextual WebMCP principal</small>
+              <strong>Buyer or provider agent</strong>
+              <small>Role-scoped server delegation · Native WebMCP</small>
             </div>
             <b>Agent</b>
           </div>
         </div>
         <footer>
-          <button type="button" className="primary-action" onClick={onClose}>
-            Done
-          </button>
+          <Dialog.Close render={<Button variant="primary">Done</Button>} />
         </footer>
-      </dialog>
-    </div>
+      </Dialog>
+    </Dialog.Root>
   );
 }
 
@@ -207,42 +259,43 @@ function ResetDialog({
   readonly onReset: () => void;
 }) {
   return (
-    <div className="workspace-modal-backdrop" role="presentation" onPointerDown={onClose}>
-      <dialog
-        open
-        className="workspace-modal reset-dialog"
-        aria-labelledby="reset-dialog-title"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
+    <Dialog.Root role="alertdialog" defaultOpen onOpenChange={(open) => !open && onClose()}>
+      <Dialog className="workspace-modal reset-dialog" size="lg">
         <header>
           <div>
             <span>Judge scenario</span>
-            <h2 id="reset-dialog-title">Reset AT-1042?</h2>
+            <Dialog.Title id="reset-dialog-title">Reset AT-1042?</Dialog.Title>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close reset dialog">
-            ×
-          </button>
+          <Dialog.Close
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<X size={20} weight="bold" />}
+                aria-label="Close reset dialog"
+              />
+            }
+          />
         </header>
         <div className="share-dialog-body">
-          <p>
+          <Dialog.Description>
             Restore the deterministic r6 clearance conflict and remove scenario receipts, quotes,
             acceptances, and commerce records. The project and workspace remain in Neon.
-          </p>
+          </Dialog.Description>
           <div className="reset-target">
             <strong>Initial condition</strong>
             <span>8.1 mm observed · 12 mm required · 4/4 mounts locked</span>
           </div>
         </div>
         <footer>
-          <button type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="danger-action" disabled={applying} onClick={onReset}>
+          <Dialog.Close render={<Button variant="secondary">Cancel</Button>} />
+          <Button variant="destructive" disabled={applying} onClick={onReset}>
             {applying ? 'Resetting…' : 'Reset deterministic scenario'}
-          </button>
+          </Button>
         </footer>
-      </dialog>
-    </div>
+      </Dialog>
+    </Dialog.Root>
   );
 }
 
@@ -263,11 +316,30 @@ function WorkspaceHeader({
   readonly onShare: () => void;
   readonly onReset: () => void;
 }) {
+  const router = useRouter();
+  const perspectiveTabs = [
+    {
+      value: 'buyer',
+      label: (
+        <span className="perspective-tab-label">
+          <UserCircle size={16} weight="bold" /> Judge Buyer
+        </span>
+      ),
+    },
+    {
+      value: 'provider',
+      label: (
+        <span className="perspective-tab-label">
+          <UserCircle size={16} weight="bold" /> Judge Provider
+        </span>
+      ),
+    },
+  ];
   return (
-    <header className="editor-topbar">
+    <header className={`editor-topbar is-${view.perspective}`}>
       <div className="editor-nav-group">
         <Link href="/dashboard" className="back-to-library" aria-label="Back to dashboard">
-          ←
+          <ArrowLeft size={20} weight="bold" />
         </Link>
         <Link href="/" className="editor-brand" aria-label="Attune home">
           <ProjectMark />
@@ -279,20 +351,23 @@ function WorkspaceHeader({
       </div>
       <div className="editor-state-group">
         {judgeMode ? (
-          <nav className="perspective-switcher" aria-label="Judge workspace perspective">
-            <Link
-              href={`/workspace/${encodeURIComponent(view.product.workspaceId)}?perspective=buyer`}
-              aria-current={view.perspective === 'buyer' ? 'page' : undefined}
-            >
-              Buyer workspace
-            </Link>
-            <Link
-              href={`/workspace/${encodeURIComponent(view.product.workspaceId)}?perspective=provider`}
-              aria-current={view.perspective === 'provider' ? 'page' : undefined}
-            >
-              Provider workspace
-            </Link>
-          </nav>
+          <div className="perspective-switcher" aria-label="Judge workspace perspective">
+            <Tabs
+              size="sm"
+              value={view.perspective}
+              tabs={perspectiveTabs}
+              onValueChange={(next) =>
+                router.push(
+                  `/workspace/${encodeURIComponent(view.product.workspaceId)}?perspective=${next}`,
+                )
+              }
+            />
+            <small>
+              {view.perspective === 'buyer'
+                ? 'Buyer authority · private design'
+                : 'Provider authority · Shopify mirror enabled'}
+            </small>
+          </div>
         ) : (
           <span className={`perspective-badge is-${view.perspective}`}>
             {view.perspective} workspace
@@ -315,8 +390,11 @@ function WorkspaceHeader({
             <i /> Local view
           </span>
         )}
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
+          icon={<Robot size={20} weight="fill" />}
           className={
             webMcpStatus.registration === 'registered'
               ? 'agent-state-button is-connected'
@@ -329,13 +407,27 @@ function WorkspaceHeader({
           <strong>
             {webMcpStatus.registration === 'registered' ? 'Connected' : webMcpStatus.registration}
           </strong>
-        </button>
-        <button type="button" className="topbar-secondary" onClick={onReset}>
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="topbar-secondary"
+          icon={<ArrowCounterClockwise size={16} weight="bold" />}
+          onClick={onReset}
+        >
           Reset scenario
-        </button>
-        <button type="button" className="share-button" onClick={onShare}>
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          className="share-button"
+          icon={<ShareNetwork size={16} weight="bold" />}
+          onClick={onShare}
+        >
           Share
-        </button>
+        </Button>
       </div>
     </header>
   );
@@ -354,7 +446,6 @@ function WorkspaceShell({
 }) {
   const [view, setView] = useState<AttuneApiView | null>(null);
   const [state, setState] = useState<ProductState>('loading');
-  const [message, setMessage] = useState<string | null>(null);
   const [selectedEntity, setSelectedEntity] = useState('slot:connector');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('constraints');
   const [dockTab, setDockTab] = useState<DockTab | null>(null);
@@ -386,7 +477,6 @@ function WorkspaceShell({
     async (path: string, command: Readonly<Record<string, unknown>>, prefix: string) => {
       if (!view) return;
       setState('applying');
-      setMessage(null);
       try {
         const next = await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId), {
           method: 'POST',
@@ -395,13 +485,18 @@ function WorkspaceShell({
         setView(next);
         setState('ready');
         setCompareOpen(false);
+        const notice = transitionNotice(command, next);
+        attuneToastManager.add({ ...notice, variant: 'success' });
         window.dispatchEvent(new Event('attune:workspace-changed'));
       } catch (error) {
-        setMessage(
-          error instanceof AttuneHttpError
-            ? `${error.code}: ${error.message}`
-            : 'The authoritative command failed.',
-        );
+        attuneToastManager.add({
+          title: 'Action not applied',
+          description:
+            error instanceof AttuneHttpError
+              ? error.message
+              : 'Attune could not revalidate the authoritative workspace.',
+          variant: 'error',
+        });
         setState('failed');
         await refresh();
       }
@@ -411,7 +506,6 @@ function WorkspaceShell({
 
   const reset = useCallback(async () => {
     setState('applying');
-    setMessage(null);
     try {
       const next = await requestAttuneView('/api/attune/reset', { method: 'POST', body: '{}' });
       setView(next);
@@ -421,11 +515,19 @@ function WorkspaceShell({
       setCompareOpen(false);
       setResetOpen(false);
       setState('ready');
+      attuneToastManager.add({
+        title: 'Judge scenario restored',
+        description: 'Draft r6 again has the 8.1 mm provider-clearance conflict.',
+        variant: 'info',
+      });
       window.dispatchEvent(new Event('attune:workspace-changed'));
     } catch (error) {
-      setMessage(
-        error instanceof AttuneHttpError ? `${error.code}: ${error.message}` : 'Reset failed.',
-      );
+      attuneToastManager.add({
+        title: 'Scenario reset failed',
+        description:
+          error instanceof AttuneHttpError ? error.message : 'The authoritative reset failed.',
+        variant: 'error',
+      });
       setResetOpen(false);
       setState('failed');
       await refresh();
@@ -457,7 +559,7 @@ function WorkspaceShell({
   const askAgent = () => setDockTab('agent');
 
   return (
-    <main className="attune-workspace-shell">
+    <main className="attune-workspace-shell" data-perspective={view.perspective}>
       <AttuneWebMcp
         workspaceId={workspaceId}
         perspective={perspective}
@@ -473,7 +575,13 @@ function WorkspaceShell({
         onReset={() => setResetOpen(true)}
       />
       <LifecycleStrip view={view} />
-      {message ? <output className="workspace-toast">{message}</output> : null}
+      <section className="mobile-editing-notice" aria-label="Mobile editing notice">
+        <strong>Review mode on this screen</strong>
+        <span>
+          Comments, history, capability and order status remain available. Use a larger screen for
+          complex geometry editing.
+        </span>
+      </section>
       <section
         className={[
           'workspace-editor-grid',
@@ -507,6 +615,11 @@ function WorkspaceShell({
           onCompare={compare}
           onAskAgent={askAgent}
           collaboration={collaboration}
+          commentsMode={dockTab === 'comments'}
+          revisionContext={{
+            revisionId: `draft:r${view.workspace.draftVersion}`,
+            specHash: view.specHash,
+          }}
         />
         {rightCollapsed ? (
           <button
@@ -549,6 +662,8 @@ function WorkspaceShell({
         disabled={state === 'applying'}
         onTab={setDockTab}
         onWorkflow={executeWorkflow}
+        selectedEntity={selectedEntity}
+        onSelectEntity={(entityId) => selectEntity(entityId, 'design')}
       />
       {shareOpen ? <ShareDialog onClose={() => setShareOpen(false)} /> : null}
       {resetOpen ? (

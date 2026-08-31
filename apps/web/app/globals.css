@@ -4995,3 +4995,128 @@ input {
     transition: none;
   }
 }
+
+/* Keep mobile product-shell rules last so the desktop shell cannot override them. */
+
+@media (max-width: 760px) {
+  .library-shell {
+    display: block;
+    min-width: 0;
+  }
+
+  .library-sidebar {
+    border-bottom: 1px solid var(--shell-line);
+    border-right: 0;
+    gap: 10px;
+    min-height: auto;
+    padding: 12px;
+  }
+
+  .library-navigation {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .library-navigation button {
+    flex: none;
+    min-height: 32px;
+  }
+
+  .library-space-list,
+  .library-user {
+    display: none;
+  }
+
+  .library-content {
+    min-width: 0;
+    padding: 20px 16px 56px;
+  }
+
+  .library-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .guided-scenario {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .guided-scenario > a {
+    grid-column: auto;
+    justify-self: start;
+  }
+
+  .library-file-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .editor-topbar {
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-inline: 8px;
+  }
+
+  .editor-actions-group .topbar-secondary,
+  .editor-actions-group .share-button,
+  .workspace-collaborators {
+    display: none;
+  }
+
+  .editor-document-identity span {
+    display: none;
+  }
+
+  .mobile-editing-notice {
+    display: flex;
+  }
+
+  .workspace-editor-grid,
+  .workspace-editor-grid.is-left-collapsed,
+  .workspace-editor-grid.is-right-collapsed,
+  .workspace-editor-grid.is-left-collapsed.is-right-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    height: calc(100svh - 218px);
+    min-height: 360px;
+  }
+
+  .workspace-left-panel,
+  .workspace-inspector,
+  .collapsed-rail-trigger,
+  .canvas-tool-rail {
+    display: none;
+  }
+
+  .canvas-usage-tip {
+    left: 12px;
+    max-width: calc(100% - 24px);
+    right: 12px;
+    translate: 0;
+  }
+
+  .geometry-local-callout {
+    bottom: 16px;
+    left: 16px;
+    max-width: calc(100% - 32px);
+    right: auto;
+    top: auto;
+  }
+
+  .workspace-bottom-dock > nav {
+    overflow-x: auto;
+  }
+
+  .workspace-bottom-dock > nav button {
+    flex: none;
+    padding-inline: 9px;
+  }
+
+  .dock-thread-grid,
+  .agent-dock-content,
+  .outcome-dock-content,
+  .dock-body > .commerce-inspector {
+    grid-template-columns: 1fr;
+  }
+}

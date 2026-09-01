@@ -10,6 +10,7 @@ const projects: readonly LibraryProject[] = [
     updatedAt: '2026-09-01T08:00:00.000Z',
     status: 'draft',
     access: 'owned',
+    canManage: true,
     template: 'spoke',
   },
   {
@@ -19,6 +20,7 @@ const projects: readonly LibraryProject[] = [
     updatedAt: '2026-09-01T07:00:00.000Z',
     status: 'draft',
     access: 'shared',
+    canManage: false,
     template: 'blank',
   },
 ];

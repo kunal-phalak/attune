@@ -2,13 +2,16 @@
 
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
+import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
 import { Input } from '@cloudflare/kumo/components/input';
+import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import { LiveblocksProvider, RoomProvider } from '@liveblocks/react';
 import { AvatarStack } from '@liveblocks/react-ui';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
 import {
@@ -33,10 +36,10 @@ function ProjectThumbnail({ template }: { readonly template: SketchTemplate }) {
     const angle = (index * Math.PI) / 3;
     return {
       id: `spoke-${index + 1}`,
-      x1: 160 + Math.cos(angle) * 31,
-      y1: 94 - Math.sin(angle) * 31,
-      x2: 160 + Math.cos(angle) * 75,
-      y2: 94 - Math.sin(angle) * 75,
+      x1: Number((160 + Math.cos(angle) * 31).toFixed(3)),
+      y1: Number((94 - Math.sin(angle) * 31).toFixed(3)),
+      x2: Number((160 + Math.cos(angle) * 75).toFixed(3)),
+      y2: Number((94 - Math.sin(angle) * 75).toFixed(3)),
     };
   });
   return (
@@ -77,24 +80,219 @@ function ProjectThumbnail({ template }: { readonly template: SketchTemplate }) {
   );
 }
 
+function projectManagementResponse(value: unknown): {
+  readonly projectName?: string;
+  readonly deleted?: boolean;
+  readonly error?: string;
+} {
+  if (typeof value !== 'object' || value === null) return {};
+  const projectName = Reflect.get(value, 'projectName');
+  const deleted = Reflect.get(value, 'deleted');
+  const error = Reflect.get(value, 'error');
+  return {
+    projectName: typeof projectName === 'string' ? projectName : undefined,
+    deleted: deleted === true,
+    error: typeof error === 'string' ? error : undefined,
+  };
+}
+
+async function renameProject(workspaceId: string, name: string): Promise<string> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(workspaceId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const result = projectManagementResponse(await response.json());
+  if (!response.ok || !result.projectName) {
+    throw new Error(result.error || 'Project rename failed.');
+  }
+  return result.projectName;
+}
+
+async function deleteProject(workspaceId: string): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(workspaceId)}`, {
+    method: 'DELETE',
+  });
+  const result = projectManagementResponse(await response.json());
+  if (!response.ok || !result.deleted) {
+    throw new Error(result.error || 'Project deletion failed.');
+  }
+}
+
+function ProjectActions({
+  project,
+  onRenamed,
+  onDeleted,
+}: {
+  readonly project: LibraryProject;
+  readonly onRenamed: (workspaceId: string, projectName: string) => void;
+  readonly onDeleted: (workspaceId: string) => void;
+}) {
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [name, setName] = useState(project.projectName);
+  const [busy, setBusy] = useState<'rename' | 'delete' | null>(null);
+
+  useEffect(() => setName(project.projectName), [project.projectName]);
+
+  const submitRename = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy('rename');
+    try {
+      const projectName = await renameProject(project.workspaceId, name);
+      onRenamed(project.workspaceId, projectName);
+      setRenameOpen(false);
+      attuneToastManager.add({ title: 'Project renamed', variant: 'success' });
+    } catch (error) {
+      attuneToastManager.add({
+        title: 'Project not renamed',
+        description: error instanceof Error ? error.message : 'Try again.',
+        variant: 'error',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmDelete = async () => {
+    setBusy('delete');
+    try {
+      await deleteProject(project.workspaceId);
+      onDeleted(project.workspaceId);
+      setDeleteOpen(false);
+      attuneToastManager.add({ title: 'Project deleted', variant: 'success' });
+    } catch (error) {
+      attuneToastManager.add({
+        title: 'Project not deleted',
+        description: error instanceof Error ? error.message : 'Try again.',
+        variant: 'error',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenu.Trigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              shape="square"
+              icon={<AppIcons.More size={18} weight="bold" />}
+              aria-label={`Actions for ${project.projectName}`}
+            />
+          }
+        />
+        <DropdownMenu.Content align="end" sideOffset={6}>
+          <DropdownMenu.LinkItem
+            href={`/workspace/${encodeURIComponent(project.workspaceId)}`}
+            icon={AppIcons.Open}
+          >
+            Open
+          </DropdownMenu.LinkItem>
+          <DropdownMenu.Item icon={AppIcons.Rename} onClick={() => setRenameOpen(true)}>
+            Rename
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            icon={AppIcons.Delete}
+            variant="danger"
+            onClick={() => setDeleteOpen(true)}
+          >
+            Delete
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu>
+
+      <Dialog.Root open={renameOpen} onOpenChange={setRenameOpen}>
+        <Dialog size="sm">
+          <form className="dashboard-project-dialog" onSubmit={(event) => void submitRename(event)}>
+            <Dialog.Title>Rename project</Dialog.Title>
+            <Dialog.Description>Choose a concise name for this project.</Dialog.Description>
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              aria-label="Project name"
+              maxLength={80}
+            />
+            <div className="dashboard-dialog-actions">
+              <Dialog.Close
+                render={
+                  <Button type="button" variant="ghost">
+                    Cancel
+                  </Button>
+                }
+              />
+              <Button
+                type="submit"
+                variant="primary"
+                loading={busy === 'rename'}
+                disabled={busy !== null || name.trim().length === 0}
+              >
+                Rename
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+      </Dialog.Root>
+
+      <Dialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <Dialog size="sm">
+          <div className="dashboard-project-dialog">
+            <Dialog.Title>Delete {project.projectName}?</Dialog.Title>
+            <Dialog.Description>
+              This removes the project from the library and cannot be undone.
+            </Dialog.Description>
+            <div className="dashboard-dialog-actions">
+              <Dialog.Close
+                render={
+                  <Button type="button" variant="ghost">
+                    Cancel
+                  </Button>
+                }
+              />
+              <Button
+                type="button"
+                variant="destructive"
+                loading={busy === 'delete'}
+                disabled={busy !== null}
+                onClick={() => void confirmDelete()}
+              >
+                Delete project
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+    </>
+  );
+}
+
 function ProjectCardBody({
   project,
   collaboration,
+  onRenamed,
+  onDeleted,
 }: {
   readonly project: LibraryProject;
   readonly collaboration: boolean;
+  readonly onRenamed: (workspaceId: string, projectName: string) => void;
+  readonly onDeleted: (workspaceId: string) => void;
 }) {
+  const workspaceHref = `/workspace/${encodeURIComponent(project.workspaceId)}`;
   return (
-    <Link
-      className="dashboard-project-card"
-      href={`/workspace/${encodeURIComponent(project.workspaceId)}`}
-    >
-      <div className="dashboard-project-thumbnail">
+    <Surface render={<article />} className="dashboard-project-card">
+      <Link className="dashboard-project-thumbnail" href={workspaceHref}>
         <ProjectThumbnail template={project.template} />
-      </div>
+      </Link>
       <div className="dashboard-project-meta">
-        <div>
-          <h2>{project.projectName}</h2>
+        <div className="dashboard-project-identity">
+          <Link href={workspaceHref}>
+            <h2>{project.projectName}</h2>
+          </Link>
           <span className="dashboard-draft-label">Draft</span>
         </div>
         <div className="dashboard-project-activity">
@@ -104,10 +302,15 @@ function ProjectCardBody({
               new Date(project.updatedAt),
             )}
           </time>
-          {collaboration ? <AvatarStack max={4} size={25} /> : null}
+          <div className="dashboard-project-collaboration">
+            {collaboration ? <AvatarStack max={4} size={25} /> : null}
+            {project.canManage ? (
+              <ProjectActions project={project} onRenamed={onRenamed} onDeleted={onDeleted} />
+            ) : null}
+          </div>
         </div>
       </div>
-    </Link>
+    </Surface>
   );
 }
 
@@ -115,13 +318,26 @@ function ProjectCard({
   project,
   collaboration,
   user,
+  onRenamed,
+  onDeleted,
 }: {
   readonly project: LibraryProject;
   readonly collaboration: boolean;
   readonly user: { readonly id: string; readonly name: string };
+  readonly onRenamed: (workspaceId: string, projectName: string) => void;
+  readonly onDeleted: (workspaceId: string) => void;
 }) {
   const resolver = useMemo(() => workspaceUserResolver(project.roomId), [project.roomId]);
-  if (!collaboration) return <ProjectCardBody project={project} collaboration={false} />;
+  if (!collaboration) {
+    return (
+      <ProjectCardBody
+        project={project}
+        collaboration={false}
+        onRenamed={onRenamed}
+        onDeleted={onDeleted}
+      />
+    );
+  }
   return (
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth" resolveUsers={resolver}>
       <RoomProvider
@@ -133,7 +349,12 @@ function ProjectCard({
           activeActor: { id: user.id, name: user.name, role: 'buyer' },
         }}
       >
-        <ProjectCardBody project={project} collaboration />
+        <ProjectCardBody
+          project={project}
+          collaboration
+          onRenamed={onRenamed}
+          onDeleted={onDeleted}
+        />
       </RoomProvider>
     </LiveblocksProvider>
   );
@@ -243,20 +464,32 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
 }
 
 function EmptyLibrary({
-  filtered,
+  filter,
+  query,
+  hasProjects,
   canCreate,
   onCreate,
 }: {
-  readonly filtered: boolean;
+  readonly filter: LibraryFilter;
+  readonly query: string;
+  readonly hasProjects: boolean;
   readonly canCreate: boolean;
   readonly onCreate: (template: SketchTemplate) => void;
 }) {
-  if (filtered) return <p className="dashboard-empty">No projects match this view.</p>;
+  if (query.trim()) return <p className="dashboard-empty">No projects match “{query.trim()}”.</p>;
+  if (filter === 'shared') {
+    return <p className="dashboard-empty">No projects have been shared with you.</p>;
+  }
+  if (filter === 'drafts' || hasProjects) {
+    return (
+      <p className="dashboard-empty">No {filter === 'drafts' ? 'drafts' : 'recent projects'}.</p>
+    );
+  }
   return (
     <Surface render={<section />} className="dashboard-first-project">
       <AppIcons.Sketch size={24} weight="regular" />
       <h2>Start your first sketch</h2>
-      <p>Create an empty XY workspace or open the radial spoke example.</p>
+      <p>Create an empty XY sketch or open the radial spoke example.</p>
       {canCreate ? (
         <div>
           <Button type="button" variant="primary" onClick={() => onCreate('blank')}>
@@ -286,9 +519,24 @@ export function DashboardLibrary({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
+  const [projects, setProjects] = useState(files);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => setProjects(files), [files]);
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', focusSearch);
+    return () => window.removeEventListener('keydown', focusSearch);
+  }, []);
+
   const visibleFiles = useMemo(
-    () => filterLibraryProjects(files, filter, query),
-    [files, filter, query],
+    () => filterLibraryProjects(projects, filter, query),
+    [projects, filter, query],
   );
   const activeLabel = navigation.find((item) => item.id === filter)?.label ?? 'Recents';
 
@@ -310,21 +558,40 @@ export function DashboardLibrary({
     <main className="dashboard-shell">
       <aside className="dashboard-sidebar">
         <Link className="dashboard-wordmark" href="/">
-          <span>AT</span>
-          <strong>Attune</strong>
+          <Image
+            src="/attune-lockup-blue-mark-white-wordmark-492x96.png"
+            width={123}
+            height={24}
+            alt="Attune"
+            priority
+          />
         </Link>
-        <label className="dashboard-search" htmlFor="dashboard-project-search">
-          <AppIcons.Search size={18} weight="regular" aria-hidden />
-          <Input
+        <InputGroup size="sm" className="dashboard-search">
+          <InputGroup.Addon>
+            <AppIcons.Search size={16} weight="regular" aria-hidden />
+          </InputGroup.Addon>
+          <InputGroup.Input
+            ref={searchRef}
             id="dashboard-project-search"
             type="search"
-            size="sm"
             value={query}
-            placeholder="Search"
+            placeholder="Search projects"
             onChange={(event) => setQuery(event.target.value)}
             aria-label="Search projects"
           />
-        </label>
+          <InputGroup.Addon align="end">
+            <InputGroup.Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              tooltip="Focus project search"
+              onClick={() => searchRef.current?.focus()}
+              aria-label="Focus project search"
+            >
+              <kbd>⌘K</kbd>
+            </InputGroup.Button>
+          </InputGroup.Addon>
+        </InputGroup>
         <nav aria-label="Project library">
           {navigation.map((item) => (
             <LinkButton
@@ -333,6 +600,7 @@ export function DashboardLibrary({
               variant={filter === item.id ? 'secondary' : 'ghost'}
               size="sm"
               className="w-full justify-start"
+              aria-current={filter === item.id ? 'page' : undefined}
               icon={
                 item.id === 'recents' ? (
                   <AppIcons.History size={18} />
@@ -347,6 +615,7 @@ export function DashboardLibrary({
             </LinkButton>
           ))}
         </nav>
+        <div className="dashboard-sidebar-future-space" aria-hidden />
       </aside>
       <section className="dashboard-library" aria-label="Projects">
         <header>
@@ -361,12 +630,26 @@ export function DashboardLibrary({
                 project={project}
                 collaboration={collaboration}
                 user={user}
+                onRenamed={(workspaceId, projectName) =>
+                  setProjects((current) =>
+                    current.map((item) =>
+                      item.workspaceId === workspaceId ? { ...item, projectName } : item,
+                    ),
+                  )
+                }
+                onDeleted={(workspaceId) =>
+                  setProjects((current) =>
+                    current.filter((item) => item.workspaceId !== workspaceId),
+                  )
+                }
               />
             ))}
           </div>
         ) : (
           <EmptyLibrary
-            filtered={files.length > 0 || query.length > 0 || filter !== 'recents'}
+            filter={filter}
+            query={query}
+            hasProjects={projects.length > 0}
             canCreate={canCreate}
             onCreate={(template) => void createFromEmpty(template)}
           />

@@ -15,11 +15,13 @@ import {
 } from '../lib/attune-view';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
 import type { SketchTemplate } from '../lib/projects/library';
+import { editorChromeCssVariables } from '../lib/sketch/editor-chrome';
 import {
-  panelForTool,
-  panelSide,
-  toggleEditorTool,
-  type EditorTool,
+  CLOSED_EDITOR_PANELS,
+  toggleEditorPanel,
+  type CanvasTool,
+  type EditorPanel,
+  type EditorPanelState,
 } from '../lib/sketch/panel-state';
 import { viewportInsetsFor } from '../lib/sketch/viewport-insets';
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
@@ -162,56 +164,59 @@ function ToolButton({
 }
 
 function WorkspaceTools({
-  activeTool,
+  canvasTool,
+  panels,
   collaboration,
-  onTool,
+  onCanvasTool,
+  onPanel,
 }: {
-  readonly activeTool: EditorTool;
+  readonly canvasTool: CanvasTool;
+  readonly panels: EditorPanelState;
   readonly collaboration: boolean;
-  readonly onTool: (tool: EditorTool) => void;
+  readonly onCanvasTool: (tool: CanvasTool) => void;
+  readonly onPanel: (panel: EditorPanel) => void;
 }) {
   return (
     <>
       <nav className="workspace-tool-island is-left" aria-label="Sketch tools">
         <ToolButton
           label="Select"
-          active={activeTool === 'select'}
+          active={canvasTool === 'select'}
           icon={<AppIcons.Select size={20} weight="regular" />}
-          onClick={() => onTool('select')}
+          onClick={() => onCanvasTool('select')}
         />
         <ToolButton
           label="Sketch tools"
-          active={activeTool === 'sketch'}
+          active={canvasTool === 'sketch'}
           icon={<AppIcons.Sketch size={20} weight="regular" />}
-          onClick={() => onTool('sketch')}
+          onClick={() => onCanvasTool('sketch')}
         />
-        <span className="workspace-tool-divider" />
         <ToolButton
           label="Comments"
-          active={activeTool === 'comments'}
+          active={panels.leftPanel === 'comments'}
           disabled={!collaboration}
           icon={<AppIcons.Comments size={20} weight="regular" />}
-          onClick={() => onTool('comments')}
+          onClick={() => onPanel('comments')}
         />
         <ToolButton
           label="Items"
-          active={activeTool === 'items'}
+          active={panels.leftPanel === 'items'}
           icon={<AppIcons.Items size={20} weight="regular" />}
-          onClick={() => onTool('items')}
+          onClick={() => onPanel('items')}
         />
       </nav>
       <nav className="workspace-tool-island is-right" aria-label="Context tools">
         <ToolButton
           label="Sketch Constraints"
-          active={activeTool === 'constraints'}
+          active={panels.rightPanel === 'constraints'}
           icon={<AppIcons.SketchConstraints size={20} weight="regular" />}
-          onClick={() => onTool('constraints')}
+          onClick={() => onPanel('constraints')}
         />
         <ToolButton
           label="History"
-          active={activeTool === 'history'}
+          active={panels.rightPanel === 'history'}
           icon={<AppIcons.History size={20} weight="regular" />}
-          onClick={() => onTool('history')}
+          onClick={() => onPanel('history')}
         />
       </nav>
     </>
@@ -232,7 +237,8 @@ function WorkspaceShell({
   readonly template: SketchTemplate;
 }) {
   const [view, setView] = useState<AttuneApiView | null>(null);
-  const [activeTool, setActiveTool] = useState<EditorTool>('select');
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
+  const [panels, setPanels] = useState<EditorPanelState>(CLOSED_EDITOR_PANELS);
 
   const refresh = useCallback(async () => {
     const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
@@ -247,49 +253,64 @@ function WorkspaceShell({
     void refresh();
   }, [refresh]);
 
-  const panel = panelForTool(activeTool);
-  const side = panelSide(panel);
-  const insets = viewportInsetsFor(panel);
-  const closePanel = () => setActiveTool('select');
-  const setTool = (tool: EditorTool) => setActiveTool((current) => toggleEditorTool(current, tool));
+  const insets = viewportInsetsFor(panels);
+  const closeLeftPanel = () => setPanels((current) => ({ ...current, leftPanel: null }));
+  const closeRightPanel = () => setPanels((current) => ({ ...current, rightPanel: null }));
+  const setPanel = (panel: EditorPanel) =>
+    setPanels((current) => toggleEditorPanel(current, panel));
   const draftVersion = view?.workspace.draftVersion ?? 1;
   const specHash = view?.specHash ?? `draft:${workspaceId}`;
 
   return (
     <main
       className="workspace-shell"
-      data-left-panel-open={side === 'left'}
-      data-right-panel-open={side === 'right'}
+      data-left-panel-open={panels.leftPanel !== null}
+      data-right-panel-open={panels.rightPanel !== null}
+      style={editorChromeCssVariables}
     >
       <WorkspaceCanvas
         insets={insets}
         projectName={projectName}
         template={template}
-        comments={
-          collaboration && activeTool === 'comments' ? (
-            <LiveCommentPins workspaceId={workspaceId} />
-          ) : undefined
+        renderComments={
+          collaboration && panels.leftPanel === 'comments'
+            ? (camera) => (
+                <LiveCommentPins
+                  workspaceId={workspaceId}
+                  camera={camera}
+                  draftVersion={draftVersion}
+                  specHash={specHash}
+                />
+              )
+            : undefined
         }
       />
       <WorkspaceHeader collaboration={collaboration} projectName={projectName} />
-      <WorkspaceTools activeTool={activeTool} collaboration={collaboration} onTool={setTool} />
+      <WorkspaceTools
+        canvasTool={canvasTool}
+        panels={panels}
+        collaboration={collaboration}
+        onCanvasTool={setCanvasTool}
+        onPanel={setPanel}
+      />
       <ItemsPanel
-        open={activeTool === 'items'}
+        open={panels.leftPanel === 'items'}
         projectName={projectName}
         template={template}
-        onClose={closePanel}
+        onClose={closeLeftPanel}
       />
       {collaboration ? (
         <LiveCommentsRail
-          open={activeTool === 'comments'}
+          open={panels.leftPanel === 'comments'}
           workspaceId={workspaceId}
-          draftVersion={draftVersion}
-          specHash={specHash}
-          onClose={closePanel}
+          onClose={closeLeftPanel}
         />
       ) : null}
-      <SketchConstraintsPanel open={activeTool === 'constraints'} onClose={closePanel} />
-      <HistoryPanel open={activeTool === 'history'} events={[]} onClose={closePanel} />
+      <SketchConstraintsPanel
+        open={panels.rightPanel === 'constraints'}
+        onClose={closeRightPanel}
+      />
+      <HistoryPanel open={panels.rightPanel === 'history'} events={[]} onClose={closeRightPanel} />
     </main>
   );
 }

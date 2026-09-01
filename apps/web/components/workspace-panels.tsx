@@ -4,12 +4,19 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import { useHistoryVersions, useSyncStatus, useThreads } from '@liveblocks/react';
-import { AvatarStack, CommentPin, Composer, Thread } from '@liveblocks/react-ui';
+import {
+  AvatarStack,
+  CommentPin,
+  FloatingComposer,
+  FloatingThread,
+  Thread,
+} from '@liveblocks/react-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import type { SketchTemplate } from '../lib/projects/library';
 import { AppIcons } from './ui/app-icons';
 import { AppScrollArea } from './ui/app-scroll-area';
+import type { CameraViewState } from './workspace-canvas';
 
 function PanelShell({
   side,
@@ -37,9 +44,9 @@ function PanelShell({
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="sm"
           shape="square"
-          icon={<AppIcons.Close size={16} weight="bold" />}
+          icon={<AppIcons.Close size={18} weight="bold" />}
           onClick={onClose}
           aria-label={`Close ${title}`}
         />
@@ -263,14 +270,10 @@ export function PresenceHeader() {
 export function LiveCommentsRail({
   open,
   workspaceId,
-  draftVersion,
-  specHash,
   onClose,
 }: {
   readonly open: boolean;
   readonly workspaceId: string;
-  readonly draftVersion: number;
-  readonly specHash: string;
   readonly onClose: () => void;
 }) {
   const result = useThreads({ query: { metadata: { workspaceId } } });
@@ -287,46 +290,93 @@ export function LiveCommentsRail({
           ) : null}
         </div>
       </AppScrollArea>
-      <div className="workspace-comment-composer attune-liveblocks-bridge">
-        <Composer
-          metadata={{
-            workspaceId,
-            entityId: 'sketch:canvas',
-            x: 390,
-            y: 210,
-            revisionId: `draft:r${draftVersion}`,
-            specHash,
-          }}
-        />
-      </div>
     </PanelShell>
   );
 }
 
-function pinPosition(x: number, y: number): { readonly left: string; readonly top: string } {
-  const left = Math.min(Math.max((x / 720) * 100, 12), 88);
-  const top = Math.min(Math.max((y / 440) * 100, 16), 84);
-  return { left: `${left}%`, top: `${top}%` };
+function worldToScreen(
+  camera: CameraViewState,
+  point: { readonly x: number; readonly y: number },
+): { readonly left: number; readonly top: number } {
+  return {
+    left: camera.x + point.x * camera.zoom,
+    top: camera.y - point.y * camera.zoom,
+  };
 }
 
-export function LiveCommentPins({ workspaceId }: { readonly workspaceId: string }) {
+function isWorldAnchor(metadata: Liveblocks['ThreadMetadata']): boolean {
+  return Number.isFinite(metadata.worldX) && Number.isFinite(metadata.worldY);
+}
+
+export function LiveCommentPins({
+  workspaceId,
+  camera,
+  draftVersion,
+  specHash,
+  onEntityFocus,
+}: {
+  readonly workspaceId: string;
+  readonly camera: CameraViewState;
+  readonly draftVersion: number;
+  readonly specHash: string;
+  readonly onEntityFocus?: (entityId: string | null) => void;
+}) {
   const result = useThreads({ query: { metadata: { workspaceId } } });
+  const composerScreen = { x: camera.width / 2, y: camera.height / 2 };
+  const composerWorld = {
+    x: (composerScreen.x - camera.x) / camera.zoom,
+    y: (camera.y - composerScreen.y) / camera.zoom,
+  };
   return (
     <div className="workspace-comment-pins attune-liveblocks-bridge" aria-label="Canvas comments">
-      {(result.threads ?? []).map((thread, index) => {
-        const position = pinPosition(
-          thread.metadata.x || 360 + index * 20,
-          thread.metadata.y || 220,
-        );
+      {(result.threads ?? []).map((thread) => {
+        if (!isWorldAnchor(thread.metadata)) return null;
+        const position = worldToScreen(camera, {
+          x: thread.metadata.worldX,
+          y: thread.metadata.worldY,
+        });
+        const entityId = thread.metadata.entityId || null;
         return (
-          <CommentPin
+          <FloatingThread
             key={thread.id}
-            userId={thread.comments.at(-1)?.userId}
-            style={position}
-            aria-label="Sketch comment"
-          />
+            thread={thread}
+            showComposer="collapsed"
+            side="right"
+            sideOffset={8}
+          >
+            <CommentPin
+              userId={thread.comments.at(-1)?.userId}
+              style={{ left: position.left, top: position.top }}
+              aria-label="Open sketch comment"
+              onFocus={() => entityId && onEntityFocus?.(entityId)}
+              onBlur={() => onEntityFocus?.(null)}
+              onPointerEnter={() => entityId && onEntityFocus?.(entityId)}
+              onPointerLeave={() => onEntityFocus?.(null)}
+            />
+          </FloatingThread>
         );
       })}
+      {camera.width > 0 && camera.height > 0 ? (
+        <FloatingComposer
+          metadata={{
+            workspaceId,
+            worldX: composerWorld.x,
+            worldY: composerWorld.y,
+            revisionId: `draft:r${draftVersion}`,
+            specHash,
+          }}
+          side="right"
+          sideOffset={8}
+        >
+          <CommentPin
+            className="workspace-new-comment-pin"
+            style={{ left: composerScreen.x, top: composerScreen.y }}
+            aria-label="Add canvas comment"
+          >
+            <AppIcons.New size={15} weight="bold" />
+          </CommentPin>
+        </FloatingComposer>
+      ) : null}
     </div>
   );
 }

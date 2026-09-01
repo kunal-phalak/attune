@@ -1,6 +1,7 @@
 'use client';
 
-import { Surface as KumoSurface } from '@cloudflare/kumo/components/surface';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Popover } from '@cloudflare/kumo/components/popover';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import type { Canvas as SkCanvas, CanvasKit, Paint, Surface } from 'canvaskit-wasm';
 import {
@@ -18,6 +19,7 @@ import { Camera2D, type FitPadding, type ViewportSize } from '../lib/sketch/came
 import { adaptiveGridStep } from '../lib/sketch/grid';
 import { SPOKE_SKETCH } from '../lib/sketch/spoke-sketch';
 import type { ViewportInsets } from '../lib/sketch/viewport-insets';
+import { AppIcons } from './ui/app-icons';
 
 declare global {
   interface Window {
@@ -67,6 +69,13 @@ export interface WorkspaceCanvasHandle {
 
 interface CanvasMetrics extends ViewportSize {
   readonly pixelRatio: number;
+}
+
+export interface CameraViewState extends ViewportSize {
+  readonly x: number;
+  readonly y: number;
+  readonly zoom: number;
+  readonly gridStep: number;
 }
 
 function paint(
@@ -207,11 +216,11 @@ export const WorkspaceCanvas = forwardRef<
   WorkspaceCanvasHandle,
   {
     readonly insets: ViewportInsets;
-    readonly comments?: ReactNode;
+    readonly renderComments?: (view: CameraViewState) => ReactNode;
     readonly projectName: string;
     readonly template: SketchTemplate;
   }
->(function WorkspaceCanvas({ insets, comments, projectName, template }, forwardedRef) {
+>(function WorkspaceCanvas({ insets, renderComments, projectName, template }, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef(new Camera2D({ minZoom: 0.08, maxZoom: 18 }));
@@ -224,7 +233,14 @@ export const WorkspaceCanvas = forwardRef<
   const pointerRef = useRef<{ readonly id: number; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [surfaceState, setSurfaceState] = useState<'loading' | 'ready' | 'failed'>('loading');
-  const [viewState, setViewState] = useState({ x: 0, y: 0, zoom: 1, gridStep: 50 });
+  const [viewState, setViewState] = useState<CameraViewState>({
+    x: 0,
+    y: 0,
+    zoom: 1,
+    gridStep: 50,
+    width: 0,
+    height: 0,
+  });
 
   insetsRef.current = insets;
   templateRef.current = template;
@@ -236,6 +252,8 @@ export const WorkspaceCanvas = forwardRef<
       y: camera.y,
       zoom: camera.zoom,
       gridStep: adaptiveGridStep(camera.zoom),
+      width: metricsRef.current.width,
+      height: metricsRef.current.height,
     });
   };
 
@@ -410,24 +428,42 @@ export const WorkspaceCanvas = forwardRef<
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       />
-      {comments}
-      <Tooltip
-        content="Sketch plane: XY"
-        render={
-          <KumoSurface
-            render={<div />}
-            className="sketch-plane-widget"
-            style={{ right: `${insets.right + 18}px` }}
-            aria-label="Sketch plane: XY"
-          >
-            <span className="sketch-plane-glyph" aria-hidden />
-            XY
-          </KumoSurface>
-        }
-      />
+      {renderComments?.(viewState)}
+      <Popover>
+        <Tooltip
+          content="Sketch plane: XY"
+          render={
+            <Popover.Trigger
+              render={
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="sketch-plane-widget"
+                  style={{ right: `${insets.right}px` }}
+                  icon={<AppIcons.View size={16} weight="bold" />}
+                  aria-label="Sketch plane: XY"
+                >
+                  XY
+                </Button>
+              }
+            />
+          }
+        />
+        <Popover.Content
+          side="bottom"
+          align="end"
+          sideOffset={8}
+          positionMethod="fixed"
+          className="sketch-orientation-popover"
+        >
+          <Popover.Title>Sketch plane</Popover.Title>
+          <p>XY is the current drawing plane.</p>
+        </Popover.Content>
+      </Popover>
       <div
         className="sketch-view-status"
-        style={{ right: `${insets.right + 22}px` }}
+        style={{ right: `${insets.right}px` }}
         aria-label={`Zoom ${Math.round(viewState.zoom * 100)} percent`}
       >
         {Math.round(viewState.zoom * 100)}% · grid {viewState.gridStep} mm

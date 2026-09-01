@@ -87,6 +87,12 @@ export interface CreateSketchProjectRecordInput {
   readonly template: 'blank' | 'spoke';
 }
 
+export interface ManagedSketchProjectRecord {
+  readonly projectId: string;
+  readonly workspaceIds: readonly string[];
+  readonly roomIds: readonly string[];
+}
+
 export interface ExecutePersistedCommandInput {
   readonly workspaceId: string;
   readonly command: AttuneCommand;
@@ -790,6 +796,94 @@ export async function createSketchProjectRecord(
   });
 }
 
+async function managedSketchProject(
+  userId: string,
+  workspaceId: string,
+): Promise<ManagedSketchProjectRecord> {
+  const database = getDatabase();
+  const targets = await database
+    .select({ projectId: projects.id })
+    .from(workspaceMemberships)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
+    .innerJoin(projects, eq(projects.id, workspaces.projectId))
+    .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
+    .innerJoin(
+      organizationMemberships,
+      and(
+        eq(organizationMemberships.organizationId, projects.organizationId),
+        eq(organizationMemberships.userId, userId),
+      ),
+    )
+    .where(
+      and(
+        eq(workspaces.id, workspaceId),
+        eq(workspaceMemberships.userId, userId),
+        sql`${workspaceFiles.kind} like 'sketch:%'`,
+      ),
+    )
+    .limit(1);
+  const target = targets[0];
+  if (!target) throw new Error('PROJECT_MANAGE_FORBIDDEN');
+
+  const projectWorkspaces = await database
+    .select({ workspaceId: workspaces.id, roomId: workspaces.liveblocksRoomId })
+    .from(workspaces)
+    .where(eq(workspaces.projectId, target.projectId));
+  return {
+    projectId: target.projectId,
+    workspaceIds: projectWorkspaces.map(({ workspaceId: id }) => id),
+    roomIds: projectWorkspaces.map(({ roomId }) => roomId),
+  };
+}
+
+export async function renameSketchProjectRecord(input: {
+  readonly userId: string;
+  readonly workspaceId: string;
+  readonly name: string;
+}): Promise<ManagedSketchProjectRecord> {
+  const target = await managedSketchProject(input.userId, input.workspaceId);
+  const database = getDatabase();
+  const now = new Date().toISOString();
+  await database.transaction(async (transaction) => {
+    await transaction
+      .update(projects)
+      .set({ name: input.name, updatedAt: now })
+      .where(eq(projects.id, target.projectId));
+    await transaction
+      .update(workspaces)
+      .set({ name: input.name, updatedAt: now })
+      .where(inArray(workspaces.id, [...target.workspaceIds]));
+    await transaction
+      .update(workspaceFiles)
+      .set({ name: `${input.name}.attune`, updatedAt: now })
+      .where(inArray(workspaceFiles.workspaceId, [...target.workspaceIds]));
+  });
+  return target;
+}
+
+export async function deleteSketchProjectRecord(input: {
+  readonly userId: string;
+  readonly workspaceId: string;
+}): Promise<ManagedSketchProjectRecord> {
+  const target = await managedSketchProject(input.userId, input.workspaceId);
+  const database = getDatabase();
+  await database.transaction(async (transaction) => {
+    await Promise.all(target.workspaceIds.map((id) => clearWorkspaceRecords(transaction, id)));
+    await transaction
+      .delete(delegationGrants)
+      .where(inArray(delegationGrants.workspaceId, [...target.workspaceIds]));
+    await transaction
+      .delete(workspaceMemberships)
+      .where(inArray(workspaceMemberships.workspaceId, [...target.workspaceIds]));
+    await transaction
+      .delete(workspaceFiles)
+      .where(inArray(workspaceFiles.workspaceId, [...target.workspaceIds]));
+    await transaction.delete(workspaces).where(inArray(workspaces.id, [...target.workspaceIds]));
+    await transaction.delete(projects).where(eq(projects.id, target.projectId));
+  });
+  return target;
+}
+
 export async function listProjectsForUser(userId: string) {
   const database = getDatabase();
   const [projectRows, organizationRows] = await Promise.all([
@@ -836,6 +930,7 @@ export async function listProjectsForUser(userId: string) {
     capabilityEpoch: row.capabilityEpoch,
     updatedAt: row.updatedAt,
     access: ownedOrganizations.has(row.organizationId) ? ('owned' as const) : ('shared' as const),
+    canManage: ownedOrganizations.has(row.organizationId) && row.fileKind.startsWith('sketch:'),
     template: row.fileKind === 'sketch:blank' ? ('blank' as const) : ('spoke' as const),
   }));
 }

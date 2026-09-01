@@ -1,20 +1,25 @@
 import { ShopifyIntegrationError } from './errors';
 import type { GraphqlBody, GraphqlClient, ShopifyConfiguration } from './types';
 
-async function requestJson<T>(url: string, init: RequestInit, operationName: string): Promise<T> {
+function isExpectedJsonObject<T extends object>(value: unknown, _expected?: T): value is T {
+  return typeof value === 'object' && value !== null;
+}
+
+async function requestJson<T extends object>(
+  url: string,
+  init: RequestInit,
+  operationName: string,
+): Promise<T> {
   const response = await fetch(url, init);
   const raw: unknown = await response.json().catch(() => null);
-  // GraphQL selections are typed at each call site and checked against Attune's contract.
-  // eslint-disable-next-line typescript/no-unsafe-type-assertion
-  const body = raw as T | null;
-  if (!response.ok || body === null) {
+  if (!response.ok || !isExpectedJsonObject<T>(raw)) {
     throw new ShopifyIntegrationError(
       'GRAPHQL_FAILED',
       `${operationName} failed with HTTP ${response.status}.`,
       response.status >= 500,
     );
   }
-  return body;
+  return raw;
 }
 
 export function graphqlClient(

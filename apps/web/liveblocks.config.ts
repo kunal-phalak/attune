@@ -36,9 +36,12 @@ declare global {
     RoomEvent: never;
     ThreadMetadata: {
       workspaceId: string;
-      entityId: string;
-      x: number;
-      y: number;
+      entityId?: string;
+      worldX: number;
+      worldY: number;
+      /** Legacy coordinates retained only for reading threads created before world anchoring. */
+      x?: number;
+      y?: number;
       revisionId: string;
       specHash: string;
     };

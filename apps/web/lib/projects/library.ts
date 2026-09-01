@@ -8,6 +8,7 @@ export interface LibraryProject {
   readonly updatedAt: string;
   readonly status: 'draft';
   readonly access: 'owned' | 'shared';
+  readonly canManage: boolean;
   readonly template: SketchTemplate;
 }
 

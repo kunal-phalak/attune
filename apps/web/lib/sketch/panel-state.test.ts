@@ -1,21 +1,32 @@
 import { describe, expect, it } from 'vitest';
 
-import { panelForTool, panelSide, toggleEditorTool } from './panel-state';
+import { CLOSED_EDITOR_PANELS, panelSide, toggleEditorPanel } from './panel-state';
 
 describe('editor panel state', () => {
-  it('opens one panel and returns to select when toggled closed', () => {
-    expect(toggleEditorTool('select', 'items')).toBe('items');
-    expect(toggleEditorTool('items', 'items')).toBe('select');
+  it('toggles a panel without changing the opposite side', () => {
+    const both = toggleEditorPanel(toggleEditorPanel(CLOSED_EDITOR_PANELS, 'items'), 'constraints');
+
+    expect(both).toEqual({ leftPanel: 'items', rightPanel: 'constraints' });
+    expect(toggleEditorPanel(both, 'items')).toEqual({
+      leftPanel: null,
+      rightPanel: 'constraints',
+    });
   });
 
-  it('switches directly between left and right contextual panels', () => {
-    expect(toggleEditorTool('comments', 'history')).toBe('history');
-    expect(panelSide(panelForTool('comments'))).toBe('left');
-    expect(panelSide(panelForTool('history'))).toBe('right');
+  it('keeps same-side choices mutually exclusive', () => {
+    expect(toggleEditorPanel({ leftPanel: 'items', rightPanel: 'history' }, 'comments')).toEqual({
+      leftPanel: 'comments',
+      rightPanel: 'history',
+    });
+    expect(
+      toggleEditorPanel({ leftPanel: 'comments', rightPanel: 'constraints' }, 'history'),
+    ).toEqual({ leftPanel: 'comments', rightPanel: 'history' });
   });
 
-  it('does not reserve a panel for direct canvas tools', () => {
-    expect(panelForTool('select')).toBeNull();
-    expect(panelForTool('sketch')).toBeNull();
+  it('maps panel choices to a stable side', () => {
+    expect(panelSide('comments')).toBe('left');
+    expect(panelSide('items')).toBe('left');
+    expect(panelSide('constraints')).toBe('right');
+    expect(panelSide('history')).toBe('right');
   });
 });

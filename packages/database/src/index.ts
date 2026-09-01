@@ -3,6 +3,7 @@ export {
   activeDelegationForWorkspace,
   canCreateProjectsForUser,
   createSketchProjectRecord,
+  deleteSketchProjectRecord,
   currentFrozenRevision,
   ensureAuthenticatedUser,
   ensureJudgeWorkspace,
@@ -14,6 +15,7 @@ export {
   JUDGE_USER_ID,
   JUDGE_WORKSPACE_ID,
   listProjectsForUser,
+  renameSketchProjectRecord,
   readWorkspaceBundle,
   resetJudgeWorkspace,
   reserveExternalMaterialization,
@@ -25,6 +27,7 @@ export type {
   ExecutePersistedCommandInput,
   ExternalMaterializationInput,
   ExternalMaterializationReservation,
+  ManagedSketchProjectRecord,
   WorkspaceBundle,
   WorkspaceIdentity,
 } from './repository';

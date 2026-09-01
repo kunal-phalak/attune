@@ -1,4 +1,44 @@
 @layer components {
+  :root {
+    --attune-layer-canvas: 0;
+    --attune-layer-annotations: 10;
+    --attune-layer-panels: 20;
+    --attune-layer-controls: 30;
+    --attune-layer-liveblocks: 40;
+    --attune-layer-popups: 50;
+    --attune-layer-dialogs: 60;
+    --attune-layer-toasts: 70;
+  }
+
+  .attune-application-root {
+    min-height: 100dvh;
+    isolation: isolate;
+  }
+
+  #attune-overlay-root {
+    position: fixed;
+    z-index: var(--attune-layer-popups);
+    inset: 0;
+    pointer-events: none;
+  }
+
+  #attune-overlay-root > * {
+    pointer-events: auto;
+  }
+
+  #attune-overlay-root > [data-base-ui-portal] {
+    position: relative;
+    z-index: var(--attune-layer-popups);
+  }
+
+  #attune-overlay-root > [data-base-ui-portal]:has([role='dialog']) {
+    z-index: var(--attune-layer-dialogs);
+  }
+
+  #attune-overlay-root > [data-base-ui-portal]:has([role='region']) {
+    z-index: var(--attune-layer-toasts);
+  }
+
   .attune-liveblocks-bridge {
     --lb-radius: 0.5rem;
     --lb-spacing: 0.75rem;
@@ -7,7 +47,6 @@
     --lb-foreground: var(--color-kumo-contrast);
     --lb-destructive: var(--color-attune-conflict);
     --lb-transition-duration: 100ms;
-    isolation: isolate;
     min-width: 0;
   }
 
@@ -18,24 +57,25 @@
     background: var(--color-kumo-base);
   }
 
-  .attune-liveblocks-portal.lb-root,
-  .lb-root:where(.lb-dropdown, .lb-tooltip, .lb-composer-suggestions, .lb-floating-thread) {
+  #attune-overlay-root .lb-root {
     --lb-accent: var(--color-kumo-brand);
     --lb-background: var(--color-kumo-base);
     --lb-foreground: var(--color-kumo-contrast);
-    z-index: 120 !important;
   }
 
-  body > [data-radix-portal],
-  body > [data-base-ui-portal] {
-    z-index: 110;
+  #attune-overlay-root .lb-floating-thread {
+    z-index: var(--attune-layer-liveblocks);
+  }
+
+  #attune-overlay-root :where(.lb-dropdown, .lb-tooltip, .lb-composer-suggestions) {
+    z-index: var(--attune-layer-popups);
   }
 
   body > div:has(> a[href='https://lblcks.io/badge']) {
     top: auto !important;
     right: 150px !important;
     bottom: 12px !important;
-    z-index: 25 !important;
+    z-index: var(--attune-layer-controls) !important;
   }
 
   @media (max-width: 767px) {

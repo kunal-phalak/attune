@@ -53,6 +53,7 @@ export default async function DashboardPage({
     updatedAt: row.updatedAt,
     status: 'draft',
     access: row.access,
+    canManage: row.canManage,
     template: row.template,
   }));
   const filter = parseLibraryFilter((await searchParams).view);

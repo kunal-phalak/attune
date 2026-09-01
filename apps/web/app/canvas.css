@@ -1,5 +1,16 @@
 @layer components {
   .workspace-shell {
+    --editor-panel-width: 288px;
+    --editor-panel-gap: 8px;
+    --editor-control-size: 34px;
+    --editor-motion-duration: 180ms;
+    --editor-motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --editor-z-canvas: 0;
+    --editor-z-indicator: 24;
+    --editor-z-panel: 40;
+    --editor-z-island: 48;
+    --editor-z-header: 60;
+    --editor-z-overlay: 100;
     position: relative;
     width: 100%;
     height: 100dvh;
@@ -18,6 +29,7 @@
   }
 
   .attune-sketch-canvas {
+    z-index: var(--editor-z-canvas);
     overflow: hidden;
     background: #f7f8f9;
   }
@@ -42,7 +54,7 @@
 
   .workspace-header {
     position: absolute;
-    z-index: 60;
+    z-index: var(--editor-z-header);
     inset: 0 0 auto;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -63,23 +75,21 @@
   }
 
   .workspace-header-left > a,
+  .workspace-header-right button,
+  .workspace-tool-island button {
+    width: var(--editor-control-size);
+    height: var(--editor-control-size);
+    min-width: var(--editor-control-size);
+    min-height: var(--editor-control-size);
+  }
+
   .workspace-project-icon {
     display: grid;
-    width: 34px;
-    height: 34px;
+    width: var(--editor-control-size);
+    height: var(--editor-control-size);
     flex: 0 0 auto;
     place-items: center;
     border-radius: 8px;
-    color: var(--color-kumo-subtle);
-    text-decoration: none;
-  }
-
-  .workspace-header-left > a:hover {
-    color: var(--color-kumo-contrast);
-    background: var(--color-kumo-fill-hover);
-  }
-
-  .workspace-project-icon {
     color: white;
     background: #27313f;
   }
@@ -96,47 +106,15 @@
     justify-content: flex-end;
   }
 
-  .workspace-draft-menu {
-    position: relative;
-  }
-
-  .workspace-draft-control {
-    display: inline-flex;
-    height: 32px;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    padding: 0 11px;
-    border: 0;
-    border-radius: 8px;
-    color: var(--color-kumo-contrast);
-    background: transparent;
-    font-size: 0.75rem;
-    font-weight: 600;
-  }
-
-  .workspace-draft-control:not(:disabled):hover,
-  .workspace-draft-control[aria-expanded='true'] {
-    background: var(--color-kumo-fill-hover);
-  }
-
   .workspace-draft-popover {
-    position: absolute;
-    z-index: 80;
-    inset: calc(100% + 8px) auto auto 50%;
-    width: 274px;
-    translate: -50% 0;
+    z-index: var(--editor-z-overlay);
+    width: 276px;
     padding: 12px;
-    border: 1px solid var(--color-kumo-line);
-    border-radius: 12px;
-    background: var(--color-kumo-base);
-    box-shadow: 0 14px 40px rgb(23 30 40 / 14%);
   }
 
-  .workspace-draft-popover > strong {
-    display: block;
-    margin-bottom: 8px;
+  .workspace-draft-popover [role='heading'] {
     font-size: 0.75rem;
+    font-weight: 650;
   }
 
   .workspace-presence {
@@ -159,7 +137,7 @@
 
   .workspace-tool-island {
     position: absolute;
-    z-index: 45;
+    z-index: var(--editor-z-island);
     top: 72px;
     display: flex;
     flex-direction: column;
@@ -169,15 +147,26 @@
     border-radius: 12px;
     background: color-mix(in oklch, var(--color-kumo-base) 94%, transparent);
     box-shadow: 0 5px 18px rgb(23 30 40 / 8%);
+    transition: transform var(--editor-motion-duration) var(--editor-motion-ease);
     backdrop-filter: blur(12px);
   }
 
   .workspace-tool-island.is-left {
-    left: 12px;
+    left: 0;
+    transform: translateX(12px);
   }
 
   .workspace-tool-island.is-right {
-    right: 12px;
+    right: 0;
+    transform: translateX(-12px);
+  }
+
+  .workspace-shell[data-left-panel-open='true'] .workspace-tool-island.is-left {
+    transform: translateX(calc(var(--editor-panel-width) + var(--editor-panel-gap)));
+  }
+
+  .workspace-shell[data-right-panel-open='true'] .workspace-tool-island.is-right {
+    transform: translateX(calc(-1 * (var(--editor-panel-width) + var(--editor-panel-gap))));
   }
 
   .workspace-tool-divider {
@@ -188,27 +177,45 @@
 
   .workspace-overlay-panel {
     position: absolute;
-    z-index: 36;
-    top: 72px;
-    bottom: 18px;
+    z-index: var(--editor-z-panel);
+    top: 56px;
+    bottom: 0;
     display: flex;
-    width: 276px;
+    width: var(--editor-panel-width);
     min-height: 0;
     flex-direction: column;
     overflow: hidden;
     border: 1px solid color-mix(in oklch, var(--color-kumo-line) 90%, transparent);
-    border-radius: 13px;
-    background: color-mix(in oklch, var(--color-kumo-base) 96%, transparent);
+    background: color-mix(in oklch, var(--color-kumo-base) 97%, transparent);
     box-shadow: 0 12px 34px rgb(23 30 40 / 10%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      transform var(--editor-motion-duration) var(--editor-motion-ease),
+      opacity var(--editor-motion-duration) var(--editor-motion-ease),
+      visibility 0s linear var(--editor-motion-duration);
     backdrop-filter: blur(14px);
   }
 
   .workspace-overlay-panel.is-left {
-    left: 68px;
+    left: 0;
+    border-radius: 0 12px 12px 0;
+    transform: translateX(-12px);
   }
 
   .workspace-overlay-panel.is-right {
-    right: 68px;
+    right: 0;
+    border-radius: 12px 0 0 12px;
+    transform: translateX(12px);
+  }
+
+  .workspace-overlay-panel[data-open='true'] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition-delay: 0s;
   }
 
   .workspace-overlay-panel > header {
@@ -228,66 +235,39 @@
 
   .workspace-overlay-panel-content {
     display: flex;
+    width: 100%;
+    min-width: 0;
     min-height: 0;
     flex: 1;
     flex-direction: column;
-    overflow: auto;
+    overflow: hidden;
     padding: 12px;
   }
 
-  .sketch-axis-indicator {
+  .sketch-plane-widget,
+  .sketch-view-status {
     position: absolute;
-    z-index: 24;
-    bottom: 22px;
-    width: 44px;
-    height: 44px;
-    color: #5c6879;
-    font-size: 9px;
+    z-index: var(--editor-z-indicator);
+    transition: right var(--editor-motion-duration) var(--editor-motion-ease);
+  }
+
+  .sketch-plane-widget {
+    top: 72px;
+    gap: 7px;
+    font-size: 10px;
     font-weight: 700;
-    transition: left 140ms ease;
   }
 
-  .sketch-axis-indicator::before,
-  .sketch-axis-indicator::after {
-    content: '';
-    position: absolute;
-    left: 9px;
-    bottom: 9px;
-    transform-origin: bottom left;
-    background: currentColor;
-  }
-
-  .sketch-axis-indicator::before {
-    width: 27px;
-    height: 1px;
-  }
-
-  .sketch-axis-indicator::after {
-    width: 1px;
-    height: 27px;
-  }
-
-  .sketch-axis-indicator .axis-x,
-  .sketch-axis-indicator .axis-y {
-    position: absolute;
-  }
-
-  .sketch-axis-indicator .axis-x {
-    right: 0;
-    bottom: 4px;
-    color: #bd594b;
-  }
-
-  .sketch-axis-indicator .axis-y {
-    top: 0;
-    left: 5px;
-    color: #397f6e;
+  .sketch-plane-glyph {
+    position: relative;
+    width: 12px;
+    height: 12px;
+    border-bottom: 1px solid #bd594b;
+    border-left: 1px solid #397f6e;
   }
 
   .sketch-view-status {
-    position: absolute;
-    z-index: 24;
-    bottom: 22px;
+    bottom: 18px;
     padding: 5px 8px;
     border: 1px solid color-mix(in oklch, var(--color-kumo-line) 80%, transparent);
     border-radius: 7px;
@@ -295,7 +275,6 @@
     background: color-mix(in oklch, var(--color-kumo-base) 88%, transparent);
     font-size: 10px;
     font-variant-numeric: tabular-nums;
-    transition: right 140ms ease;
     backdrop-filter: blur(8px);
   }
 
@@ -315,24 +294,29 @@
   .sketch-tree-heading strong,
   .sketch-tree-heading small,
   .sketch-item-list strong,
-  .sketch-item-list small {
+  .sketch-item-list small,
+  .sketch-version-list strong,
+  .sketch-version-list small {
     display: block;
   }
 
   .sketch-tree-heading strong,
-  .sketch-item-list strong {
+  .sketch-item-list strong,
+  .sketch-version-list strong {
     font-size: 0.75rem;
   }
 
   .sketch-tree-heading small,
-  .sketch-item-list small {
+  .sketch-item-list small,
+  .sketch-version-list small {
     margin-top: 2px;
     color: var(--color-kumo-subtle);
     font-size: 0.67rem;
   }
 
   .sketch-item-list,
-  .sketch-version-list {
+  .sketch-version-list,
+  .sketch-history-list {
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -371,51 +355,13 @@
     border-radius: 50%;
   }
 
-  .sketch-item-icon.is-line::before {
-    content: '';
-    width: 16px;
-    height: 1px;
-    rotate: -30deg;
-    background: currentColor;
-  }
-
   .sketch-item-icon.is-group {
     border: 1px solid var(--color-kumo-line);
     border-radius: 5px;
   }
 
-  .workspace-panel-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 7px;
-  }
-
-  .sketch-view-list {
-    display: grid;
-    gap: 0;
-    margin: 14px 0 0;
-  }
-
-  .sketch-view-list > div {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 2px;
-    border-bottom: 1px solid var(--color-kumo-line);
-    font-size: 0.7rem;
-  }
-
-  .sketch-view-list dt {
-    color: var(--color-kumo-subtle);
-  }
-
-  .sketch-view-list dd {
-    margin: 0;
-    text-align: right;
-  }
-
   .sketch-panel-note {
-    margin: 2px 0 12px;
+    margin: 8px 2px 12px;
     color: var(--color-kumo-subtle);
     font-size: 0.7rem;
     line-height: 1.55;
@@ -436,67 +382,81 @@
   }
 
   .sketch-constraint-grid button {
-    display: flex;
-    min-height: 46px;
-    align-items: center;
-    gap: 7px;
-    padding: 8px;
-    border: 1px solid var(--color-kumo-line);
-    border-radius: 8px;
-    color: var(--color-kumo-subtle);
-    background: var(--color-kumo-base);
-    font-size: 0.66rem;
-    text-align: left;
+    justify-content: flex-start;
+    white-space: normal;
   }
 
   .sketch-version-list {
-    margin: 0;
+    margin-top: 8px;
   }
 
   .sketch-version-list li {
-    justify-content: space-between;
     border-bottom: 1px solid var(--color-kumo-line);
     border-radius: 0;
   }
 
-  .sketch-version-list li > span {
-    min-width: 0;
+  .sketch-history-list {
+    gap: 0;
+    margin-top: 0;
   }
 
-  .sketch-version-list strong,
-  .sketch-version-list small {
+  .sketch-history-list li {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 2px;
+    border-bottom: 1px solid var(--color-kumo-line);
+  }
+
+  .sketch-history-list li > span {
+    width: 6px;
+    height: 6px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: var(--color-kumo-brand);
+  }
+
+  .sketch-history-list strong,
+  .sketch-history-list time {
     display: block;
-  }
-
-  .sketch-version-list strong {
     font-size: 0.7rem;
   }
 
-  .sketch-version-list small {
+  .sketch-history-list time {
     margin-top: 3px;
     color: var(--color-kumo-subtle);
     font-size: 0.64rem;
   }
 
-  .sketch-version-list.is-compact li {
-    padding-inline: 4px;
+  .workspace-comment-list,
+  .workspace-comment-composer,
+  .workspace-comment-list .lb-root,
+  .workspace-comment-composer .lb-root,
+  .workspace-comment-list .lb-thread,
+  .workspace-comment-composer .lb-composer {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .workspace-comment-list {
     display: grid;
     gap: 10px;
+    overflow-x: clip;
     padding-bottom: 10px;
+    overflow-wrap: anywhere;
   }
 
   .workspace-comment-composer {
     flex: 0 0 auto;
+    overflow-x: clip;
     padding-top: 10px;
     border-top: 1px solid var(--color-kumo-line);
   }
 
   .workspace-comment-pins {
     position: absolute;
-    z-index: 28;
+    z-index: calc(var(--editor-z-panel) - 1);
     inset: 0;
     pointer-events: none;
   }
@@ -573,16 +533,16 @@
     gap: 3px;
   }
 
-  .dashboard-sidebar > button:last-child {
-    margin-top: auto;
-  }
-
   .dashboard-library {
     min-width: 0;
     padding: 34px clamp(24px, 4vw, 64px);
   }
 
   .dashboard-library > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
     padding-bottom: 18px;
     border-bottom: 1px solid var(--color-kumo-line);
   }
@@ -595,7 +555,7 @@
 
   .dashboard-project-grid {
     display: grid;
-    max-width: 820px;
+    max-width: 980px;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 18px;
     margin-top: 24px;
@@ -627,6 +587,7 @@
   }
 
   .dashboard-project-thumbnail > svg {
+    display: block;
     width: 100%;
     height: 100%;
   }
@@ -635,11 +596,7 @@
     fill: #f7f8f9;
   }
 
-  .spoke-thumbnail-grid {
-    fill: url('#spoke-thumbnail-grid');
-  }
-
-  #spoke-thumbnail-grid path {
+  .dashboard-project-thumbnail pattern path {
     fill: none;
     stroke: rgb(64 75 90 / 8%);
     stroke-width: 0.7;
@@ -665,7 +622,9 @@
     font-weight: 650;
   }
 
-  .dashboard-draft-label {
+  .dashboard-draft-label,
+  .dashboard-project-activity time,
+  .dashboard-empty {
     color: var(--color-kumo-subtle);
     font-size: 0.68rem;
   }
@@ -678,14 +637,68 @@
   }
 
   .dashboard-project-activity time {
-    color: var(--color-kumo-subtle);
     font-size: 0.64rem;
     white-space: nowrap;
   }
 
   .dashboard-empty {
-    color: var(--color-kumo-subtle);
+    margin-top: 24px;
     font-size: 0.78rem;
+  }
+
+  .dashboard-new-project-dialog {
+    display: grid;
+    gap: 16px;
+    padding: 20px;
+  }
+
+  .dashboard-template-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .dashboard-template-actions button {
+    min-height: 70px;
+    justify-content: flex-start;
+  }
+
+  .dashboard-first-project {
+    display: grid;
+    max-width: 520px;
+    justify-items: start;
+    gap: 8px;
+    margin-top: 24px;
+    padding: 24px;
+  }
+
+  .dashboard-first-project h2,
+  .dashboard-first-project p {
+    margin: 0;
+  }
+
+  .dashboard-first-project h2 {
+    font-size: 0.95rem;
+  }
+
+  .dashboard-first-project p {
+    color: var(--color-kumo-subtle);
+    font-size: 0.75rem;
+  }
+
+  .dashboard-first-project > div {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-tool-island,
+  .workspace-overlay-panel,
+  .sketch-plane-widget,
+  .sketch-view-status {
+    transition-duration: 0.01ms !important;
   }
 }
 
@@ -694,8 +707,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .workspace-header > .workspace-draft-menu,
-  .workspace-header > .workspace-draft-control {
+  .workspace-header > button:nth-child(2) {
     display: none;
   }
 
@@ -704,12 +716,12 @@
   }
 
   .workspace-overlay-panel {
-    inset: 128px 12px 12px !important;
-    width: auto;
+    top: 112px;
+    width: min(288px, calc(100vw - 54px));
   }
 
   .workspace-tool-island {
-    top: 66px;
+    top: 64px;
     flex-direction: row;
   }
 

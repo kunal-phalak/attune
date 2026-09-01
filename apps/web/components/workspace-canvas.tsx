@@ -1,5 +1,7 @@
 'use client';
 
+import { Surface as KumoSurface } from '@cloudflare/kumo/components/surface';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import type { Canvas as SkCanvas, CanvasKit, Paint, Surface } from 'canvaskit-wasm';
 import {
   forwardRef,
@@ -11,6 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 
+import type { SketchTemplate } from '../lib/projects/library';
 import { Camera2D, type FitPadding, type ViewportSize } from '../lib/sketch/camera-2d';
 import { adaptiveGridStep } from '../lib/sketch/grid';
 import { SPOKE_SKETCH } from '../lib/sketch/spoke-sketch';
@@ -148,7 +151,13 @@ function drawAxes(
   }
 }
 
-function drawSpokeSketch(canvasKit: CanvasKit, canvas: SkCanvas, camera: Camera2D): void {
+function drawSketch(
+  canvasKit: CanvasKit,
+  canvas: SkCanvas,
+  camera: Camera2D,
+  template: SketchTemplate,
+): void {
+  if (template === 'blank') return;
   const geometryPaint = paint(canvasKit, canvasKit.Color(38, 48, 63, 0.95), 1.65 / camera.zoom);
   try {
     for (const entity of SPOKE_SKETCH.entities) {
@@ -168,6 +177,7 @@ function renderSurface(
   surface: Surface,
   camera: Camera2D,
   metrics: CanvasMetrics,
+  template: SketchTemplate,
 ): void {
   const canvas = surface.getCanvas();
   canvas.clear(canvasKit.Color(247, 248, 249, 1));
@@ -178,7 +188,7 @@ function renderSurface(
   canvas.scale(camera.zoom, -camera.zoom);
   drawGrid(canvasKit, canvas, camera, metrics);
   drawAxes(canvasKit, canvas, camera, metrics);
-  drawSpokeSketch(canvasKit, canvas, camera);
+  drawSketch(canvasKit, canvas, camera, template);
   canvas.restore();
   canvas.restore();
   surface.flush();
@@ -198,14 +208,17 @@ export const WorkspaceCanvas = forwardRef<
   {
     readonly insets: ViewportInsets;
     readonly comments?: ReactNode;
+    readonly projectName: string;
+    readonly template: SketchTemplate;
   }
->(function WorkspaceCanvas({ insets, comments }, forwardedRef) {
+>(function WorkspaceCanvas({ insets, comments, projectName, template }, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef(new Camera2D({ minZoom: 0.08, maxZoom: 18 }));
   const surfaceRef = useRef<Surface | null>(null);
   const metricsRef = useRef<CanvasMetrics>({ width: 0, height: 0, pixelRatio: 1 });
   const insetsRef = useRef(insets);
+  const templateRef = useRef(template);
   const redrawRef = useRef<() => void>(() => undefined);
   const initializedRef = useRef(false);
   const pointerRef = useRef<{ readonly id: number; x: number; y: number } | null>(null);
@@ -214,6 +227,7 @@ export const WorkspaceCanvas = forwardRef<
   const [viewState, setViewState] = useState({ x: 0, y: 0, zoom: 1, gridStep: 50 });
 
   insetsRef.current = insets;
+  templateRef.current = template;
 
   const publishView = () => {
     const camera = cameraRef.current;
@@ -228,7 +242,11 @@ export const WorkspaceCanvas = forwardRef<
   const fitSketch = () => {
     const metrics = metricsRef.current;
     if (metrics.width === 0 || metrics.height === 0) return;
-    cameraRef.current.fitBounds(SPOKE_SKETCH.bounds, metrics, fitPadding(insetsRef.current));
+    if (templateRef.current === 'spoke') {
+      cameraRef.current.fitBounds(SPOKE_SKETCH.bounds, metrics, fitPadding(insetsRef.current));
+    } else {
+      cameraRef.current.resetView(metrics);
+    }
     redrawRef.current();
     publishView();
   };
@@ -272,11 +290,15 @@ export const WorkspaceCanvas = forwardRef<
 
           if (!initializedRef.current) {
             initializedRef.current = true;
-            cameraRef.current.fitBounds(
-              SPOKE_SKETCH.bounds,
-              metrics,
-              fitPadding(insetsRef.current),
-            );
+            if (templateRef.current === 'spoke') {
+              cameraRef.current.fitBounds(
+                SPOKE_SKETCH.bounds,
+                metrics,
+                fitPadding(insetsRef.current),
+              );
+            } else {
+              cameraRef.current.resetView(metrics);
+            }
           } else if (previous.width > 0 && previous.height > 0) {
             cameraRef.current.panBy(
               (metrics.width - previous.width) / 2,
@@ -289,7 +311,15 @@ export const WorkspaceCanvas = forwardRef<
 
         redrawRef.current = () => {
           const surface = surfaceRef.current;
-          if (surface) renderSurface(canvasKit, surface, cameraRef.current, metricsRef.current);
+          if (surface) {
+            renderSurface(
+              canvasKit,
+              surface,
+              cameraRef.current,
+              metricsRef.current,
+              templateRef.current,
+            );
+          }
         };
         observer = new ResizeObserver(resize);
         observer.observe(host);
@@ -363,7 +393,7 @@ export const WorkspaceCanvas = forwardRef<
     <section
       ref={hostRef}
       className="attune-sketch-canvas"
-      aria-label="Spoke sketch canvas"
+      aria-label={`${projectName} canvas`}
       data-camera-x={viewState.x.toFixed(2)}
       data-camera-y={viewState.y.toFixed(2)}
       data-camera-zoom={viewState.zoom.toFixed(4)}
@@ -381,14 +411,20 @@ export const WorkspaceCanvas = forwardRef<
         onPointerCancel={onPointerUp}
       />
       {comments}
-      <div
-        className="sketch-axis-indicator"
-        style={{ left: `${insets.left + 22}px` }}
-        aria-label="XY axis indicator"
-      >
-        <span className="axis-x">X</span>
-        <span className="axis-y">Y</span>
-      </div>
+      <Tooltip
+        content="Sketch plane: XY"
+        render={
+          <KumoSurface
+            render={<div />}
+            className="sketch-plane-widget"
+            style={{ right: `${insets.right + 18}px` }}
+            aria-label="Sketch plane: XY"
+          >
+            <span className="sketch-plane-glyph" aria-hidden />
+            XY
+          </KumoSurface>
+        }
+      />
       <div
         className="sketch-view-status"
         style={{ right: `${insets.right + 22}px` }}

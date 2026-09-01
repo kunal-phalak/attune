@@ -1,6 +1,8 @@
 export { databaseConfigured, getDatabase } from './client';
 export {
   activeDelegationForWorkspace,
+  canCreateProjectsForUser,
+  createSketchProjectRecord,
   currentFrozenRevision,
   ensureAuthenticatedUser,
   ensureJudgeWorkspace,
@@ -19,6 +21,7 @@ export {
   workspaceRoles,
 } from './repository';
 export type {
+  CreateSketchProjectRecordInput,
   ExecutePersistedCommandInput,
   ExternalMaterializationInput,
   ExternalMaterializationReservation,

@@ -23,7 +23,12 @@
     --lb-accent: var(--color-kumo-brand);
     --lb-background: var(--color-kumo-base);
     --lb-foreground: var(--color-kumo-contrast);
-    z-index: 80;
+    z-index: 120 !important;
+  }
+
+  body > [data-radix-portal],
+  body > [data-base-ui-portal] {
+    z-index: 110;
   }
 
   body > div:has(> a[href='https://lblcks.io/badge']) {

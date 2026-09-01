@@ -1,11 +1,11 @@
 'use client';
 
-import { Button } from '@cloudflare/kumo/components/button';
+import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { LiveblocksProvider, RoomProvider, useRoom } from '@liveblocks/react';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
-import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import {
   attuneWorkspaceEndpoint,
@@ -14,23 +14,26 @@ import {
   type CapabilityRole,
 } from '../lib/attune-view';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
-import { viewportInsetsFor, type OverlayPanel } from '../lib/sketch/viewport-insets';
+import type { SketchTemplate } from '../lib/projects/library';
+import {
+  panelForTool,
+  panelSide,
+  toggleEditorTool,
+  type EditorTool,
+} from '../lib/sketch/panel-state';
+import { viewportInsetsFor } from '../lib/sketch/viewport-insets';
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
 import { AppIcons } from './ui/app-icons';
-import { WorkspaceCanvas, type WorkspaceCanvasHandle } from './workspace-canvas';
+import { WorkspaceCanvas } from './workspace-canvas';
 import {
   DraftControl,
+  HistoryPanel,
   ItemsPanel,
   LiveCommentPins,
   LiveCommentsRail,
-  LiveHistoryPanel,
-  LocalHistoryPanel,
   PresenceHeader,
   SketchConstraintsPanel,
-  ViewPanel,
 } from './workspace-panels';
-
-type WorkspaceTool = 'select' | 'sketch' | OverlayPanel;
 
 function draftFrom(view: AttuneApiView): AttuneCollaborativeDraft {
   return {
@@ -75,29 +78,51 @@ function YjsDraftBridge({
   return null;
 }
 
-function WorkspaceHeader({ collaboration }: { readonly collaboration: boolean }) {
+function WorkspaceHeader({
+  collaboration,
+  projectName,
+}: {
+  readonly collaboration: boolean;
+  readonly projectName: string;
+}) {
   return (
     <header className="workspace-header">
       <div className="workspace-header-left">
-        <Link href="/dashboard" aria-label="Back to dashboard">
-          <AppIcons.Back size={20} weight="bold" />
-        </Link>
+        <LinkButton
+          href="/dashboard"
+          variant="ghost"
+          size="sm"
+          shape="square"
+          icon={<AppIcons.Back size={20} weight="bold" />}
+          aria-label="Back to dashboard"
+        />
         <span className="workspace-project-icon" aria-hidden>
           <AppIcons.Brand size={18} weight="bold" />
         </span>
-        <strong>Spoke sketch</strong>
+        <strong>{projectName}</strong>
       </div>
       <DraftControl collaboration={collaboration} />
       <div className="workspace-header-right">
         {collaboration ? <PresenceHeader /> : null}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          shape="square"
-          icon={<AppIcons.More size={20} weight="bold" />}
-          aria-label="More project actions"
-        />
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<AppIcons.More size={20} weight="bold" />}
+                aria-label="More project actions"
+              />
+            }
+          />
+          <DropdownMenu.Content align="end" sideOffset={8}>
+            <DropdownMenu.LinkItem href="/dashboard" icon={AppIcons.Back}>
+              Back to projects
+            </DropdownMenu.LinkItem>
+          </DropdownMenu.Content>
+        </DropdownMenu>
       </div>
     </header>
   );
@@ -141,9 +166,9 @@ function WorkspaceTools({
   collaboration,
   onTool,
 }: {
-  readonly activeTool: WorkspaceTool;
+  readonly activeTool: EditorTool;
   readonly collaboration: boolean;
-  readonly onTool: (tool: WorkspaceTool) => void;
+  readonly onTool: (tool: EditorTool) => void;
 }) {
   return (
     <>
@@ -175,13 +200,7 @@ function WorkspaceTools({
           onClick={() => onTool('items')}
         />
       </nav>
-      <nav className="workspace-tool-island is-right" aria-label="Workspace panels">
-        <ToolButton
-          label="View"
-          active={activeTool === 'view'}
-          icon={<AppIcons.View size={20} weight="regular" />}
-          onClick={() => onTool('view')}
-        />
+      <nav className="workspace-tool-island is-right" aria-label="Context tools">
         <ToolButton
           label="Sketch Constraints"
           active={activeTool === 'constraints'}
@@ -203,14 +222,17 @@ function WorkspaceShell({
   workspaceId,
   collaboration,
   perspective,
+  projectName,
+  template,
 }: {
   readonly workspaceId: string;
   readonly collaboration: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly projectName: string;
+  readonly template: SketchTemplate;
 }) {
   const [view, setView] = useState<AttuneApiView | null>(null);
-  const [activeTool, setActiveTool] = useState<WorkspaceTool>('select');
-  const canvasRef = useRef<WorkspaceCanvasHandle>(null);
+  const [activeTool, setActiveTool] = useState<EditorTool>('select');
 
   const refresh = useCallback(async () => {
     const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
@@ -225,58 +247,49 @@ function WorkspaceShell({
     void refresh();
   }, [refresh]);
 
-  const panel: OverlayPanel =
-    activeTool === 'comments' ||
-    activeTool === 'items' ||
-    activeTool === 'view' ||
-    activeTool === 'constraints' ||
-    activeTool === 'history'
-      ? activeTool
-      : null;
+  const panel = panelForTool(activeTool);
+  const side = panelSide(panel);
   const insets = viewportInsetsFor(panel);
   const closePanel = () => setActiveTool('select');
-  const setTool = (tool: WorkspaceTool) =>
-    setActiveTool((current) => (current === tool ? 'select' : tool));
+  const setTool = (tool: EditorTool) => setActiveTool((current) => toggleEditorTool(current, tool));
   const draftVersion = view?.workspace.draftVersion ?? 1;
-  const specHash = view?.specHash ?? 'draft:spoke-sketch';
+  const specHash = view?.specHash ?? `draft:${workspaceId}`;
 
   return (
-    <main className="workspace-shell">
+    <main
+      className="workspace-shell"
+      data-left-panel-open={side === 'left'}
+      data-right-panel-open={side === 'right'}
+    >
       <WorkspaceCanvas
-        ref={canvasRef}
         insets={insets}
+        projectName={projectName}
+        template={template}
         comments={
           collaboration && activeTool === 'comments' ? (
             <LiveCommentPins workspaceId={workspaceId} />
           ) : undefined
         }
       />
-      <WorkspaceHeader collaboration={collaboration} />
+      <WorkspaceHeader collaboration={collaboration} projectName={projectName} />
       <WorkspaceTools activeTool={activeTool} collaboration={collaboration} onTool={setTool} />
-      {activeTool === 'items' ? <ItemsPanel onClose={closePanel} /> : null}
-      {activeTool === 'comments' && collaboration ? (
+      <ItemsPanel
+        open={activeTool === 'items'}
+        projectName={projectName}
+        template={template}
+        onClose={closePanel}
+      />
+      {collaboration ? (
         <LiveCommentsRail
+          open={activeTool === 'comments'}
           workspaceId={workspaceId}
           draftVersion={draftVersion}
           specHash={specHash}
           onClose={closePanel}
         />
       ) : null}
-      {activeTool === 'view' ? (
-        <ViewPanel
-          onClose={closePanel}
-          onFit={() => canvasRef.current?.fitSketch()}
-          onReset={() => canvasRef.current?.resetView()}
-        />
-      ) : null}
-      {activeTool === 'constraints' ? <SketchConstraintsPanel onClose={closePanel} /> : null}
-      {activeTool === 'history' ? (
-        collaboration ? (
-          <LiveHistoryPanel onClose={closePanel} />
-        ) : (
-          <LocalHistoryPanel onClose={closePanel} />
-        )
-      ) : null}
+      <SketchConstraintsPanel open={activeTool === 'constraints'} onClose={closePanel} />
+      <HistoryPanel open={activeTool === 'history'} events={[]} onClose={closePanel} />
     </main>
   );
 }
@@ -287,18 +300,27 @@ export function WorkspaceProduct({
   collaboration,
   perspective,
   actor,
+  projectName,
+  template,
 }: {
   readonly workspaceId: string;
   readonly roomId: string;
   readonly collaboration: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
-  readonly judgeMode: boolean;
   readonly actor: { readonly id: string; readonly name: string; readonly role: CapabilityRole };
+  readonly projectName: string;
+  readonly template: SketchTemplate;
 }) {
   const resolver = useMemo(() => workspaceUserResolver(roomId), [roomId]);
   if (!collaboration) {
     return (
-      <WorkspaceShell workspaceId={workspaceId} collaboration={false} perspective={perspective} />
+      <WorkspaceShell
+        workspaceId={workspaceId}
+        collaboration={false}
+        perspective={perspective}
+        projectName={projectName}
+        template={template}
+      />
     );
   }
   return (
@@ -308,7 +330,13 @@ export function WorkspaceProduct({
         initialPresence={{ cursor: null, selection: [], currentTool: 'select', activeActor: actor }}
       >
         <YjsDraftBridge workspaceId={workspaceId} perspective={perspective} />
-        <WorkspaceShell workspaceId={workspaceId} collaboration perspective={perspective} />
+        <WorkspaceShell
+          workspaceId={workspaceId}
+          collaboration
+          perspective={perspective}
+          projectName={projectName}
+          template={template}
+        />
       </RoomProvider>
     </LiveblocksProvider>
   );

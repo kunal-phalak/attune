@@ -1,10 +1,16 @@
-import { databaseConfigured, ensureJudgeWorkspace, listProjectsForUser } from '@attune/database';
+import {
+  canCreateProjectsForUser,
+  databaseConfigured,
+  ensureJudgeWorkspace,
+  listProjectsForUser,
+} from '@attune/database';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashboard-library';
 import { currentAttuneUser } from '../../lib/auth/session';
 import { liveblocksConfigured } from '../../lib/liveblocks/server';
+import { parseLibraryFilter } from '../../lib/projects/library';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,24 +33,38 @@ function SetupRequired() {
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  readonly searchParams: Promise<{ readonly view?: string }>;
+}) {
   if (!databaseConfigured()) return <SetupRequired />;
   const user = await currentAttuneUser();
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
-  const projectRows = await listProjectsForUser(user.userId);
-  const files: AttuneLibraryFile[] = projectRows.slice(0, 1).map((row) => ({
+  const [projectRows, hasProjectCreatePermission] = await Promise.all([
+    listProjectsForUser(user.userId),
+    canCreateProjectsForUser(user.userId),
+  ]);
+  const files: AttuneLibraryFile[] = projectRows.map((row) => ({
     workspaceId: row.workspaceId,
     roomId: row.liveblocksRoomId,
-    projectName: 'Spoke sketch',
+    projectName: row.projectName,
     updatedAt: row.updatedAt,
+    status: 'draft',
+    access: row.access,
+    template: row.template,
   }));
+  const filter = parseLibraryFilter((await searchParams).view);
+  const collaboration = liveblocksConfigured();
 
   return (
     <DashboardLibrary
       files={files}
-      collaboration={liveblocksConfigured()}
+      collaboration={collaboration}
       user={{ id: user.userId, name: user.displayName }}
+      filter={filter}
+      canCreate={hasProjectCreatePermission && collaboration}
     />
   );
 }

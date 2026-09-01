@@ -1,30 +1,26 @@
 'use client';
 
 import { Button } from '@cloudflare/kumo/components/button';
+import { Popover } from '@cloudflare/kumo/components/popover';
 import { Surface } from '@cloudflare/kumo/components/surface';
-import {
-  useHistoryVersionYjsData,
-  useHistoryVersions,
-  useRoom,
-  useSyncStatus,
-  useThreads,
-} from '@liveblocks/react';
+import { useHistoryVersions, useSyncStatus, useThreads } from '@liveblocks/react';
 import { AvatarStack, CommentPin, Composer, Thread } from '@liveblocks/react-ui';
-import { getYjsProviderForRoom } from '@liveblocks/yjs';
 import { useEffect, useState, type ReactNode } from 'react';
-import * as Y from 'yjs';
 
+import type { SketchTemplate } from '../lib/projects/library';
 import { AppIcons } from './ui/app-icons';
 import { AppScrollArea } from './ui/app-scroll-area';
 
 function PanelShell({
   side,
   title,
+  open,
   onClose,
   children,
 }: {
   readonly side: 'left' | 'right';
   readonly title: string;
+  readonly open: boolean;
   readonly onClose: () => void;
   readonly children: ReactNode;
 }) {
@@ -32,6 +28,8 @@ function PanelShell({
     <Surface
       render={<aside />}
       className={`workspace-overlay-panel is-${side}`}
+      data-open={open}
+      aria-hidden={!open}
       aria-label={`${title} panel`}
     >
       <header>
@@ -59,197 +57,189 @@ function ItemIcon({ kind }: { readonly kind: 'circle' | 'line' | 'group' }) {
   );
 }
 
-export function ItemsPanel({ onClose }: { readonly onClose: () => void }) {
-  const items = [
-    { name: 'Outer ring', detail: 'Circle · Ø300 mm', kind: 'circle' as const },
-    { name: 'Inner ring', detail: 'Circle · Ø264 mm', kind: 'circle' as const },
-    { name: 'Center hub', detail: 'Circle · Ø76 mm', kind: 'circle' as const },
-    { name: 'Center bore', detail: 'Circle · Ø32 mm', kind: 'circle' as const },
-    { name: 'Spokes', detail: '6 lines · radial', kind: 'group' as const },
-  ];
+export function ItemsPanel({
+  open,
+  projectName,
+  template,
+  onClose,
+}: {
+  readonly open: boolean;
+  readonly projectName: string;
+  readonly template: SketchTemplate;
+  readonly onClose: () => void;
+}) {
+  const items =
+    template === 'spoke'
+      ? [
+          { name: 'Outer ring', detail: 'Circle · Ø300 mm', kind: 'circle' as const },
+          { name: 'Inner ring', detail: 'Circle · Ø264 mm', kind: 'circle' as const },
+          { name: 'Center hub', detail: 'Circle · Ø76 mm', kind: 'circle' as const },
+          { name: 'Center bore', detail: 'Circle · Ø32 mm', kind: 'circle' as const },
+          { name: 'Spokes', detail: '6 lines · radial', kind: 'group' as const },
+        ]
+      : [];
   return (
-    <PanelShell side="left" title="Items" onClose={onClose}>
+    <PanelShell side="left" title="Items" open={open} onClose={onClose}>
       <div className="sketch-tree-heading">
         <AppIcons.Brand size={17} weight="bold" />
         <span>
-          <strong>Spoke sketch</strong>
-          <small>10 sketch entities</small>
+          <strong>{projectName}</strong>
+          <small>{items.length === 0 ? 'Empty sketch' : '10 sketch entities'}</small>
         </span>
       </div>
-      <ul className="sketch-item-list">
-        {items.map((item) => (
-          <li key={item.name}>
-            <ItemIcon kind={item.kind} />
-            <span>
-              <strong>{item.name}</strong>
-              <small>{item.detail}</small>
-            </span>
-          </li>
-        ))}
-      </ul>
+      {items.length > 0 ? (
+        <ul className="sketch-item-list">
+          {items.map((item) => (
+            <li key={item.name}>
+              <ItemIcon kind={item.kind} />
+              <span>
+                <strong>{item.name}</strong>
+                <small>{item.detail}</small>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="sketch-panel-note">Draw geometry to add items.</p>
+      )}
     </PanelShell>
   );
 }
 
-export function ViewPanel({
+export function SketchConstraintsPanel({
+  open,
   onClose,
-  onFit,
-  onReset,
 }: {
+  readonly open: boolean;
   readonly onClose: () => void;
-  readonly onFit: () => void;
-  readonly onReset: () => void;
 }) {
-  return (
-    <PanelShell side="right" title="View" onClose={onClose}>
-      <div className="workspace-panel-actions">
-        <Button type="button" variant="secondary" onClick={onFit}>
-          Zoom to fit
-        </Button>
-        <Button type="button" variant="ghost" onClick={onReset}>
-          Reset view
-        </Button>
-      </div>
-      <dl className="sketch-view-list">
-        <div>
-          <dt>Grid</dt>
-          <dd>Adaptive 1 / 2 / 5</dd>
-        </div>
-        <div>
-          <dt>Axes</dt>
-          <dd>X / Y visible</dd>
-        </div>
-        <div>
-          <dt>Navigation</dt>
-          <dd>Drag to pan · wheel to zoom</dd>
-        </div>
-      </dl>
-    </PanelShell>
-  );
-}
-
-export function SketchConstraintsPanel({ onClose }: { readonly onClose: () => void }) {
   const constraints = ['Coincident', 'Horizontal / Vertical', 'Equal', 'Tangent', 'Fix'];
   const dimensions = ['Distance', 'Radius', 'Diameter', 'Angle'];
   return (
-    <PanelShell side="right" title="Sketch Constraints" onClose={onClose}>
+    <PanelShell side="right" title="Sketch Constraints" open={open} onClose={onClose}>
       <p className="sketch-panel-note">Select sketch geometry to apply a relationship.</p>
       <div className="sketch-constraint-grid" aria-label="Geometric constraints">
         {constraints.map((constraint) => (
-          <button type="button" key={constraint} disabled>
-            <span aria-hidden>—</span>
+          <Button key={constraint} type="button" variant="secondary" size="sm" disabled>
             {constraint}
-          </button>
+          </Button>
         ))}
       </div>
       <h3 className="sketch-panel-subtitle">Dimensions</h3>
       <div className="sketch-constraint-grid" aria-label="Dimensions">
         {dimensions.map((dimension) => (
-          <button type="button" key={dimension} disabled>
-            <span aria-hidden>↔</span>
+          <Button key={dimension} type="button" variant="secondary" size="sm" disabled>
             {dimension}
-          </button>
+          </Button>
         ))}
       </div>
     </PanelShell>
   );
 }
 
-function RestoreVersionButton({ versionId }: { readonly versionId: string }) {
-  const version = useHistoryVersionYjsData(versionId);
-  const room = useRoom();
-  const restore = () => {
-    if (!version.data) return;
-    const historicDocument = new Y.Doc();
-    try {
-      Y.applyUpdate(historicDocument, version.data);
-      const historicDraft = historicDocument.getMap('attune').get('draft');
-      if (historicDraft) {
-        getYjsProviderForRoom(room).getYDoc().getMap('attune').set('draft', historicDraft);
-      }
-    } finally {
-      historicDocument.destroy();
-    }
-  };
+export interface SketchHistoryEvent {
+  readonly id: string;
+  readonly label: string;
+  readonly createdAt: string;
+}
+
+export function HistoryPanel({
+  open,
+  events,
+  onClose,
+}: {
+  readonly open: boolean;
+  readonly events: readonly SketchHistoryEvent[];
+  readonly onClose: () => void;
+}) {
   return (
-    <Button type="button" variant="ghost" size="xs" disabled={!version.data} onClick={restore}>
-      Load
-    </Button>
+    <PanelShell side="right" title="History" open={open} onClose={onClose}>
+      {events.length === 0 ? (
+        <p className="sketch-panel-note">Sketch actions will appear here as they are recorded.</p>
+      ) : (
+        <ol className="sketch-history-list">
+          {events.map((event) => (
+            <li key={event.id}>
+              <span aria-hidden />
+              <div>
+                <strong>{event.label}</strong>
+                <time dateTime={event.createdAt}>
+                  {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(
+                    new Date(event.createdAt),
+                  )}
+                </time>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </PanelShell>
   );
 }
 
-function VersionList({ compact = false }: { readonly compact?: boolean }) {
+function VersionIdentityList() {
   const result = useHistoryVersions();
   const versions = result.versions ?? [];
-  if (result.isLoading) return <p className="sketch-panel-note">Loading versions…</p>;
-  if (versions.length === 0) return <p className="sketch-panel-note">No saved versions yet.</p>;
   return (
-    <ul className={compact ? 'sketch-version-list is-compact' : 'sketch-version-list'}>
-      {versions.slice(0, compact ? 5 : 12).map((version) => (
+    <ul className="sketch-version-list is-compact">
+      <li>
+        <span>
+          <strong>Current draft</strong>
+          <small>Live working copy</small>
+        </span>
+      </li>
+      {versions.slice(0, 5).map((version, index) => (
         <li key={version.id}>
           <span>
-            <strong>
-              {new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(version.createdAt)}
-            </strong>
+            <strong>Version {versions.length - index}</strong>
             <small>
-              {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(version.createdAt)} ·{' '}
-              {version.authors.length || 1} editor
+              {new Intl.DateTimeFormat('en', {
+                dateStyle: 'medium',
+                timeStyle: 'short',
+              }).format(version.createdAt)}
             </small>
           </span>
-          {compact ? null : <RestoreVersionButton versionId={version.id} />}
         </li>
       ))}
+      {!result.isLoading && versions.length === 0 ? (
+        <li>
+          <span>
+            <small>No saved versions yet</small>
+          </span>
+        </li>
+      ) : null}
     </ul>
-  );
-}
-
-export function LiveHistoryPanel({ onClose }: { readonly onClose: () => void }) {
-  return (
-    <PanelShell side="right" title="History" onClose={onClose}>
-      <VersionList />
-    </PanelShell>
-  );
-}
-
-export function LocalHistoryPanel({ onClose }: { readonly onClose: () => void }) {
-  return (
-    <PanelShell side="right" title="History" onClose={onClose}>
-      <p className="sketch-panel-note">Version history is available in collaborative workspaces.</p>
-    </PanelShell>
   );
 }
 
 export function DraftControl({ collaboration }: { readonly collaboration: boolean }) {
   if (!collaboration) {
     return (
-      <button className="workspace-draft-control" type="button" disabled>
+      <Button type="button" variant="ghost" size="sm" disabled>
         Draft
-      </button>
+      </Button>
     );
   }
-  return <LiveDraftControl />;
-}
-
-function LiveDraftControl() {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="workspace-draft-menu">
-      <button
-        className="workspace-draft-control"
-        type="button"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((value) => !value)}
+    <Popover>
+      <Popover.Trigger
+        render={
+          <Button type="button" variant="ghost" size="sm">
+            Draft <AppIcons.CollapseDown size={14} weight="bold" />
+          </Button>
+        }
+      />
+      <Popover.Content
+        side="bottom"
+        align="center"
+        sideOffset={8}
+        positionMethod="fixed"
+        className="workspace-draft-popover"
       >
-        Draft <AppIcons.CollapseDown size={14} weight="bold" />
-      </button>
-      {open ? (
-        <dialog className="workspace-draft-popover" open aria-label="Draft history">
-          <strong>Version history</strong>
-          <VersionList compact />
-        </dialog>
-      ) : null}
-    </div>
+        <Popover.Title>Draft versions</Popover.Title>
+        <VersionIdentityList />
+      </Popover.Content>
+    </Popover>
   );
 }
 
@@ -271,11 +261,13 @@ export function PresenceHeader() {
 }
 
 export function LiveCommentsRail({
+  open,
   workspaceId,
   draftVersion,
   specHash,
   onClose,
 }: {
+  readonly open: boolean;
   readonly workspaceId: string;
   readonly draftVersion: number;
   readonly specHash: string;
@@ -284,7 +276,7 @@ export function LiveCommentsRail({
   const result = useThreads({ query: { metadata: { workspaceId } } });
   const threads = result.threads ?? [];
   return (
-    <PanelShell side="left" title="Comments" onClose={onClose}>
+    <PanelShell side="left" title="Comments" open={open} onClose={onClose}>
       <AppScrollArea className="min-h-0 flex-1" ariaLabel="Canvas comment threads">
         <div className="workspace-comment-list attune-liveblocks-bridge">
           {threads.map((thread) => (
@@ -299,7 +291,7 @@ export function LiveCommentsRail({
         <Composer
           metadata={{
             workspaceId,
-            entityId: 'sketch:spoke',
+            entityId: 'sketch:canvas',
             x: 390,
             y: 210,
             revisionId: `draft:r${draftVersion}`,
@@ -331,7 +323,7 @@ export function LiveCommentPins({ workspaceId }: { readonly workspaceId: string 
             key={thread.id}
             userId={thread.comments.at(-1)?.userId}
             style={position}
-            aria-label="Comment on spoke sketch"
+            aria-label="Sketch comment"
           />
         );
       })}

@@ -56,7 +56,8 @@ export default async function WorkspacePage({
       roomId={bundle.liveblocksRoomId}
       collaboration={liveblocksConfigured()}
       perspective={perspective}
-      judgeMode={user.judge}
+      projectName={bundle.projectName}
+      template={bundle.fileKind === 'sketch:blank' ? 'blank' : 'spoke'}
       actor={{
         id: user.userId,
         name: user.displayName,

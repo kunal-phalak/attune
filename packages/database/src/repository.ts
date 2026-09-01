@@ -64,6 +64,7 @@ export interface WorkspaceBundle {
   readonly workspaceId: string;
   readonly projectName: string;
   readonly fileName: string;
+  readonly fileKind: string;
   readonly liveblocksRoomId: string;
   readonly needStartedAt: string;
   readonly workspace: AttuneWorkspace;
@@ -72,6 +73,18 @@ export interface WorkspaceBundle {
   readonly rejections: readonly CommandRejection[];
   readonly observation: InterventionSummary;
   readonly humanInterventionsDetected: number;
+}
+
+export interface CreateSketchProjectRecordInput {
+  readonly userId: string;
+  readonly projectId: string;
+  readonly workspaceId: string;
+  readonly roomId: string;
+  readonly fileId: string;
+  readonly projectCode: string;
+  readonly commitmentId: string;
+  readonly name: string;
+  readonly template: 'blank' | 'spoke';
 }
 
 export interface ExecutePersistedCommandInput {
@@ -669,42 +682,162 @@ export async function ensureAuthenticatedUser(input: {
   readonly displayName: string;
 }): Promise<string> {
   const userId = `user:${hashCanonical(input.authUserId).slice(0, 24)}`;
-  await getDatabase()
-    .insert(users)
-    .values({
-      id: userId,
-      authUserId: input.authUserId,
-      email: input.email,
-      displayName: input.displayName,
-    })
-    .onConflictDoUpdate({
-      target: users.authUserId,
-      set: { email: input.email, displayName: input.displayName },
-    });
+  const organizationId = `organization:personal:${hashCanonical(input.authUserId).slice(0, 20)}`;
+  await getDatabase().transaction(async (transaction) => {
+    await transaction
+      .insert(users)
+      .values({
+        id: userId,
+        authUserId: input.authUserId,
+        email: input.email,
+        displayName: input.displayName,
+      })
+      .onConflictDoUpdate({
+        target: users.authUserId,
+        set: { email: input.email, displayName: input.displayName },
+      });
+    await transaction
+      .insert(organizations)
+      .values({ id: organizationId, name: `${input.displayName} projects` })
+      .onConflictDoNothing();
+    await transaction
+      .insert(organizationMemberships)
+      .values({ organizationId, userId, roles: ['buyer'] })
+      .onConflictDoUpdate({
+        target: [organizationMemberships.organizationId, organizationMemberships.userId],
+        set: { roles: ['buyer'] },
+      });
+  });
   return userId;
 }
 
-export async function listProjectsForUser(userId: string) {
-  return getDatabase()
+export async function canCreateProjectsForUser(userId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ organizationId: organizationMemberships.organizationId })
+    .from(organizationMemberships)
+    .where(eq(organizationMemberships.userId, userId))
+    .limit(1);
+  return rows.length > 0;
+}
+
+export async function createSketchProjectRecord(
+  input: CreateSketchProjectRecordInput,
+): Promise<void> {
+  const database = getDatabase();
+  const memberships = await database
     .select({
-      projectId: projects.id,
-      projectName: projects.name,
-      projectCode: projects.code,
-      workspaceId: workspaces.id,
-      workspaceName: workspaces.name,
-      fileName: workspaceFiles.name,
-      liveblocksRoomId: workspaces.liveblocksRoomId,
-      workspaceSeq: workspaces.workspaceSeq,
-      draftVersion: workspaces.draftVersion,
-      capabilityEpoch: workspaces.capabilityEpoch,
-      updatedAt: workspaces.updatedAt,
+      organizationId: organizationMemberships.organizationId,
+      roles: organizationMemberships.roles,
     })
-    .from(workspaceMemberships)
-    .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
-    .innerJoin(projects, eq(projects.id, workspaces.projectId))
-    .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
-    .where(eq(workspaceMemberships.userId, userId))
-    .orderBy(desc(workspaces.updatedAt));
+    .from(organizationMemberships)
+    .where(eq(organizationMemberships.userId, input.userId))
+    .orderBy(asc(organizationMemberships.organizationId))
+    .limit(1);
+  const membership = memberships[0];
+  if (!membership) throw new Error('PROJECT_CREATE_FORBIDDEN');
+
+  const initial = createAt1042Workspace();
+  const now = new Date().toISOString();
+  const creatorRoles: AttuneRole[] = membership.roles.includes('buyer')
+    ? [...membership.roles]
+    : ['buyer', ...membership.roles];
+
+  await database.transaction(async (transaction) => {
+    await transaction.insert(projects).values({
+      id: input.projectId,
+      organizationId: membership.organizationId,
+      name: input.name,
+      code: input.projectCode,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await transaction.insert(workspaces).values({
+      id: input.workspaceId,
+      projectId: input.projectId,
+      name: input.name,
+      commitmentId: input.commitmentId,
+      liveblocksRoomId: input.roomId,
+      currentSpecification: initial,
+      workspaceSeq: initial.workspaceSeq,
+      draftVersion: initial.draftVersion,
+      capabilityEpoch: initial.capabilityEpoch,
+      needStartedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await transaction.insert(workspaceFiles).values({
+      id: input.fileId,
+      workspaceId: input.workspaceId,
+      name: `${input.name}.attune`,
+      kind: `sketch:${input.template}`,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await transaction.insert(workspaceMemberships).values({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      roles: creatorRoles,
+      canComment: true,
+      createdAt: now,
+    });
+    await transaction.insert(workspaceSnapshots).values({
+      id: `${input.workspaceId}:snapshot:0`,
+      workspaceId: input.workspaceId,
+      workspaceSeq: initial.workspaceSeq,
+      specification: initial,
+      specHash: hashSpecification(initial),
+    });
+  });
+}
+
+export async function listProjectsForUser(userId: string) {
+  const database = getDatabase();
+  const [projectRows, organizationRows] = await Promise.all([
+    database
+      .select({
+        projectId: projects.id,
+        projectName: projects.name,
+        projectCode: projects.code,
+        organizationId: projects.organizationId,
+        workspaceId: workspaces.id,
+        workspaceName: workspaces.name,
+        fileName: workspaceFiles.name,
+        fileKind: workspaceFiles.kind,
+        liveblocksRoomId: workspaces.liveblocksRoomId,
+        workspaceSeq: workspaces.workspaceSeq,
+        draftVersion: workspaces.draftVersion,
+        capabilityEpoch: workspaces.capabilityEpoch,
+        updatedAt: workspaces.updatedAt,
+      })
+      .from(workspaceMemberships)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
+      .innerJoin(projects, eq(projects.id, workspaces.projectId))
+      .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
+      .where(eq(workspaceMemberships.userId, userId))
+      .orderBy(desc(workspaces.updatedAt)),
+    database
+      .select({ organizationId: organizationMemberships.organizationId })
+      .from(organizationMemberships)
+      .where(eq(organizationMemberships.userId, userId)),
+  ]);
+  const ownedOrganizations = new Set(organizationRows.map(({ organizationId }) => organizationId));
+  return projectRows.map((row) => ({
+    projectId: row.projectId,
+    projectName: row.projectName,
+    projectCode: row.projectCode,
+    organizationId: row.organizationId,
+    workspaceId: row.workspaceId,
+    workspaceName: row.workspaceName,
+    fileName: row.fileName,
+    fileKind: row.fileKind,
+    liveblocksRoomId: row.liveblocksRoomId,
+    workspaceSeq: row.workspaceSeq,
+    draftVersion: row.draftVersion,
+    capabilityEpoch: row.capabilityEpoch,
+    updatedAt: row.updatedAt,
+    access: ownedOrganizations.has(row.organizationId) ? ('owned' as const) : ('shared' as const),
+    template: row.fileKind === 'sketch:blank' ? ('blank' as const) : ('spoke' as const),
+  }));
 }
 
 export async function readWorkspaceBundle(
@@ -718,6 +851,7 @@ export async function readWorkspaceBundle(
       workspace: workspaces.currentSpecification,
       projectName: projects.name,
       fileName: workspaceFiles.name,
+      fileKind: workspaceFiles.kind,
       liveblocksRoomId: workspaces.liveblocksRoomId,
       needStartedAt: workspaces.needStartedAt,
     })
@@ -785,6 +919,7 @@ export async function readWorkspaceBundle(
     workspaceId,
     projectName: row.projectName,
     fileName: row.fileName,
+    fileKind: row.fileKind,
     liveblocksRoomId: row.liveblocksRoomId,
     needStartedAt: row.needStartedAt,
     workspace: authoritativeWorkspace,

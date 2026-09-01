@@ -16,7 +16,7 @@ export function AttuneEmptyState({
     <Empty
       size="sm"
       className="attune-empty-state"
-      icon={media ? <span className="attune-empty-state-media">{media}</span> : undefined}
+      icon={media}
       title={title}
       description={description}
       contents={actions ? <div className="attune-empty-state-actions">{actions}</div> : undefined}

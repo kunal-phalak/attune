@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react';
 
 export const EDITOR_CHROME = {
-  compactIconButton: 30,
-  normalIconButton: 34,
+  compactIconButton: 26,
+  normalIconButton: 36,
   icon: 20,
   islandPadding: 5,
   islandGap: 2,
@@ -10,8 +10,8 @@ export const EDITOR_CHROME = {
   panelWidth: 288,
   viewportGap: 12,
   panelIslandGap: 8,
-  closeButton: 34,
-  headerControlHeight: 34,
+  closeButton: 26,
+  headerControlHeight: 36,
   headerHeight: 56,
   panelRadius: 12,
   popupRadius: 12,

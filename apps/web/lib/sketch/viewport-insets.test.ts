@@ -15,9 +15,9 @@ describe('viewport safe insets', () => {
   it('returns compact-island clearance when labels are hidden', () => {
     expect(viewportInsetsFor({ leftPanel: 'items', rightPanel: 'history' }, false)).toEqual({
       top: 68,
-      right: 368,
+      right: 370,
       bottom: 12,
-      left: 368,
+      left: 370,
     });
   });
 });

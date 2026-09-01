@@ -34,6 +34,8 @@ const navigation: readonly { readonly id: LibraryFilter; readonly label: string 
   { id: 'shared', label: 'Shared with me' },
 ];
 
+const DASHBOARD_SIDEBAR_STORAGE_KEY = 'attune:dashboard-sidebar-open';
+
 function ProjectThumbnail({ template }: { readonly template: SketchTemplate }) {
   const spokes = Array.from({ length: 6 }, (_, index) => {
     const angle = (index * Math.PI) / 3;
@@ -420,7 +422,7 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
           <Button
             type="button"
             variant="primary"
-            size="sm"
+            size="base"
             icon={<AppIcons.New size={17} weight="bold" />}
           >
             New project
@@ -428,7 +430,21 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
         }
       />
       <Dialog size="base" className="dashboard-new-project-dialog">
-        <Dialog.Title>New project</Dialog.Title>
+        <div className="dashboard-dialog-header">
+          <Dialog.Title>New project</Dialog.Title>
+          <Dialog.Close
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                shape="square"
+                icon={<AppIcons.Close size={18} />}
+                aria-label="Close new project dialog"
+              />
+            }
+          />
+        </div>
         <Dialog.Description>Choose a starting point.</Dialog.Description>
         <div className="dashboard-template-actions">
           <Button
@@ -466,13 +482,6 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
             </span>
           </Button>
         </div>
-        <Dialog.Close
-          render={
-            <Button type="button" variant="ghost">
-              Cancel
-            </Button>
-          }
-        />
       </Dialog>
     </Dialog.Root>
   );
@@ -514,10 +523,10 @@ function EmptyLibrary({
       <AttuneEmptyState
         media={<AppIcons.File size={22} />}
         title="No drafts yet"
-        description="Projects you’re still editing will appear here."
+        description="Projects you're still editing will appear here."
         actions={
           canCreate ? (
-            <Button type="button" variant="primary" size="sm" onClick={() => onCreate('blank')}>
+            <Button type="button" variant="primary" size="base" onClick={() => onCreate('blank')}>
               New project
             </Button>
           ) : undefined
@@ -566,7 +575,24 @@ function DashboardSidebar({
   readonly onQueryChange: (query: string) => void;
   readonly searchRef: React.RefObject<HTMLInputElement | null>;
 }) {
-  const { isMobile, setOpen, setOpenMobile } = useSidebar();
+  const { isMobile, open, setOpen, setOpenMobile } = useSidebar();
+  const sidebarRestoreStarted = useRef(false);
+  const [sidebarStateRestored, setSidebarStateRestored] = useState(false);
+
+  useEffect(() => {
+    if (sidebarRestoreStarted.current) return;
+    sidebarRestoreStarted.current = true;
+    const stored = window.localStorage.getItem(DASHBOARD_SIDEBAR_STORAGE_KEY);
+    if (stored !== null) setOpen(stored === 'true');
+    setSidebarStateRestored(true);
+  }, [setOpen]);
+
+  useEffect(() => {
+    if (sidebarStateRestored) {
+      window.localStorage.setItem(DASHBOARD_SIDEBAR_STORAGE_KEY, String(open));
+    }
+  }, [open, sidebarStateRestored]);
+
   const focusSearch = useCallback(() => {
     if (isMobile) setOpenMobile(true);
     else setOpen(true);
@@ -590,10 +616,11 @@ function DashboardSidebar({
         <Link className="dashboard-brandmark" href="/" aria-label="Attune home">
           <AttuneBrandmark size={24} />
         </Link>
+        <Sidebar.Trigger className="dashboard-sidebar-header-trigger" />
       </Sidebar.Header>
       <Sidebar.Content>
         <div className="dashboard-search-wrap">
-          <InputGroup size="sm" className="dashboard-search">
+          <InputGroup size="base" className="dashboard-search">
             <InputGroup.Addon>
               <AppIcons.Search size={16} weight="regular" aria-hidden />
             </InputGroup.Addon>
@@ -610,7 +637,6 @@ function DashboardSidebar({
               <InputGroup.Button
                 type="button"
                 variant="ghost"
-                size="xs"
                 tooltip="Focus project search"
                 onClick={focusSearch}
                 aria-label="Focus project search"
@@ -646,9 +672,6 @@ function DashboardSidebar({
           </Sidebar.Menu>
         </Sidebar.Group>
       </Sidebar.Content>
-      <Sidebar.Footer className="dashboard-sidebar-footer">
-        <Sidebar.Trigger aria-label="Collapse project navigation" />
-      </Sidebar.Footer>
     </Sidebar>
   );
 }
@@ -742,13 +765,15 @@ export function DashboardLibrary({
             ))}
           </div>
         ) : (
-          <EmptyLibrary
-            filter={filter}
-            query={query}
-            hasProjects={projects.length > 0}
-            canCreate={canCreate}
-            onCreate={(template) => void createFromEmpty(template)}
-          />
+          <div className="dashboard-empty-viewport">
+            <EmptyLibrary
+              filter={filter}
+              query={query}
+              hasProjects={projects.length > 0}
+              canCreate={canCreate}
+              onCreate={(template) => void createFromEmpty(template)}
+            />
+          </div>
         )}
       </section>
     </Sidebar.Provider>

@@ -17,7 +17,7 @@ import type { SketchTemplate } from '../lib/projects/library';
 import { AppIcons } from './ui/app-icons';
 import { AppScrollArea } from './ui/app-scroll-area';
 import { AttuneBrandmark } from './ui/attune-brandmark';
-import type { CameraViewState } from './workspace-canvas';
+import type { CameraViewState, CanvasCommentPlacement } from './workspace-canvas';
 
 function PanelShell({
   side,
@@ -223,7 +223,7 @@ function VersionIdentityList() {
 export function DraftControl({ collaboration }: { readonly collaboration: boolean }) {
   if (!collaboration) {
     return (
-      <Button type="button" variant="ghost" size="sm" disabled>
+      <Button type="button" variant="ghost" size="base" disabled>
         Draft
       </Button>
     );
@@ -232,7 +232,7 @@ export function DraftControl({ collaboration }: { readonly collaboration: boolea
     <Popover>
       <Popover.Trigger
         render={
-          <Button type="button" variant="ghost" size="sm">
+          <Button type="button" variant="ghost" size="base">
             Draft <AppIcons.CollapseDown size={14} weight="bold" />
           </Button>
         }
@@ -309,25 +309,67 @@ function isWorldAnchor(metadata: Liveblocks['ThreadMetadata']): boolean {
   return Number.isFinite(metadata.worldX) && Number.isFinite(metadata.worldY);
 }
 
+function NewCommentComposer({
+  workspaceId,
+  placement,
+  draftVersion,
+  specHash,
+}: {
+  readonly workspaceId: string;
+  readonly placement: CanvasCommentPlacement | null;
+  readonly draftVersion: number;
+  readonly specHash: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<CanvasCommentPlacement | null>(null);
+  const activePlacement = open ? anchor : placement;
+  const onOpenChange = (nextOpen: boolean) => {
+    if (nextOpen && placement) setAnchor(placement);
+    if (!nextOpen) setAnchor(null);
+    setOpen(nextOpen);
+  };
+  if (!activePlacement) return null;
+  return (
+    <FloatingComposer
+      open={open}
+      onOpenChange={onOpenChange}
+      metadata={{
+        workspaceId,
+        worldX: activePlacement.world.x,
+        worldY: activePlacement.world.y,
+        revisionId: `draft:r${draftVersion}`,
+        specHash,
+      }}
+      side="right"
+      sideOffset={8}
+    >
+      <CommentPin
+        className="workspace-new-comment-pin"
+        style={{ left: activePlacement.screen.x, top: activePlacement.screen.y }}
+        aria-label="Add canvas comment"
+      >
+        <AppIcons.New size={15} weight="bold" />
+      </CommentPin>
+    </FloatingComposer>
+  );
+}
+
 export function LiveCommentPins({
   workspaceId,
   camera,
+  placement,
   draftVersion,
   specHash,
   onEntityFocus,
 }: {
   readonly workspaceId: string;
   readonly camera: CameraViewState;
+  readonly placement: CanvasCommentPlacement | null;
   readonly draftVersion: number;
   readonly specHash: string;
   readonly onEntityFocus?: (entityId: string | null) => void;
 }) {
   const result = useThreads({ query: { metadata: { workspaceId } } });
-  const composerScreen = { x: camera.width / 2, y: camera.height / 2 };
-  const composerWorld = {
-    x: (composerScreen.x - camera.x) / camera.zoom,
-    y: (camera.y - composerScreen.y) / camera.zoom,
-  };
   return (
     <div className="workspace-comment-pins attune-liveblocks-bridge" aria-label="Canvas comments">
       {(result.threads ?? []).map((thread) => {
@@ -358,25 +400,12 @@ export function LiveCommentPins({
         );
       })}
       {camera.width > 0 && camera.height > 0 ? (
-        <FloatingComposer
-          metadata={{
-            workspaceId,
-            worldX: composerWorld.x,
-            worldY: composerWorld.y,
-            revisionId: `draft:r${draftVersion}`,
-            specHash,
-          }}
-          side="right"
-          sideOffset={8}
-        >
-          <CommentPin
-            className="workspace-new-comment-pin"
-            style={{ left: composerScreen.x, top: composerScreen.y }}
-            aria-label="Add canvas comment"
-          >
-            <AppIcons.New size={15} weight="bold" />
-          </CommentPin>
-        </FloatingComposer>
+        <NewCommentComposer
+          workspaceId={workspaceId}
+          placement={placement}
+          draftVersion={draftVersion}
+          specHash={specHash}
+        />
       ) : null}
     </div>
   );

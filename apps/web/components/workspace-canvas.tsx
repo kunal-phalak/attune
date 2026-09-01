@@ -76,6 +76,11 @@ export interface CameraViewState extends ViewportSize {
   readonly gridStep: number;
 }
 
+export interface CanvasCommentPlacement {
+  readonly screen: { readonly x: number; readonly y: number };
+  readonly world: { readonly x: number; readonly y: number };
+}
+
 function paint(
   canvasKit: CanvasKit,
   color: ReturnType<CanvasKit['Color']>,
@@ -214,7 +219,10 @@ export const WorkspaceCanvas = forwardRef<
   WorkspaceCanvasHandle,
   {
     readonly insets: ViewportInsets;
-    readonly renderComments?: (view: CameraViewState) => ReactNode;
+    readonly renderComments?: (
+      view: CameraViewState,
+      placement: CanvasCommentPlacement | null,
+    ) => ReactNode;
     readonly projectName: string;
     readonly template: SketchTemplate;
     readonly cursorMode: EditorCursorMode;
@@ -234,6 +242,9 @@ export const WorkspaceCanvas = forwardRef<
   const initializedRef = useRef(false);
   const pointerRef = useRef<{ readonly id: number; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [commentPointer, setCommentPointer] = useState<CanvasCommentPlacement['screen'] | null>(
+    null,
+  );
   const [surfaceState, setSurfaceState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [viewState, setViewState] = useState<CameraViewState>({
     x: 0,
@@ -409,7 +420,23 @@ export const WorkspaceCanvas = forwardRef<
     event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const onCommentPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    if (cursorMode !== 'comment') return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setCommentPointer({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+  };
+
+  useEffect(() => {
+    if (cursorMode !== 'comment') setCommentPointer(null);
+  }, [cursorMode]);
+
   const cursor = editorCursorFor(dragging ? 'pan' : cursorMode);
+  const commentPlacement = commentPointer
+    ? {
+        screen: commentPointer,
+        world: cameraRef.current.screenToWorld(commentPointer),
+      }
+    : null;
 
   return (
     <section
@@ -421,6 +448,8 @@ export const WorkspaceCanvas = forwardRef<
       data-camera-zoom={viewState.zoom.toFixed(4)}
       data-grid-step={viewState.gridStep}
       data-cursor-mode={dragging ? 'pan' : cursorMode}
+      onPointerMove={onCommentPointerMove}
+      onPointerLeave={() => setCommentPointer(null)}
     >
       <canvas
         ref={canvasRef}
@@ -434,14 +463,8 @@ export const WorkspaceCanvas = forwardRef<
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       />
-      {renderComments?.(viewState)}
-      <WorkspaceOrientationHud
-        right={insets.right}
-        gridStep={viewState.gridStep}
-        zoom={viewState.zoom}
-        onFit={fitSketch}
-        onReset={resetView}
-      />
+      {renderComments?.(viewState, commentPlacement)}
+      <WorkspaceOrientationHud right={insets.right} gridStep={viewState.gridStep} />
       {surfaceState !== 'ready' ? (
         <span
           className="sketch-surface-status"

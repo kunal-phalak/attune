@@ -4,7 +4,7 @@ export const DASHBOARD_CHROME = {
   sidebarWidth: 232,
   sidebarPadding: 14,
   navigationItemHeight: 34,
-  searchHeight: 32,
+  searchHeight: 36,
   contentMaxWidth: 1120,
   contentStartInset: 40,
   pageHeaderHeight: 52,

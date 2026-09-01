@@ -1,8 +1,8 @@
 'use client';
 
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
-import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
 import { Popover } from '@cloudflare/kumo/components/popover';
+import { Surface } from '@cloudflare/kumo/components/surface';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { LiveblocksProvider, RoomProvider, useRoom, useUpdateMyPresence } from '@liveblocks/react';
 import { Cursors } from '@liveblocks/react-ui';
@@ -103,7 +103,7 @@ function WorkspaceHeader({
         <LinkButton
           href="/dashboard"
           variant="ghost"
-          size="sm"
+          size="base"
           shape="square"
           icon={<AppIcons.Back size={20} weight="bold" />}
           aria-label="Back to dashboard"
@@ -114,28 +114,7 @@ function WorkspaceHeader({
         <strong>{projectName}</strong>
       </div>
       <DraftControl collaboration={collaboration} />
-      <div className="workspace-header-right">
-        {collaboration ? <PresenceHeader /> : null}
-        <DropdownMenu>
-          <DropdownMenu.Trigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                shape="square"
-                icon={<AppIcons.More size={20} weight="bold" />}
-                aria-label="More project actions"
-              />
-            }
-          />
-          <DropdownMenu.Content align="end" sideOffset={8}>
-            <DropdownMenu.LinkItem href="/dashboard" icon={AppIcons.Back}>
-              Back to projects
-            </DropdownMenu.LinkItem>
-          </DropdownMenu.Content>
-        </DropdownMenu>
-      </div>
+      <div className="workspace-header-right">{collaboration ? <PresenceHeader /> : null}</div>
     </header>
   );
 }
@@ -157,11 +136,27 @@ function ToolButton({
   readonly icon: ReactNode;
   readonly onClick: () => void;
 }) {
+  if (!showLabel) {
+    return (
+      <Button
+        type="button"
+        variant={active ? 'secondary' : 'ghost'}
+        size="base"
+        shape="square"
+        className="workspace-tool-button"
+        icon={icon}
+        aria-label={label}
+        aria-pressed={active}
+        disabled={disabled}
+        onClick={onClick}
+      />
+    );
+  }
   return (
     <Button
       type="button"
       variant={active ? 'secondary' : 'ghost'}
-      size="sm"
+      size="base"
       className="workspace-tool-button"
       icon={icon}
       aria-label={label}
@@ -169,8 +164,8 @@ function ToolButton({
       disabled={disabled}
       onClick={onClick}
     >
-      {showLabel ? <span className="workspace-tool-label">{label}</span> : null}
-      {showLabel && keybind ? <kbd>{keybind}</kbd> : null}
+      <span className="workspace-tool-label">{label}</span>
+      {keybind ? <kbd>{keybind}</kbd> : null}
     </Button>
   );
 }
@@ -258,7 +253,7 @@ function WorkspaceSettings({
           <Button
             type="button"
             variant="secondary"
-            size="sm"
+            size="base"
             shape="square"
             className="workspace-settings-button"
             icon={<AppIcons.Settings size={19} />}
@@ -275,7 +270,7 @@ function WorkspaceSettings({
       >
         <Popover.Title>Editor display</Popover.Title>
         <Switch
-          size="sm"
+          size="base"
           variant="neutral"
           label="Show tool labels"
           checked={showLabels}
@@ -347,10 +342,11 @@ function WorkspaceShell({
       cursorMode={cursorMode}
       renderComments={
         collaboration && panels.leftPanel === 'comments'
-          ? (camera) => (
+          ? (camera, placement) => (
               <LiveCommentPins
                 workspaceId={workspaceId}
                 camera={camera}
+                placement={placement}
                 draftVersion={draftVersion}
                 specHash={specHash}
               />
@@ -375,6 +371,9 @@ function WorkspaceShell({
       )}
       {collaboration ? <LiveToolPresence tool={cursorMode} /> : null}
       <WorkspaceHeader collaboration={collaboration} projectName={projectName} />
+      <Surface render={<section />} className="workspace-mobile-notice" aria-live="polite">
+        <p>Attune's editor works best on a larger screen.</p>
+      </Surface>
       <WorkspaceTools
         canvasTool={canvasTool}
         panels={panels}

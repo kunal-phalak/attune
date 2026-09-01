@@ -42,15 +42,15 @@ describe('adaptive sketch viewport helpers', () => {
   it('reserves indicator space for overlay panels without changing canvas size', () => {
     expect(viewportInsetsFor({ leftPanel: 'items', rightPanel: null })).toEqual({
       top: 68,
-      right: 72,
+      right: 152,
       bottom: 12,
-      left: 368,
+      left: 448,
     });
     expect(viewportInsetsFor({ leftPanel: null, rightPanel: 'history' })).toEqual({
       top: 68,
-      right: 368,
+      right: 448,
       bottom: 12,
-      left: 72,
+      left: 152,
     });
   });
 });

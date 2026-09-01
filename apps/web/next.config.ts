@@ -12,7 +12,13 @@ if (existsSync(workspaceEnvironment)) {
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  serverExternalPackages: ['@neondatabase/serverless', 'bufferutil', 'utf-8-validate', 'ws'],
+  serverExternalPackages: [
+    '@neondatabase/serverless',
+    '@salusoft89/planegcs',
+    'bufferutil',
+    'utf-8-validate',
+    'ws',
+  ],
 };
 
 export default nextConfig;

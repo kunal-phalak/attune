@@ -1,5 +1,6 @@
 'use client';
 
+import type { GeometryPatch } from '@attune/domain';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import { Surface } from '@cloudflare/kumo/components/surface';
@@ -11,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 
 import {
   attuneWorkspaceEndpoint,
+  requestHumanSemanticMutation,
   requestAttuneView,
   type AttuneApiView,
   type CapabilityRole,
@@ -47,6 +49,7 @@ function draftFrom(view: AttuneApiView): AttuneCollaborativeDraft {
     commitmentId: view.workspace.commitmentId,
     fabricationQuantity: 4,
     geometry: structuredClone(view.workspace.geometry),
+    sketchDocument: structuredClone(view.workspace.sketchDocument),
     draftVersion: view.workspace.draftVersion,
     metadata: {
       material: view.workspace.geometry.material,
@@ -334,12 +337,37 @@ function WorkspaceShell({
           ? 'constraint'
           : 'select';
 
+  const editGeometry = useCallback(
+    async (entities: readonly GeometryPatch[]) => {
+      if (!view) throw new Error('The authoritative sketch is not loaded.');
+      const command = { type: 'edit_geometry' as const, entities };
+      const applied = await requestHumanSemanticMutation(
+        attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
+        view,
+        command,
+      );
+      setView({
+        ...view,
+        specHash: applied.mutation.specificationHash,
+        workspace: applied.workspace,
+        semantic: {
+          ...view.semantic,
+          documentRevision: applied.workspace.sketchDocument.revision,
+          solve: applied.workspace.sketchDocument.lastSolve ?? null,
+        },
+      });
+      window.dispatchEvent(new Event('attune:workspace-changed'));
+    },
+    [view, workspaceId],
+  );
+
   const canvas = (
     <WorkspaceCanvas
       insets={insets}
       projectName={projectName}
-      template={template}
       cursorMode={cursorMode}
+      document={view?.workspace.sketchDocument ?? null}
+      onEditGeometry={perspective === 'buyer' ? editGeometry : undefined}
       renderComments={
         collaboration && panels.leftPanel === 'comments'
           ? (camera, placement) => (

@@ -1,6 +1,7 @@
 import {
   AttuneCommandBus,
   AttuneCommandError,
+  authoritativeSemanticEnvelope,
   type CapabilityTransition,
   type ChangeReceipt,
   type CommandEnvelope,
@@ -12,15 +13,18 @@ import {
 } from '@attune/command-bus';
 import {
   createAt1042Workspace,
+  createSpokeSeedDocument,
   createJudgeProviderCapabilityProfile,
   hashCanonical,
   hashSpecification,
+  isSketchCommand,
   providerBinding,
   type AttuneCommand,
   type AttuneRole,
   type AttuneWorkspace,
 } from '@attune/domain';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { getPlaneGcsSolver } from '@attune/domain/planegcs';
+import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 
 import { getDatabase } from './client';
 import {
@@ -145,7 +149,8 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
   const storedGeometry = workspace.geometry;
   const current = {
     ...workspace,
-    scenarioVersion: 2 as const,
+    scenarioVersion: 3 as const,
+    authorityEpoch: workspace.authorityEpoch ?? 0,
     providerCapabilityProfile:
       workspace.providerCapabilityProfile ?? createJudgeProviderCapabilityProfile(),
     geometry: {
@@ -154,6 +159,7 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       circularCutouts: storedGeometry.circularCutouts ?? [],
       ventSlots: storedGeometry.ventSlots ?? [],
     },
+    sketchDocument: workspace.sketchDocument ?? createSpokeSeedDocument(),
   };
   const provider = providerBinding(current);
   return {
@@ -166,6 +172,7 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
     frozenRevisions: current.frozenRevisions.map((revision) => ({
       ...revision,
       provider: Reflect.get(revision, 'provider') ?? provider,
+      sketchDocument: Reflect.get(revision, 'sketchDocument') ?? current.sketchDocument,
     })),
     quotes: current.quotes.map((quote) => ({
       ...quote,
@@ -198,7 +205,10 @@ function interventionSummary(
     previousWorkspaceSeq,
     currentWorkspaceSeq: workspaceSeq,
     interventions: receipts
-      .filter(({ receiptSeq }) => cursor !== undefined && receiptSeq > cursor)
+      .filter(
+        ({ receiptSeq, origin }) =>
+          cursor !== undefined && receiptSeq > cursor && origin === 'human_ui',
+      )
       .map(({ receiptSeq, origin, command, affectedEntities, beforeHash, afterHash }) => ({
         receiptSeq,
         origin,
@@ -539,7 +549,7 @@ export async function ensureJudgeWorkspace(): Promise<void> {
       .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
       .limit(1);
     const stored = existing[0]?.workspace;
-    if (stored && Reflect.get(stored, 'scenarioVersion') !== 2) {
+    if (stored && Reflect.get(stored, 'scenarioVersion') !== 3) {
       await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
       await transaction
         .update(workspaces)
@@ -598,6 +608,21 @@ export async function activeDelegationForWorkspace(
     .orderBy(desc(delegationGrants.issuedAt))
     .limit(1);
   return rows[0] ? immutableCopy(rows[0]) : null;
+}
+
+export async function advanceDelegationObservation(
+  workspaceId: string,
+  grantId: string,
+  workspaceSeq: number,
+): Promise<void> {
+  await getDatabase()
+    .update(delegationGrants)
+    .set({
+      observationCursor: sql`greatest(${delegationGrants.observationCursor}, ${workspaceSeq})`,
+    })
+    .where(
+      and(eq(delegationGrants.workspaceId, workspaceId), eq(delegationGrants.grantId, grantId)),
+    );
 }
 
 export async function resetJudgeWorkspace(): Promise<void> {
@@ -742,7 +767,7 @@ export async function createSketchProjectRecord(
   const membership = memberships[0];
   if (!membership) throw new Error('PROJECT_CREATE_FORBIDDEN');
 
-  const initial = createAt1042Workspace();
+  const initial = createAt1042Workspace({ sketchTemplate: input.template });
   const now = new Date().toISOString();
   const creatorRoles: AttuneRole[] = membership.roles.includes('buyer')
     ? [...membership.roles]
@@ -1056,7 +1081,17 @@ export async function executePersistedCommand(
         )
         .limit(1);
       if (existing[0]) {
-        if (existing[0].fingerprint === fingerprint) return immutableCopy(existing[0].result);
+        if (existing[0].fingerprint === fingerprint) {
+          if (input.context.path === 'webmcp' && input.context.delegation) {
+            await transaction
+              .update(delegationGrants)
+              .set({
+                observationCursor: sql`greatest(${delegationGrants.observationCursor}, ${existing[0].result.workspace.workspaceSeq})`,
+              })
+              .where(eq(delegationGrants.grantId, input.context.delegation.grantId));
+          }
+          return immutableCopy(existing[0].result);
+        }
         throw new AttuneCommandError(
           'IDEMPOTENCY_CONFLICT',
           'This command identifier is already bound to a different authoritative request.',
@@ -1073,10 +1108,68 @@ export async function executePersistedCommand(
       const current = stored ? workspaceWithCurrentContract(stored) : undefined;
       if (!current) throw new Error(`Attune workspace ${input.workspaceId} was not found.`);
 
-      const bus = new AttuneCommandBus(current);
+      let authoritativeEnvelope = input.envelope;
+      let receiptHistory: readonly ChangeReceipt[] = [];
+      if (isSketchCommand(input.command)) {
+        const observedWorkspaceSeq =
+          input.context.path === 'webmcp'
+            ? input.context.delegation?.observationCursor
+            : input.envelope.expectedWorkspaceSeq;
+        if (observedWorkspaceSeq === undefined || observedWorkspaceSeq > current.workspaceSeq) {
+          throw new AttuneCommandError(
+            'CONTEXT_CHANGED',
+            'The server could not establish the command observation snapshot.',
+            ['sketch:document'],
+          );
+        }
+        const observedRows =
+          observedWorkspaceSeq === current.workspaceSeq
+            ? [{ workspace: current }]
+            : await transaction
+                .select({ workspace: workspaceSnapshots.specification })
+                .from(workspaceSnapshots)
+                .where(
+                  and(
+                    eq(workspaceSnapshots.workspaceId, input.workspaceId),
+                    eq(workspaceSnapshots.workspaceSeq, observedWorkspaceSeq),
+                  ),
+                )
+                .limit(1);
+        const observed = observedRows[0]?.workspace;
+        if (!observed) {
+          throw new AttuneCommandError(
+            'CONTEXT_CHANGED',
+            'The authoritative observation snapshot is no longer available.',
+            ['sketch:document'],
+          );
+        }
+        authoritativeEnvelope = authoritativeSemanticEnvelope({
+          command: input.command,
+          commandId: input.envelope.commandId,
+          observed: workspaceWithCurrentContract(observed),
+        });
+        const priorReceipts = await transaction
+          .select({ receipt: changeReceipts.receipt })
+          .from(changeReceipts)
+          .where(
+            and(
+              eq(changeReceipts.workspaceId, input.workspaceId),
+              gt(changeReceipts.receiptSeq, observedWorkspaceSeq),
+            ),
+          )
+          .orderBy(asc(changeReceipts.receiptSeq));
+        receiptHistory = priorReceipts.map(({ receipt }) => receipt);
+      }
+
+      const bus = new AttuneCommandBus(
+        current,
+        undefined,
+        isSketchCommand(input.command) ? await getPlaneGcsSolver() : undefined,
+        { receipts: receiptHistory },
+      );
       let result: CommandResult;
       try {
-        result = bus.execute(input.command, input.envelope, input.context);
+        result = bus.execute(input.command, authoritativeEnvelope, input.context);
       } catch (error) {
         rejection = bus.rejections().at(-1);
         throw error;
@@ -1150,6 +1243,27 @@ export async function executePersistedCommand(
         result,
         createdAt: result.receipt.createdAt,
       });
+      if (input.context.path === 'webmcp' && input.context.delegation) {
+        const humanReceiptIds = receiptHistory
+          .filter(({ origin }) => origin === 'human_ui')
+          .map(({ receiptId }) => receiptId);
+        if (humanReceiptIds.length > 0) {
+          await transaction
+            .insert(agentInterventionObservations)
+            .values(
+              humanReceiptIds.map((receiptId) => ({
+                workspaceId: input.workspaceId,
+                principalId: input.context.principalId,
+                receiptId,
+              })),
+            )
+            .onConflictDoNothing();
+        }
+        await transaction
+          .update(delegationGrants)
+          .set({ observationCursor: result.workspace.workspaceSeq })
+          .where(eq(delegationGrants.grantId, input.context.delegation.grantId));
+      }
       return immutableCopy(result);
     });
   } catch (error) {

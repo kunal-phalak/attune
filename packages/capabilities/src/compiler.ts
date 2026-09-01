@@ -1,4 +1,5 @@
 import {
+  hashCanonical,
   validateWorkspace,
   type AttuneCommandType,
   type AttuneRole,
@@ -15,7 +16,18 @@ import type {
   CompilerContext,
 } from './types';
 
+const MAX_COMPILED_FRONTIERS = 128;
+const compiledFrontiers = new Map<string, readonly CapabilityFrontierEntry[]>();
+
 const COMMAND_CAPABILITY: Readonly<Partial<Record<AttuneCommandType, CapabilityId>>> = {
+  create_geometry: 'edit_draft',
+  edit_geometry: 'edit_draft',
+  delete_geometry: 'edit_draft',
+  create_group: 'edit_draft',
+  move_to_group: 'edit_draft',
+  apply_constraint: 'edit_draft',
+  remove_constraint: 'edit_draft',
+  set_dimension: 'edit_draft',
   apply_deterministic_repair: 'apply_deterministic_repair',
   move_slot: 'edit_draft',
   request_quote: 'request_quote',
@@ -46,13 +58,28 @@ export function compileCapabilityFrontier(
   workspace: AttuneWorkspace,
   role: AttuneRole,
 ): readonly CapabilityFrontierEntry[] {
+  const cacheKey = hashCanonical({
+    workspace,
+    role,
+    providerProfileVersion: workspace.providerCapabilityProfile.version,
+    authorityEpoch: workspace.authorityEpoch,
+  });
+  const cached = compiledFrontiers.get(cacheKey);
+  if (cached) return structuredClone(cached);
   const context: CompilerContext = {
     workspace,
     role,
     valid: validateWorkspace(workspace).valid,
     authority: deriveCurrentAuthority(workspace),
   };
-  return CAPABILITY_DEFINITIONS.map((definition) => compileEntry(workspace, definition, context));
+  const compiled = CAPABILITY_DEFINITIONS.map((definition) =>
+    compileEntry(workspace, definition, context),
+  );
+  if (compiledFrontiers.size >= MAX_COMPILED_FRONTIERS) {
+    compiledFrontiers.delete(compiledFrontiers.keys().next().value ?? '');
+  }
+  compiledFrontiers.set(cacheKey, structuredClone(compiled));
+  return compiled;
 }
 
 export function compileCapabilities(

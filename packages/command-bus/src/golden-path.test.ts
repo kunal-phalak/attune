@@ -106,6 +106,7 @@ function envelope(
     commandId,
     expectedWorkspaceSeq: workspace.workspaceSeq,
     expectedCapabilityEpoch: workspace.capabilityEpoch,
+    expectedAuthorityEpoch: workspace.authorityEpoch,
     expectedSpecHash: hashSpecification(workspace),
     observationCursor,
   };
@@ -434,6 +435,7 @@ describe('AT-1042 r7 to r8 authority path', () => {
           commandId: 'stale-materialize',
           expectedWorkspaceSeq: r8.workspaceSeq,
           expectedCapabilityEpoch: staleEpoch,
+          expectedAuthorityEpoch: r8.authorityEpoch,
           expectedSpecHash: hashSpecification(r8),
         },
         shopify,

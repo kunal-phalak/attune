@@ -7,6 +7,7 @@ import {
 } from '@attune/command-bus';
 import {
   activeDelegationForWorkspace,
+  advanceDelegationObservation,
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
@@ -17,11 +18,17 @@ import {
 } from '@attune/database';
 import {
   compareValidChanges,
+  createSelectionContext,
   hashSpecification,
+  isSketchCommand,
+  rankConstraintCandidates,
   type AttuneCommand,
   type AttuneRole,
+  type SelectionContextRequest,
 } from '@attune/domain';
+import { getPlaneGcsSolver } from '@attune/domain/planegcs';
 import { materializeAt1042Revision } from '@attune/shopify';
+import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp';
 
 import { requireWorkspaceIdentity } from './auth/session';
 import { snapshotCollaborativeDraft } from './liveblocks/server';
@@ -117,8 +124,15 @@ function impactMetrics(bundle: WorkspaceBundle) {
   };
 }
 
-function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole, delegation?: DelegationGrant) {
-  const bus = new AttuneCommandBus(bundle.workspace);
+async function viewForBundle(
+  bundle: WorkspaceBundle,
+  role: AttuneRole,
+  delegation?: DelegationGrant,
+) {
+  const solver = await getPlaneGcsSolver();
+  const solve = solver.solve(bundle.workspace.sketchDocument);
+  const selection = createSelectionContext(solve.document);
+  const bus = new AttuneCommandBus(bundle.workspace, undefined, solver);
   const inspection = bus.inspect(role);
   const delegatedCapabilities = delegation
     ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
@@ -160,6 +174,22 @@ function viewForBundle(bundle: WorkspaceBundle, role: AttuneRole, delegation?: D
     latestCapabilityTransition: bundle.transitions.at(-1) ?? null,
     receiptCount: bundle.receipts.length,
     impact: impactMetrics(bundle),
+    semantic: {
+      documentRevision: bundle.workspace.sketchDocument.revision,
+      selection,
+      rankedConstraintCandidates: rankConstraintCandidates(solve.document, selection),
+      availableActions: delegatedCapabilities.some(({ id }) => id === 'edit_draft')
+        ? [
+            'create_geometry',
+            'edit_geometry',
+            'apply_constraint',
+            'set_dimension',
+            'forecast_change',
+            'check_design',
+          ]
+        : ['forecast_change', 'check_design'],
+      solve: solve.document.lastSolve ?? null,
+    },
   };
 }
 
@@ -173,16 +203,65 @@ async function inspectHuman(workspaceId: string, role: AttuneRole) {
 export async function inspectForDelegatedAgent(
   workspaceId: string,
   role: Extract<AttuneRole, 'buyer' | 'provider'>,
-  observationCursor?: number,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
   const context = await trustedDelegatedContext(workspaceId, role);
   const bundle = await readWorkspaceBundle(
     workspaceId,
-    observationCursor,
-    observationCursor === undefined ? undefined : context.principalId,
+    context.delegation?.observationCursor,
+    undefined,
   );
   return viewForBundle(bundle, role, context.delegation);
+}
+
+async function agentContextForBundle(
+  bundle: WorkspaceBundle,
+  context: TrustedExecutionContext,
+  focus?: SelectionContextRequest,
+) {
+  const solver = await getPlaneGcsSolver();
+  const solution = solver.solve(bundle.workspace.sketchDocument);
+  const workspace = {
+    ...bundle.workspace,
+    sketchDocument: {
+      ...bundle.workspace.sketchDocument,
+      lastSolve: solution.document.lastSolve,
+    },
+  };
+  const inspection = new AttuneCommandBus(workspace, undefined, solver).inspect(context.role);
+  const capabilityIds = inspection.capabilities
+    .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
+    .map(({ id }) => id);
+  return compileAgentContext({
+    workspace,
+    role: context.role,
+    capabilityIds,
+    observation: bundle.observation,
+    focus,
+  });
+}
+
+export async function inspectAgentContext(
+  workspaceId: string,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  focus?: SelectionContextRequest,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const context = await trustedDelegatedContext(workspaceId, role);
+  const bundle = await readWorkspaceBundle(
+    workspaceId,
+    context.delegation?.observationCursor,
+    context.principalId,
+  );
+  const snapshot = await agentContextForBundle(bundle, context, focus);
+  if (context.delegation) {
+    await advanceDelegationObservation(
+      workspaceId,
+      context.delegation.grantId,
+      bundle.workspace.workspaceSeq,
+    );
+  }
+  return snapshot;
 }
 
 export function inspectForHuman(workspaceId: string, role: AttuneRole = 'buyer') {
@@ -218,6 +297,108 @@ export async function executeAgentCommand(
   input: CommandExecutionInput,
 ) {
   return executeWithContext(workspaceId, input, await trustedDelegatedContext(workspaceId, role));
+}
+
+export async function executeSemanticCommand(
+  workspaceId: string,
+  input: CommandExecutionInput,
+  context: TrustedExecutionContext,
+) {
+  if (!isSketchCommand(input.command)) {
+    throw new TypeError('executeSemanticCommand accepts semantic sketch commands only.');
+  }
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const result = await executePersistedCommand({
+    workspaceId,
+    command: input.command,
+    envelope: input.envelope,
+    context,
+  });
+  const capabilityIds = result.capabilities
+    .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
+    .map(({ id }) => id);
+  const nextContext = compileAgentContext({
+    workspace: result.workspace,
+    role: context.role,
+    capabilityIds,
+    observation: result.observation,
+  });
+  return {
+    result,
+    nextContext,
+    mutation: compileAgentMutationResult(result, nextContext, capabilityIds),
+  };
+}
+
+export async function executeAgentSemanticCommand(
+  workspaceId: string,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  input: CommandExecutionInput,
+) {
+  const execution = await executeSemanticCommand(
+    workspaceId,
+    input,
+    await trustedDelegatedContext(workspaceId, role),
+  );
+  return execution.mutation;
+}
+
+export async function executeHumanSemanticCommand(
+  workspaceId: string,
+  input: CommandExecutionInput,
+  role: AttuneRole = 'buyer',
+) {
+  const execution = await executeSemanticCommand(
+    workspaceId,
+    input,
+    await trustedHumanContext(workspaceId, role),
+  );
+  return { mutation: execution.mutation, workspace: execution.result.workspace };
+}
+
+async function forecastWithContext(
+  workspaceId: string,
+  command: AttuneCommand,
+  context: TrustedExecutionContext,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const bundle = await readWorkspaceBundle(
+    workspaceId,
+    context.delegation?.observationCursor,
+    context.path === 'webmcp' ? context.principalId : undefined,
+  );
+  const solver = await getPlaneGcsSolver();
+  const bus = new AttuneCommandBus(bundle.workspace, undefined, solver);
+  const forecast = bus.forecast(command, context, `forecast-${crypto.randomUUID()}`);
+  const agentContext = await agentContextForBundle(bundle, context);
+  if (context.path === 'webmcp' && context.delegation) {
+    await advanceDelegationObservation(
+      workspaceId,
+      context.delegation.grantId,
+      bundle.workspace.workspaceSeq,
+    );
+  }
+  return { status: 'FORECAST' as const, forecast, context: agentContext };
+}
+
+export async function forecastAgentCommand(
+  workspaceId: string,
+  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  command: AttuneCommand,
+) {
+  return forecastWithContext(
+    workspaceId,
+    command,
+    await trustedDelegatedContext(workspaceId, role),
+  );
+}
+
+export async function forecastHumanCommand(
+  workspaceId: string,
+  command: AttuneCommand,
+  role: AttuneRole = 'buyer',
+) {
+  return forecastWithContext(workspaceId, command, await trustedHumanContext(workspaceId, role));
 }
 
 export async function executeHumanCommand(

@@ -1,5 +1,14 @@
 'use client';
 
+import {
+  createSelectionContext,
+  geometryBounds,
+  snapSketchPoint,
+  type CircleEntity,
+  type GeometryPatch,
+  type SketchBounds,
+  type SketchDocument,
+} from '@attune/domain/sketch';
 import type { Canvas as SkCanvas, CanvasKit, Paint, Surface } from 'canvaskit-wasm';
 import {
   forwardRef,
@@ -11,11 +20,9 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { SketchTemplate } from '../lib/projects/library';
 import { Camera2D, type FitPadding, type ViewportSize } from '../lib/sketch/camera-2d';
 import { editorCursorFor, type EditorCursorMode } from '../lib/sketch/editor-cursors';
 import { adaptiveGridStep } from '../lib/sketch/grid';
-import { SPOKE_SKETCH } from '../lib/sketch/spoke-sketch';
 import type { ViewportInsets } from '../lib/sketch/viewport-insets';
 import { WorkspaceOrientationHud } from './workspace-orientation-hud';
 
@@ -167,16 +174,42 @@ function drawSketch(
   canvasKit: CanvasKit,
   canvas: SkCanvas,
   camera: Camera2D,
-  template: SketchTemplate,
+  document: SketchDocument | null,
 ): void {
-  if (template === 'blank') return;
+  if (!document) return;
   const geometryPaint = paint(canvasKit, canvasKit.Color(38, 48, 63, 0.95), 1.65 / camera.zoom);
   try {
-    for (const entity of SPOKE_SKETCH.entities) {
-      if (entity.kind === 'circle') {
-        canvas.drawCircle(entity.center.x, entity.center.y, entity.radius, geometryPaint);
-      } else {
-        canvas.drawLine(entity.start.x, entity.start.y, entity.end.x, entity.end.y, geometryPaint);
+    for (const entity of document.entities) {
+      switch (entity.kind) {
+        case 'point':
+          canvas.drawCircle(entity.position.x, entity.position.y, 2.5 / camera.zoom, geometryPaint);
+          break;
+        case 'line':
+          canvas.drawLine(
+            entity.start.x,
+            entity.start.y,
+            entity.end.x,
+            entity.end.y,
+            geometryPaint,
+          );
+          break;
+        case 'circle':
+          canvas.drawCircle(entity.center.x, entity.center.y, entity.radius, geometryPaint);
+          break;
+        case 'arc':
+          canvas.drawArc(
+            [
+              entity.center.x - entity.radius,
+              entity.center.y - entity.radius,
+              entity.center.x + entity.radius,
+              entity.center.y + entity.radius,
+            ],
+            (-entity.endAngle * 180) / Math.PI,
+            ((entity.endAngle - entity.startAngle) * 180) / Math.PI,
+            false,
+            geometryPaint,
+          );
+          break;
       }
     }
   } finally {
@@ -189,7 +222,7 @@ function renderSurface(
   surface: Surface,
   camera: Camera2D,
   metrics: CanvasMetrics,
-  template: SketchTemplate,
+  document: SketchDocument | null,
 ): void {
   const canvas = surface.getCanvas();
   canvas.clear(canvasKit.Color(247, 248, 249, 1));
@@ -200,7 +233,7 @@ function renderSurface(
   canvas.scale(camera.zoom, -camera.zoom);
   drawGrid(canvasKit, canvas, camera, metrics);
   drawAxes(canvasKit, canvas, camera, metrics);
-  drawSketch(canvasKit, canvas, camera, template);
+  drawSketch(canvasKit, canvas, camera, document);
   canvas.restore();
   canvas.restore();
   surface.flush();
@@ -224,11 +257,12 @@ export const WorkspaceCanvas = forwardRef<
       placement: CanvasCommentPlacement | null,
     ) => ReactNode;
     readonly projectName: string;
-    readonly template: SketchTemplate;
     readonly cursorMode: EditorCursorMode;
+    readonly document: SketchDocument | null;
+    readonly onEditGeometry?: (patches: readonly GeometryPatch[]) => Promise<void>;
   }
 >(function WorkspaceCanvas(
-  { insets, renderComments, projectName, template, cursorMode },
+  { insets, renderComments, projectName, document, cursorMode, onEditGeometry },
   forwardedRef,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -237,10 +271,20 @@ export const WorkspaceCanvas = forwardRef<
   const surfaceRef = useRef<Surface | null>(null);
   const metricsRef = useRef<CanvasMetrics>({ width: 0, height: 0, pixelRatio: 1 });
   const insetsRef = useRef(insets);
-  const templateRef = useRef(template);
+  const documentRef = useRef(document);
   const redrawRef = useRef<() => void>(() => undefined);
   const initializedRef = useRef(false);
-  const pointerRef = useRef<{ readonly id: number; x: number; y: number } | null>(null);
+  const cameraAnimationRef = useRef<number | null>(null);
+  const pointerRef = useRef<
+    | { readonly mode: 'pan'; readonly id: number; x: number; y: number }
+    | {
+        readonly mode: 'resize-circle';
+        readonly id: number;
+        readonly entityId: string;
+        readonly original: CircleEntity;
+      }
+    | null
+  >(null);
   const [dragging, setDragging] = useState(false);
   const [commentPointer, setCommentPointer] = useState<CanvasCommentPlacement['screen'] | null>(
     null,
@@ -256,7 +300,19 @@ export const WorkspaceCanvas = forwardRef<
   });
 
   insetsRef.current = insets;
-  templateRef.current = template;
+  documentRef.current = document;
+
+  const documentBounds = (): SketchBounds | null => {
+    const entities = documentRef.current?.entities ?? [];
+    if (entities.length === 0) return null;
+    const bounds = entities.map(geometryBounds);
+    return {
+      minX: Math.min(...bounds.map(({ minX }) => minX)),
+      minY: Math.min(...bounds.map(({ minY }) => minY)),
+      maxX: Math.max(...bounds.map(({ maxX }) => maxX)),
+      maxY: Math.max(...bounds.map(({ maxY }) => maxY)),
+    };
+  };
 
   const publishView = () => {
     const camera = cameraRef.current;
@@ -270,24 +326,56 @@ export const WorkspaceCanvas = forwardRef<
     });
   };
 
+  const cancelCameraAnimation = () => {
+    if (cameraAnimationRef.current !== null) {
+      cancelAnimationFrame(cameraAnimationRef.current);
+      cameraAnimationRef.current = null;
+    }
+  };
+
+  const animateCamera = (configure: (target: Camera2D) => void) => {
+    const metrics = metricsRef.current;
+    if (metrics.width === 0 || metrics.height === 0) return;
+    cancelCameraAnimation();
+    const camera = cameraRef.current;
+    const start = camera.state();
+    const target = new Camera2D({
+      ...start,
+      minZoom: camera.minZoom,
+      maxZoom: camera.maxZoom,
+    });
+    configure(target);
+    const finish = target.state();
+    const startedAt = performance.now();
+    const frame = (time: number) => {
+      const progress = Math.min(1, (time - startedAt) / 180);
+      camera.interpolate(start, finish, 1 - (1 - progress) ** 3);
+      redrawRef.current();
+      publishView();
+      if (progress < 1) {
+        cameraAnimationRef.current = requestAnimationFrame(frame);
+      } else {
+        cameraAnimationRef.current = null;
+      }
+    };
+    cameraAnimationRef.current = requestAnimationFrame(frame);
+  };
+
   const fitSketch = () => {
     const metrics = metricsRef.current;
     if (metrics.width === 0 || metrics.height === 0) return;
-    if (templateRef.current === 'spoke') {
-      cameraRef.current.fitBounds(SPOKE_SKETCH.bounds, metrics, fitPadding(insetsRef.current));
-    } else {
-      cameraRef.current.resetView(metrics);
-    }
-    redrawRef.current();
-    publishView();
+    const bounds = documentBounds();
+    animateCamera((target) =>
+      bounds
+        ? target.fitBounds(bounds, metrics, fitPadding(insetsRef.current))
+        : target.resetView(metrics),
+    );
   };
 
   const resetView = () => {
     const metrics = metricsRef.current;
     if (metrics.width === 0 || metrics.height === 0) return;
-    cameraRef.current.resetView(metrics);
-    redrawRef.current();
-    publishView();
+    animateCamera((target) => target.resetView(metrics));
   };
 
   useImperativeHandle(forwardedRef, () => ({ fitSketch, resetView }));
@@ -321,12 +409,9 @@ export const WorkspaceCanvas = forwardRef<
 
           if (!initializedRef.current) {
             initializedRef.current = true;
-            if (templateRef.current === 'spoke') {
-              cameraRef.current.fitBounds(
-                SPOKE_SKETCH.bounds,
-                metrics,
-                fitPadding(insetsRef.current),
-              );
+            const bounds = documentBounds();
+            if (bounds) {
+              cameraRef.current.fitBounds(bounds, metrics, fitPadding(insetsRef.current));
             } else {
               cameraRef.current.resetView(metrics);
             }
@@ -348,7 +433,7 @@ export const WorkspaceCanvas = forwardRef<
               surface,
               cameraRef.current,
               metricsRef.current,
-              templateRef.current,
+              documentRef.current,
             );
           }
         };
@@ -368,14 +453,21 @@ export const WorkspaceCanvas = forwardRef<
       surfaceRef.current?.delete();
       surfaceRef.current = null;
       redrawRef.current = () => undefined;
+      cancelCameraAnimation();
     };
   }, []);
+
+  useEffect(() => {
+    documentRef.current = document;
+    redrawRef.current();
+  }, [document]);
 
   useEffect(() => {
     const element = canvasRef.current;
     if (!element) return undefined;
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      cancelCameraAnimation();
       const bounds = element.getBoundingClientRect();
       const cursor = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
       const looksLikeTrackpadPan =
@@ -399,25 +491,108 @@ export const WorkspaceCanvas = forwardRef<
 
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (event.button !== 0 && event.button !== 1) return;
+    cancelCameraAnimation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const screen = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+    const sketch = documentRef.current;
+    if (event.button === 0 && cursorMode === 'select' && sketch) {
+      const context = createSelectionContext(sketch, {
+        screenPoint: screen,
+        camera: {
+          x: cameraRef.current.x,
+          y: cameraRef.current.y,
+          zoom: cameraRef.current.zoom,
+        },
+      });
+      const hovered = context.hoveredEntity
+        ? sketch.entities.find(({ id }) => id === context.hoveredEntity?.entityId)
+        : undefined;
+      if (hovered?.kind === 'circle') {
+        pointerRef.current = {
+          mode: 'resize-circle',
+          id: event.pointerId,
+          entityId: hovered.id,
+          original: hovered,
+        };
+        setDragging(true);
+        return;
+      }
+    }
+    pointerRef.current = {
+      mode: 'pan',
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+    };
     setDragging(true);
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const pointer = pointerRef.current;
     if (!pointer || pointer.id !== event.pointerId) return;
-    cameraRef.current.panBy(event.clientX - pointer.x, event.clientY - pointer.y);
-    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    if (pointer.mode === 'pan') {
+      cameraRef.current.panBy(event.clientX - pointer.x, event.clientY - pointer.y);
+      pointerRef.current = { ...pointer, x: event.clientX, y: event.clientY };
+    } else {
+      const sketch = documentRef.current;
+      if (!sketch) return;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const world = cameraRef.current.screenToWorld({
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+      });
+      const snapped = snapSketchPoint(sketch, world, {
+        gridStep: adaptiveGridStep(cameraRef.current.zoom),
+        tolerance: 9 / cameraRef.current.zoom,
+      });
+      const radius = Math.max(
+        0.1,
+        Math.hypot(
+          snapped.point.x - pointer.original.center.x,
+          snapped.point.y - pointer.original.center.y,
+        ),
+      );
+      documentRef.current = {
+        ...sketch,
+        entities: sketch.entities.map((entity) =>
+          entity.id === pointer.entityId && entity.kind === 'circle'
+            ? Object.assign({}, entity, { radius })
+            : entity,
+        ),
+      };
+    }
     redrawRef.current();
     publishView();
   };
 
   const onPointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (pointerRef.current?.id !== event.pointerId) return;
+    const pointer = pointerRef.current;
+    if (pointer?.id !== event.pointerId) return;
     pointerRef.current = null;
     setDragging(false);
     event.currentTarget.releasePointerCapture(event.pointerId);
+    if (pointer.mode === 'resize-circle') {
+      const changed = documentRef.current?.entities.find(
+        (entity): entity is CircleEntity =>
+          entity.id === pointer.entityId && entity.kind === 'circle',
+      );
+      documentRef.current = document;
+      redrawRef.current();
+      if (changed && Math.abs(changed.radius - pointer.original.radius) > 1e-6) {
+        void onEditGeometry?.([
+          {
+            id: changed.id,
+            kind: 'circle',
+            center: changed.center,
+            radius: changed.radius,
+          },
+        ]).catch(() => {
+          documentRef.current = document;
+          redrawRef.current();
+        });
+      }
+    }
   };
 
   const onCommentPointerMove = (event: ReactPointerEvent<HTMLElement>) => {

@@ -10,6 +10,7 @@ function request(command: Record<string, unknown>) {
     commandId: 'webmcp-security-eval',
     expectedWorkspaceSeq: 4,
     expectedCapabilityEpoch: 5,
+    expectedAuthorityEpoch: 0,
     expectedSpecHash: HASH,
   };
 }
@@ -32,6 +33,7 @@ describe('trusted Attune HTTP command boundary', () => {
         commandId: 'webmcp-security-eval',
         expectedWorkspaceSeq: 4,
         expectedCapabilityEpoch: 5,
+        expectedAuthorityEpoch: 0,
         expectedSpecHash: HASH,
         observationCursor: undefined,
       },

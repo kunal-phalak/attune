@@ -74,6 +74,7 @@ function envelope(bus: AttuneCommandBus, commandId: string, cursor?: number): Co
     commandId,
     expectedWorkspaceSeq: workspace.workspaceSeq,
     expectedCapabilityEpoch: workspace.capabilityEpoch,
+    expectedAuthorityEpoch: workspace.authorityEpoch,
     expectedSpecHash: hashSpecification(workspace),
     observationCursor: cursor,
   };
@@ -120,7 +121,11 @@ describe('deterministic WebMCP surface evals', () => {
   it('changes the contextual tool set only when authoritative capabilities change', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
     expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toEqual([
-      'inspect_attune_workspace',
+      'inspect_context',
+      'forecast_change',
+      'check_design',
+      'modify_geometry',
+      'constrain_geometry',
       'compare_valid_changes',
       'apply_attune_repair',
       'move_attune_slot',

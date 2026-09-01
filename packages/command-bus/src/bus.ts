@@ -4,16 +4,20 @@ import {
   requiredCapability,
 } from '@attune/capabilities';
 import {
+  changedFootprintReferences,
   hashSpecification,
-  transitionWorkspace,
+  isSketchCommand,
   validateWorkspace,
   type AttuneCommand,
   type AttuneRole,
   type AttuneWorkspace,
+  type ConstraintSolver,
+  type DomainTransition,
 } from '@attune/domain';
 
 import { authorizationFailure, originForPath } from './authorization';
 import { AttuneCommandError, type AttuneCommandErrorCode } from './errors';
+import { forecastWorkspaceChange } from './forecast/forecast';
 import { commandFingerprint, type IdempotencyRecord } from './idempotency';
 import { interventionSummary } from './interventions';
 import { createReceipt, immutableCopy } from './receipts';
@@ -33,12 +37,17 @@ interface RejectionInput {
   readonly commandType: AttuneCommand['type'];
   readonly envelope: CommandEnvelope;
   readonly context: TrustedExecutionContext;
+  readonly changedEntities?: readonly string[];
+}
+
+interface EnvelopeValidation {
+  readonly rebasedFromWorkspaceSeq: number | null;
 }
 
 export class AttuneCommandBus {
   readonly #clock: () => string;
   readonly #idempotency = new Map<string, IdempotencyRecord>();
-  readonly #receipts: ChangeReceipt[] = [];
+  readonly #receipts: ChangeReceipt[];
   readonly #transitions: CapabilityTransition[] = [];
   readonly #rejections: CommandRejection[] = [];
   #workspace: AttuneWorkspace;
@@ -46,9 +55,12 @@ export class AttuneCommandBus {
   constructor(
     initialWorkspace: AttuneWorkspace,
     clock: () => string = () => new Date().toISOString(),
+    private readonly solver?: ConstraintSolver,
+    history: { readonly receipts?: readonly ChangeReceipt[] } = {},
   ) {
     this.#workspace = immutableCopy(initialWorkspace);
     this.#clock = clock;
+    this.#receipts = [...(history.receipts ?? [])];
   }
 
   inspect(role: AttuneRole, observationCursor?: number) {
@@ -77,6 +89,22 @@ export class AttuneCommandBus {
     return immutableCopy(this.#rejections);
   }
 
+  forecast(command: AttuneCommand, context: TrustedExecutionContext, commandId = 'forecast') {
+    const now = this.#clock();
+    const authorization = authorizationFailure(context, command.type, now);
+    if (authorization) throw new AttuneCommandError(authorization.code, authorization.message);
+    this.#ensureCapability(command.type, context.role, commandId, context);
+    return immutableCopy(
+      forecastWorkspaceChange({
+        workspace: this.#workspace,
+        command,
+        role: context.role,
+        metadata: { commandId, now },
+        solver: this.solver,
+      }).consequence,
+    );
+  }
+
   execute(
     command: AttuneCommand,
     envelope: CommandEnvelope,
@@ -96,13 +124,19 @@ export class AttuneCommandBus {
       });
     }
 
-    this.#validateEnvelope(envelope, context, command.type, now);
+    const envelopeValidation = this.#validateEnvelope(envelope, context, command, now);
     const before = this.#workspace;
     const validationBefore = validateWorkspace(before);
-    let transition;
+    let forecast;
 
     try {
-      transition = transitionWorkspace(before, command, { commandId: envelope.commandId, now });
+      forecast = forecastWorkspaceChange({
+        workspace: before,
+        command,
+        role: context.role,
+        metadata: { commandId: envelope.commandId, now },
+        solver: this.solver,
+      });
     } catch {
       return this.#reject({
         code: 'COMMAND_CONFLICT',
@@ -113,7 +147,24 @@ export class AttuneCommandBus {
       });
     }
 
-    const after = immutableCopy(transition.workspace);
+    if (isSketchCommand(command) && !forecast.consequence.valid) {
+      return this.#reject({
+        code: 'COMMAND_CONFLICT',
+        message: 'PlaneGCS could not produce a valid, conflict-free semantic sketch consequence.',
+        commandType: command.type,
+        envelope,
+        context,
+        changedEntities: forecast.consequence.solver.conflicts,
+      });
+    }
+
+    const after = immutableCopy(forecast.workspaceAfter);
+    const transition: DomainTransition = {
+      workspace: after,
+      affectedEntities: forecast.affectedEntities,
+      addedConstraints: forecast.consequence.addedConstraints,
+      removedConstraints: forecast.consequence.removedConstraints,
+    };
     const validationAfter = validateWorkspace(after);
     const receiptId = `receipt:${after.workspaceSeq}:${envelope.commandId}`;
     const transitionRecord = immutableCopy(capabilityTransition(before, after, receiptId));
@@ -128,6 +179,8 @@ export class AttuneCommandBus {
       validationBefore,
       validationAfter,
       createdAt: now,
+      consequence: forecast.consequence,
+      rebasedFromWorkspaceSeq: envelopeValidation.rebasedFromWorkspaceSeq,
     });
 
     this.#workspace = after;
@@ -144,6 +197,7 @@ export class AttuneCommandBus {
         envelope.observationCursor,
         after.workspaceSeq,
       ),
+      forecast: forecast.consequence,
     });
     this.#idempotency.set(envelope.commandId, { fingerprint, result });
     return result;
@@ -161,13 +215,85 @@ export class AttuneCommandBus {
   #validateEnvelope(
     envelope: CommandEnvelope,
     context: TrustedExecutionContext,
-    commandType: AttuneCommand['type'],
+    command: AttuneCommand | AttuneCommand['type'],
     now: string,
-  ): void {
+  ): EnvelopeValidation {
+    const commandType = typeof command === 'string' ? command : command.type;
     const authorization = authorizationFailure(context, commandType, now);
     if (authorization) {
       this.#reject({ ...authorization, commandType, envelope, context });
     }
+    const semantic = typeof command !== 'string' && isSketchCommand(command);
+    const currentSpecHash = hashSpecification(this.#workspace);
+    if (semantic) {
+      if (!envelope.footprint) {
+        this.#reject({
+          code: 'REVALIDATION_REQUIRED',
+          message: 'Semantic sketch commands require an observed command footprint.',
+          commandType,
+          envelope,
+          context,
+          changedEntities: ['sketch:document'],
+        });
+      }
+      const changedEntities = changedFootprintReferences(
+        this.#workspace.sketchDocument,
+        envelope.footprint,
+      );
+      if (changedEntities.length > 0) {
+        this.#reject({
+          code: 'REVALIDATION_REQUIRED',
+          message: `Touched semantic references changed: ${changedEntities.join(', ')}.`,
+          commandType,
+          envelope,
+          context,
+          changedEntities,
+        });
+      }
+      if (envelope.expectedAuthorityEpoch !== this.#workspace.authorityEpoch) {
+        this.#reject({
+          code: 'CONTEXT_CHANGED',
+          message: 'Consequential authority changed after this command was observed.',
+          commandType,
+          envelope,
+          context,
+          changedEntities: ['authority:workspace'],
+        });
+      }
+      if (envelope.expectedWorkspaceSeq > this.#workspace.workspaceSeq) {
+        this.#reject({
+          code: 'CONTEXT_CHANGED',
+          message: 'The observed workspace sequence is ahead of authoritative state.',
+          commandType,
+          envelope,
+          context,
+        });
+      }
+      const exactSequence = envelope.expectedWorkspaceSeq === this.#workspace.workspaceSeq;
+      if (exactSequence && envelope.expectedCapabilityEpoch !== this.#workspace.capabilityEpoch) {
+        this.#reject({
+          code: 'STALE_CAPABILITY',
+          message: `Expected capability epoch ${envelope.expectedCapabilityEpoch}, current is ${this.#workspace.capabilityEpoch}.`,
+          commandType,
+          envelope,
+          context,
+        });
+      }
+      if (exactSequence && envelope.expectedSpecHash !== currentSpecHash) {
+        this.#reject({
+          code: 'SPEC_HASH_MISMATCH',
+          message: 'The expected specification hash does not match authoritative state.',
+          commandType,
+          envelope,
+          context,
+        });
+      }
+      this.#ensureCapability(commandType, context.role, envelope.commandId, context, envelope);
+      return {
+        rebasedFromWorkspaceSeq: exactSequence ? null : envelope.expectedWorkspaceSeq,
+      };
+    }
+
     if (envelope.expectedWorkspaceSeq !== this.#workspace.workspaceSeq) {
       this.#reject({
         code: 'STALE_WORKSPACE',
@@ -186,7 +312,6 @@ export class AttuneCommandBus {
         context,
       });
     }
-    const currentSpecHash = hashSpecification(this.#workspace);
     if (envelope.expectedSpecHash !== currentSpecHash) {
       this.#reject({
         code: 'SPEC_HASH_MISMATCH',
@@ -196,16 +321,43 @@ export class AttuneCommandBus {
         context,
       });
     }
-    const required = requiredCapability(commandType);
-    const available = compileCapabilities(this.#workspace, context.role);
-    if (required && !available.some((candidate) => candidate.id === required)) {
+    if (envelope.expectedAuthorityEpoch !== this.#workspace.authorityEpoch) {
       this.#reject({
-        code: 'CAPABILITY_UNAVAILABLE',
-        message: `${required} is not available for the current role and authoritative state.`,
+        code: 'CONTEXT_CHANGED',
+        message: 'Consequential authority changed after this command was observed.',
         commandType,
         envelope,
         context,
+        changedEntities: ['authority:workspace'],
       });
+    }
+    this.#ensureCapability(commandType, context.role, envelope.commandId, context, envelope);
+    return { rebasedFromWorkspaceSeq: null };
+  }
+
+  #ensureCapability(
+    commandType: AttuneCommand['type'],
+    role: AttuneRole,
+    commandId: string,
+    context: TrustedExecutionContext,
+    envelope?: CommandEnvelope,
+  ): void {
+    const required = requiredCapability(commandType);
+    const available = compileCapabilities(this.#workspace, role);
+    if (required && !available.some((candidate) => candidate.id === required)) {
+      if (envelope) {
+        this.#reject({
+          code: 'CAPABILITY_UNAVAILABLE',
+          message: `${required} is not available for the current role and authoritative state.`,
+          commandType,
+          envelope,
+          context,
+        });
+      }
+      throw new AttuneCommandError(
+        'CAPABILITY_UNAVAILABLE',
+        `${required} is not available for the current role and authoritative state.`,
+      );
     }
   }
 
@@ -222,9 +374,10 @@ export class AttuneCommandBus {
       workspaceSeq: this.#workspace.workspaceSeq,
       capabilityEpoch: this.#workspace.capabilityEpoch,
       currentSpecHash: hashSpecification(this.#workspace),
+      changedEntities: input.changedEntities ?? [],
       createdAt: this.#clock(),
     });
     this.#rejections.push(rejection);
-    throw new AttuneCommandError(code, message);
+    throw new AttuneCommandError(code, message, input.changedEntities ?? []);
   }
 }

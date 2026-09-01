@@ -12,12 +12,15 @@ export type AttuneCommandErrorCode =
   | 'DELEGATION_REVOKED'
   | 'DELEGATION_CAPABILITY_DENIED'
   | 'IDEMPOTENCY_CONFLICT'
-  | 'COMMAND_CONFLICT';
+  | 'COMMAND_CONFLICT'
+  | 'CONTEXT_CHANGED'
+  | 'REVALIDATION_REQUIRED';
 
 export class AttuneCommandError extends Error {
   constructor(
     readonly code: AttuneCommandErrorCode,
     message: string,
+    readonly changedEntities: readonly string[] = [],
   ) {
     super(message);
     this.name = 'AttuneCommandError';

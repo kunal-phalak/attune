@@ -22,6 +22,12 @@ export interface FitPadding {
   readonly left: number;
 }
 
+export interface Camera2DState {
+  readonly x: number;
+  readonly y: number;
+  readonly zoom: number;
+}
+
 const DEFAULT_PADDING: FitPadding = { top: 72, right: 72, bottom: 72, left: 72 };
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -84,6 +90,27 @@ export class Camera2D {
     this.zoom = clamp(this.zoom * zoomFactor, this.minZoom, this.maxZoom);
     this.x = screenPoint.x - worldPoint.x * this.zoom;
     this.y = screenPoint.y + worldPoint.y * this.zoom;
+  }
+
+  state(): Camera2DState {
+    return { x: this.x, y: this.y, zoom: this.zoom };
+  }
+
+  setState(state: Camera2DState): void {
+    this.x = state.x;
+    this.y = state.y;
+    this.zoom = clamp(state.zoom, this.minZoom, this.maxZoom);
+  }
+
+  interpolate(from: Camera2DState, to: Camera2DState, progress: number): void {
+    const amount = clamp(progress, 0, 1);
+    this.x = from.x + (to.x - from.x) * amount;
+    this.y = from.y + (to.y - from.y) * amount;
+    this.zoom = clamp(
+      Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * amount),
+      this.minZoom,
+      this.maxZoom,
+    );
   }
 
   fitBounds(bounds: Bounds2D, viewport: ViewportSize, padding: FitPadding = DEFAULT_PADDING): void {

@@ -1,3 +1,6 @@
+import type { SketchCommand } from './sketch/commands';
+import type { SketchDocument } from './sketch/document';
+
 export type CommandOrigin =
   | 'human_ui'
   | 'webmcp'
@@ -173,6 +176,7 @@ export interface FrozenRevision {
   readonly specHash: string;
   readonly provider: ProviderBinding;
   readonly geometry: PanelGeometry;
+  readonly sketchDocument: SketchDocument;
   readonly frozenAt: string;
 }
 
@@ -264,15 +268,17 @@ export interface CommerceLink {
 }
 
 export interface AttuneWorkspace {
-  readonly scenarioVersion: 2;
+  readonly scenarioVersion: 3;
   readonly projectId: 'project:attune';
   readonly commitmentId: 'AT-1042';
   readonly workspaceSeq: number;
   readonly draftVersion: number;
   readonly capabilityEpoch: number;
+  readonly authorityEpoch: number;
   readonly fabricationQuantity: 4;
   readonly providerCapabilityProfile: ProviderCapabilityProfile;
   readonly geometry: PanelGeometry;
+  readonly sketchDocument: SketchDocument;
   readonly quoteRequests: readonly QuoteRequest[];
   readonly frozenRevisions: readonly FrozenRevision[];
   readonly quotes: readonly Quote[];
@@ -293,6 +299,7 @@ export interface DeterministicRepair {
 }
 
 export type AttuneCommand =
+  | SketchCommand
   | { readonly type: 'apply_deterministic_repair'; readonly repairId: DeterministicRepair['id'] }
   | { readonly type: 'move_slot'; readonly centerX: number; readonly centerY: number }
   | { readonly type: 'request_quote' }

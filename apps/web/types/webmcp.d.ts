@@ -9,7 +9,7 @@ interface WebMcpTool {
   description: string;
   inputSchema: Record<string, unknown>;
   annotations?: WebMcpToolAnnotations;
-  execute(input: unknown): unknown;
+  execute(input: unknown, context?: { readonly signal?: AbortSignal }): unknown;
 }
 
 interface WebMcpModelContext {

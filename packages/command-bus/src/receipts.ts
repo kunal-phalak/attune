@@ -9,6 +9,7 @@ import {
 } from '@attune/domain';
 
 import { originForPath } from './authorization';
+import type { ForecastConsequence } from './forecast/consequence';
 import type {
   CapabilityTransition,
   ChangeReceipt,
@@ -27,6 +28,8 @@ interface ReceiptInput {
   readonly validationBefore: ValidationResult;
   readonly validationAfter: ValidationResult;
   readonly createdAt: string;
+  readonly consequence: ForecastConsequence;
+  readonly rebasedFromWorkspaceSeq: number | null;
 }
 
 export function deepFreeze<T>(value: T): T {
@@ -57,6 +60,8 @@ export function createReceipt(input: ReceiptInput): ChangeReceipt {
     specHashBefore: hashSpecification(before),
     specHashAfter: hashSpecification(after),
     affectedEntities: transition.affectedEntities,
+    rebasedFromWorkspaceSeq: input.rebasedFromWorkspaceSeq,
+    consequence: input.consequence,
     preservedLocks: lockedMountIds(),
     validationBefore: input.validationBefore,
     validationAfter: input.validationAfter,

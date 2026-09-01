@@ -32,7 +32,13 @@ export function attuneErrorResponse(error: unknown): NextResponse {
 
   if (isAttuneCommandError(error)) {
     return NextResponse.json(
-      { error: { code: error.code, message: error.message } },
+      {
+        error: {
+          code: error.code,
+          message: error.message,
+          changedEntities: error.changedEntities,
+        },
+      },
       { status: 409 },
     );
   }

@@ -1,4 +1,10 @@
-import type { PanelGeometry } from '@attune/domain';
+import type { ForecastConsequence } from '@attune/command-bus';
+import {
+  type AttuneWorkspace,
+  type PanelGeometry,
+  type SelectionContext,
+  type SketchDocument,
+} from '@attune/domain';
 
 export type CapabilityRole = 'buyer' | 'provider' | 'reviewer';
 
@@ -33,6 +39,7 @@ export interface AttuneApiView {
     readonly workspaceSeq: number;
     readonly draftVersion: number;
     readonly capabilityEpoch: number;
+    readonly authorityEpoch: number;
     readonly fabricationQuantity: 4;
     readonly providerCapabilityProfile: {
       readonly profileId: string;
@@ -41,6 +48,7 @@ export interface AttuneApiView {
       readonly version: string;
     };
     readonly geometry: PanelGeometry;
+    readonly sketchDocument: SketchDocument;
     readonly quoteRequests: readonly {
       readonly id: string;
       readonly draftVersion: number;
@@ -171,9 +179,35 @@ export interface AttuneApiView {
     readonly exactRevisionShopifyVerifications: number;
     readonly goldenPath: { readonly completedRuns: number; readonly startedRuns: number };
   };
+  readonly semantic: {
+    readonly documentRevision: number;
+    readonly selection: SelectionContext;
+    readonly rankedConstraintCandidates: readonly {
+      readonly type: string;
+      readonly refs: readonly { readonly entityId: string; readonly anchor?: string }[];
+      readonly score: number;
+      readonly reason: string;
+      readonly predictedEffect: string;
+    }[];
+    readonly availableActions: readonly string[];
+    readonly solve: SketchDocument['lastSolve'] | null;
+  };
 }
 
 export type RepairId = 'move_slot_left_to_clearance' | 'narrow_slot_to_clearance';
+
+export interface HumanSemanticMutationResponse {
+  readonly mutation: {
+    readonly status: 'APPLIED';
+    readonly workspaceSequence: number;
+    readonly draftVersion: number;
+    readonly capabilityEpoch: number;
+    readonly authorityEpoch: number;
+    readonly specificationHash: string;
+    readonly changedEntities: readonly string[];
+  };
+  readonly workspace: AttuneWorkspace;
+}
 
 export interface ReceiptView {
   readonly receiptSeq: number;
@@ -191,6 +225,8 @@ export interface ReceiptView {
   readonly draftVersion: number;
   readonly capabilityEpoch: number;
   readonly createdAt: string;
+  readonly rebasedFromWorkspaceSeq: number | null;
+  readonly consequence: ForecastConsequence;
 }
 
 export interface CapabilityTransitionView {
@@ -271,6 +307,22 @@ export function isAttuneApiView(value: unknown): value is AttuneApiView {
   );
 }
 
+function isHumanSemanticMutationResponse(value: unknown): value is HumanSemanticMutationResponse {
+  if (typeof value !== 'object' || value === null) return false;
+  const mutation = Reflect.get(value, 'mutation');
+  const workspace = Reflect.get(value, 'workspace');
+  return (
+    typeof mutation === 'object' &&
+    mutation !== null &&
+    Reflect.get(mutation, 'status') === 'APPLIED' &&
+    Number.isInteger(Reflect.get(mutation, 'workspaceSequence')) &&
+    typeof Reflect.get(mutation, 'specificationHash') === 'string' &&
+    typeof workspace === 'object' &&
+    workspace !== null &&
+    Reflect.get(workspace, 'commitmentId') === 'AT-1042'
+  );
+}
+
 function jsonHeaders(initial?: HeadersInit): Headers {
   const headers = new Headers(initial);
   headers.set('Accept', 'application/json');
@@ -328,7 +380,39 @@ export function commandRequestBody(
     commandId: `${originPrefix}-${crypto.randomUUID()}`,
     expectedWorkspaceSeq: view.workspace.workspaceSeq,
     expectedCapabilityEpoch: view.workspace.capabilityEpoch,
+    expectedAuthorityEpoch: view.workspace.authorityEpoch,
     expectedSpecHash: view.specHash,
     observationCursor,
   });
+}
+
+export async function requestHumanSemanticMutation(
+  path: string,
+  view: AttuneApiView,
+  command: Readonly<Record<string, unknown>>,
+): Promise<HumanSemanticMutationResponse> {
+  const response = await fetch(path, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: jsonHeaders(),
+    body: commandRequestBody(view, command, 'human', view.workspace.workspaceSeq),
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    const error =
+      typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : undefined;
+    const message =
+      typeof error === 'object' && error !== null
+        ? Reflect.get(error, 'message')
+        : 'The semantic mutation failed.';
+    throw new AttuneHttpError(
+      response.status,
+      'SEMANTIC_MUTATION_FAILED',
+      typeof message === 'string' ? message : 'The semantic mutation failed.',
+    );
+  }
+  if (!isHumanSemanticMutationResponse(payload)) {
+    throw new TypeError('Attune returned an invalid semantic mutation result.');
+  }
+  return payload;
 }

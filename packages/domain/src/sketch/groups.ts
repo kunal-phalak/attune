@@ -1,0 +1,16 @@
+export interface SketchGroup {
+  readonly id: string;
+  readonly version: number;
+  readonly name: string;
+  readonly entityIds: readonly string[];
+  readonly childGroupIds?: readonly string[];
+}
+
+export type GroupInput = Omit<SketchGroup, 'version'>;
+
+export function validateGroupInput(group: GroupInput): void {
+  if (!group.id || !group.name.trim()) throw new TypeError('Groups require a stable ID and name.');
+  if (new Set(group.entityIds).size !== group.entityIds.length) {
+    throw new TypeError(`${group.id} contains duplicate entity references.`);
+  }
+}

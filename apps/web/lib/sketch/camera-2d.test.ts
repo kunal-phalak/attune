@@ -30,6 +30,12 @@ describe('Camera2D', () => {
     expect(camera.worldToScreen({ x: -100, y: 50 }).x).toBeGreaterThanOrEqual(100);
     expect(camera.worldToScreen({ x: 100, y: -50 }).x).toBeLessThanOrEqual(900);
   });
+
+  it('interpolates pan linearly and zoom logarithmically', () => {
+    const camera = new Camera2D({ x: 0, y: 0, zoom: 1 });
+    camera.interpolate({ x: 0, y: 0, zoom: 1 }, { x: 100, y: 50, zoom: 4 }, 0.5);
+    expect(camera.state()).toEqual({ x: 50, y: 25, zoom: 2 });
+  });
 });
 
 describe('adaptive sketch viewport helpers', () => {

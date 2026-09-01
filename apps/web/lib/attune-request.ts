@@ -4,17 +4,22 @@ import type {
   AttuneCommandType,
   AttuneRole,
   DeterministicRepair,
+  CommandFootprint,
+  SelectionContextRequest,
 } from '@attune/domain';
 
 import type { CommandExecutionInput } from './attune-runtime';
+import { isSketchCommandType, parseSketchCommand } from './sketch/sketch-command-parser';
 
 const ENVELOPE_KEYS = [
   'command',
   'commandId',
   'expectedWorkspaceSeq',
   'expectedCapabilityEpoch',
+  'expectedAuthorityEpoch',
   'expectedSpecHash',
   'observationCursor',
+  'footprint',
 ] as const;
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -33,14 +38,17 @@ function isRepairId(value: unknown): value is DeterministicRepair['id'] {
 }
 
 function isCommandType(value: string): value is AttuneCommandType {
-  return [
-    'apply_deterministic_repair',
-    'move_slot',
-    'request_quote',
-    'freeze_and_quote_revision',
-    'accept_revision',
-    'materialize_for_commerce',
-  ].includes(value);
+  return (
+    isSketchCommandType(value) ||
+    [
+      'apply_deterministic_repair',
+      'move_slot',
+      'request_quote',
+      'freeze_and_quote_revision',
+      'accept_revision',
+      'materialize_for_commerce',
+    ].includes(value)
+  );
 }
 
 function requiredInteger(value: unknown, name: string): number {
@@ -125,6 +133,7 @@ function parseCommand(value: unknown, allowedTypes: ReadonlySet<AttuneCommandTyp
   if (typeof type !== 'string' || !isCommandType(type) || !allowedTypes.has(type)) {
     throw new TypeError('command.type is not allowed on this trusted execution path.');
   }
+  if (isSketchCommandType(type)) return parseSketchCommand(value);
 
   switch (type) {
     case 'apply_deterministic_repair':
@@ -142,6 +151,50 @@ function parseCommand(value: unknown, allowedTypes: ReadonlySet<AttuneCommandTyp
   }
 }
 
+function parseFootprint(value: unknown): CommandFootprint | undefined {
+  if (value === undefined) return undefined;
+  if (!isObject(value)) throw new TypeError('footprint must be an object.');
+  assertExactKeys(
+    value,
+    [
+      'documentId',
+      'documentRevision',
+      'reads',
+      'writes',
+      'versions',
+      'entityIds',
+      'groupIds',
+      'constraintIds',
+      'dimensionIds',
+      'authorityDependencies',
+    ],
+    'footprint',
+  );
+  const parseIds = (candidate: unknown, name: string) => {
+    if (!Array.isArray(candidate)) throw new TypeError(`${name} must be an array.`);
+    return candidate.map((item) => requiredIdentifier(item, name));
+  };
+  if (!isObject(value.versions)) throw new TypeError('footprint.versions must be an object.');
+  const versions = Object.fromEntries(
+    Object.entries(value.versions).map(([reference, version]) => [
+      requiredIdentifier(reference, 'footprint reference'),
+      requiredInteger(version, `footprint.versions.${reference}`),
+    ]),
+  );
+  return {
+    documentId: requiredIdentifier(value.documentId, 'footprint.documentId'),
+    documentRevision: requiredInteger(value.documentRevision, 'footprint.documentRevision'),
+    reads: parseIds(value.reads, 'footprint.reads'),
+    writes: parseIds(value.writes, 'footprint.writes'),
+    versions,
+    entityIds: parseIds(value.entityIds ?? [], 'footprint.entityIds'),
+    groupIds: parseIds(value.groupIds ?? [], 'footprint.groupIds'),
+    constraintIds: parseIds(value.constraintIds ?? [], 'footprint.constraintIds'),
+    dimensionIds: parseIds(value.dimensionIds ?? [], 'footprint.dimensionIds'),
+    authorityDependencies: ['sketch:document', 'authority:workspace'],
+  };
+}
+
 function parseEnvelope(value: Record<string, unknown>): CommandEnvelope {
   return {
     commandId: requiredIdentifier(value.commandId, 'commandId'),
@@ -150,14 +203,60 @@ function parseEnvelope(value: Record<string, unknown>): CommandEnvelope {
       value.expectedCapabilityEpoch,
       'expectedCapabilityEpoch',
     ),
+    expectedAuthorityEpoch: requiredInteger(value.expectedAuthorityEpoch, 'expectedAuthorityEpoch'),
     expectedSpecHash: requiredSpecHash(value.expectedSpecHash),
     observationCursor: optionalInteger(value.observationCursor, 'observationCursor'),
+    footprint: parseFootprint(value.footprint),
   };
+}
+
+export function parseForecastCommandInput(
+  value: unknown,
+  allowedTypes: readonly AttuneCommandType[],
+): AttuneCommand {
+  if (!isObject(value)) throw new TypeError('The forecast body must be an object.');
+  assertExactKeys(value, ['command'], 'forecast body');
+  return parseCommand(value.command, new Set(allowedTypes));
 }
 
 export function parseObservationCursor(value: string | null): number | undefined {
   if (value === null) return undefined;
   return requiredInteger(Number(value), 'observation_cursor');
+}
+
+function commaSeparatedIds(value: string | null, name: string): readonly string[] | undefined {
+  if (value === null || value.length === 0) return undefined;
+  const values = value.split(',');
+  if (values.length > 100) throw new TypeError(`${name} contains too many references.`);
+  return values.map((candidate) => requiredIdentifier(candidate, name));
+}
+
+export function parseAgentContextFocus(parameters: URLSearchParams): SelectionContextRequest {
+  const entityIds = commaSeparatedIds(parameters.get('entity_ids'), 'entity_ids');
+  const groupIds = commaSeparatedIds(parameters.get('group_ids'), 'group_ids');
+  const regionValues = [
+    parameters.get('min_x'),
+    parameters.get('min_y'),
+    parameters.get('max_x'),
+    parameters.get('max_y'),
+  ];
+  const hasRegion = regionValues.some((value) => value !== null);
+  if (hasRegion && regionValues.some((value) => value === null)) {
+    throw new TypeError('A world region requires min_x, min_y, max_x, and max_y.');
+  }
+  const worldRegion = hasRegion
+    ? {
+        minX: requiredNumber(Number(regionValues[0]), 'min_x'),
+        minY: requiredNumber(Number(regionValues[1]), 'min_y'),
+        maxX: requiredNumber(Number(regionValues[2]), 'max_x'),
+        maxY: requiredNumber(Number(regionValues[3]), 'max_y'),
+      }
+    : undefined;
+  return {
+    ...(entityIds ? { entityIds } : {}),
+    ...(groupIds ? { groupIds } : {}),
+    ...(worldRegion ? { worldRegion } : {}),
+  };
 }
 
 export function parseWorkspaceId(value: string | null): string {

@@ -7,11 +7,13 @@ import type {
   AttuneCommand,
   AttuneRole,
   AttuneWorkspace,
+  CommandFootprint,
   CommandOrigin,
   ValidationResult,
 } from '@attune/domain';
 
 import type { AttuneCommandErrorCode } from './errors';
+import type { ForecastConsequence } from './forecast/consequence';
 
 export type TrustedExecutionPath =
   | 'human'
@@ -45,8 +47,10 @@ export interface CommandEnvelope {
   readonly commandId: string;
   readonly expectedWorkspaceSeq: number;
   readonly expectedCapabilityEpoch: number;
+  readonly expectedAuthorityEpoch: number;
   readonly expectedSpecHash: string;
   readonly observationCursor?: number;
+  readonly footprint?: CommandFootprint;
 }
 
 export interface CapabilityReference {
@@ -77,6 +81,8 @@ export interface ChangeReceipt {
   readonly specHashBefore: string;
   readonly specHashAfter: string;
   readonly affectedEntities: readonly string[];
+  readonly rebasedFromWorkspaceSeq: number | null;
+  readonly consequence: ForecastConsequence;
   readonly preservedLocks: readonly string[];
   readonly validationBefore: ValidationResult;
   readonly validationAfter: ValidationResult;
@@ -107,6 +113,7 @@ export interface CommandRejection {
   readonly workspaceSeq: number;
   readonly capabilityEpoch: number;
   readonly currentSpecHash: string;
+  readonly changedEntities: readonly string[];
   readonly createdAt: string;
 }
 
@@ -116,4 +123,5 @@ export interface CommandResult {
   readonly capabilities: readonly CompiledCapability[];
   readonly frontier: readonly CapabilityFrontierEntry[];
   readonly observation: InterventionSummary;
+  readonly forecast: ForecastConsequence;
 }

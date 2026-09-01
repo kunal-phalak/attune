@@ -1,6 +1,7 @@
 export { databaseConfigured, getDatabase } from './client';
 export {
   activeDelegationForWorkspace,
+  advanceDelegationObservation,
   canCreateProjectsForUser,
   createSketchProjectRecord,
   deleteSketchProjectRecord,

@@ -1,14 +1,18 @@
+import { isSketchCommand } from '@attune/domain';
+
 import {
+  parseAgentContextFocus,
   parseCommandExecutionInput,
   parseDelegatedRole,
   parseMaterializationExecutionInput,
-  parseObservationCursor,
   parseWorkspaceId,
 } from '../../../../lib/attune-request';
 import { attuneErrorResponse, noStoreJson } from '../../../../lib/attune-response';
 import {
   executeAgentCommand,
+  executeAgentSemanticCommand,
   executeCommerceMaterialization,
+  inspectAgentContext,
   inspectForDelegatedAgent,
 } from '../../../../lib/attune-runtime';
 
@@ -17,10 +21,14 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   try {
     const parameters = new URL(request.url).searchParams;
-    const cursor = parseObservationCursor(parameters.get('cursor'));
     const role = parseDelegatedRole(parameters.get('perspective'));
     const workspaceId = parseWorkspaceId(parameters.get('workspace_id'));
-    return noStoreJson(await inspectForDelegatedAgent(workspaceId, role, cursor));
+    if (parameters.get('format') === 'context') {
+      return noStoreJson(
+        await inspectAgentContext(workspaceId, role, parseAgentContextFocus(parameters)),
+      );
+    }
+    return noStoreJson(await inspectForDelegatedAgent(workspaceId, role));
   } catch (error) {
     return attuneErrorResponse(error);
   }
@@ -46,8 +54,23 @@ export async function POST(request: Request) {
         ),
       );
     }
-    const input = parseCommandExecutionInput(body, ['apply_deterministic_repair', 'move_slot']);
-    return noStoreJson(await executeAgentCommand(workspaceId, role, input));
+    const input = parseCommandExecutionInput(body, [
+      'apply_deterministic_repair',
+      'move_slot',
+      'create_geometry',
+      'edit_geometry',
+      'delete_geometry',
+      'create_group',
+      'move_to_group',
+      'apply_constraint',
+      'remove_constraint',
+      'set_dimension',
+    ]);
+    return noStoreJson(
+      isSketchCommand(input.command)
+        ? await executeAgentSemanticCommand(workspaceId, role, input)
+        : await executeAgentCommand(workspaceId, role, input),
+    );
   } catch (error) {
     return attuneErrorResponse(error);
   }

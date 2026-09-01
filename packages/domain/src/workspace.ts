@@ -1,4 +1,5 @@
 import { applyRepairToGeometry, hashSpecification, validateGeometry } from './geometry';
+import { createSpokeSeedDocument } from './maker/makerjs-adapter';
 import type {
   AttuneCommand,
   AttuneWorkspace,
@@ -6,6 +7,8 @@ import type {
   ProviderBinding,
   ProviderCapabilityProfile,
 } from './model';
+import { applySketchCommand, isSketchCommand } from './sketch/commands';
+import { emptySketchDocument, type SketchDocument } from './sketch/document';
 
 export interface TransitionMetadata {
   readonly commandId: string;
@@ -15,6 +18,8 @@ export interface TransitionMetadata {
 export interface DomainTransition {
   readonly workspace: AttuneWorkspace;
   readonly affectedEntities: readonly string[];
+  readonly addedConstraints?: readonly string[];
+  readonly removedConstraints?: readonly string[];
 }
 
 function assertNever(command: never): never {
@@ -128,17 +133,22 @@ export function providerBinding(workspace: AttuneWorkspace): ProviderBinding {
   };
 }
 
-export function createAt1042Workspace(): AttuneWorkspace {
+export function createAt1042Workspace(
+  options: { readonly sketchTemplate?: 'blank' | 'spoke' } = {},
+): AttuneWorkspace {
   return {
-    scenarioVersion: 2,
+    scenarioVersion: 3,
     projectId: 'project:attune',
     commitmentId: 'AT-1042',
     workspaceSeq: 0,
     draftVersion: 6,
     capabilityEpoch: 1,
+    authorityEpoch: 0,
     fabricationQuantity: 4,
     providerCapabilityProfile: createJudgeProviderCapabilityProfile(),
     geometry: seedGeometry(),
+    sketchDocument:
+      options.sketchTemplate === 'blank' ? emptySketchDocument() : createSpokeSeedDocument(),
     quoteRequests: [],
     frozenRevisions: [],
     quotes: [],
@@ -149,20 +159,56 @@ export function createAt1042Workspace(): AttuneWorkspace {
   };
 }
 
-function advance(workspace: AttuneWorkspace, changes: Partial<AttuneWorkspace>): AttuneWorkspace {
+function advance(
+  workspace: AttuneWorkspace,
+  changes: Partial<AttuneWorkspace>,
+  authorityChanged = true,
+): AttuneWorkspace {
   return {
     ...workspace,
     ...changes,
     workspaceSeq: workspace.workspaceSeq + 1,
     capabilityEpoch: workspace.capabilityEpoch + 1,
+    authorityEpoch: workspace.authorityEpoch + (authorityChanged ? 1 : 0),
   };
 }
 
+function hasCurrentConsequentialAuthority(workspace: AttuneWorkspace): boolean {
+  const specHash = hashSpecification(workspace);
+  const revisionId = `r${workspace.draftVersion}`;
+  return [
+    ...workspace.quoteRequests,
+    ...workspace.frozenRevisions,
+    ...workspace.quotes,
+    ...workspace.acceptances,
+    ...workspace.commerceLinks,
+  ].some(
+    (record) =>
+      record.specHash === specHash &&
+      (!('revisionId' in record) || record.revisionId === revisionId),
+  );
+}
+
 function mutateDraft(workspace: AttuneWorkspace, geometry: PanelGeometry): AttuneWorkspace {
-  return advance(workspace, {
-    draftVersion: workspace.draftVersion + 1,
-    geometry,
-  });
+  return advance(
+    workspace,
+    {
+      draftVersion: workspace.draftVersion + 1,
+      geometry,
+    },
+    hasCurrentConsequentialAuthority(workspace),
+  );
+}
+
+function mutateSketchDraft(
+  workspace: AttuneWorkspace,
+  sketchDocument: SketchDocument,
+): AttuneWorkspace {
+  return advance(
+    workspace,
+    { draftVersion: workspace.draftVersion + 1, sketchDocument },
+    hasCurrentConsequentialAuthority(workspace),
+  );
 }
 
 function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata): AttuneWorkspace {
@@ -193,6 +239,7 @@ function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata
         specHash,
         provider: providerBinding(workspace),
         geometry: structuredClone(workspace.geometry),
+        sketchDocument: structuredClone(workspace.sketchDocument),
         frozenAt: metadata.now,
       },
     ],
@@ -326,7 +373,18 @@ export function transitionWorkspace(
   workspace: AttuneWorkspace,
   command: AttuneCommand,
   metadata: TransitionMetadata,
+  options: { readonly solvedSketchDocument?: SketchDocument } = {},
 ): DomainTransition {
+  if (isSketchCommand(command)) {
+    const application = applySketchCommand(workspace.sketchDocument, command);
+    return {
+      workspace: mutateSketchDraft(workspace, options.solvedSketchDocument ?? application.document),
+      affectedEntities: application.affectedEntities,
+      addedConstraints: application.addedConstraints,
+      removedConstraints: application.removedConstraints,
+    };
+  }
+
   switch (command.type) {
     case 'apply_deterministic_repair':
       return {

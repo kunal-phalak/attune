@@ -6,6 +6,7 @@ import {
   databaseConfigured,
   ensureJudgeWorkspace,
 } from '@attune/database';
+import { createSpokeSeedDocument, emptySketchDocument } from '@attune/domain';
 import * as Y from 'yjs';
 
 import { currentAttuneUser } from '../../../lib/auth/session';
@@ -15,7 +16,6 @@ import {
   provisionSketchProject,
 } from '../../../lib/projects/create-project';
 import type { SketchTemplate } from '../../../lib/projects/library';
-import { SPOKE_SKETCH } from '../../../lib/sketch/spoke-sketch';
 
 function noStoreJson(body: unknown, status: number): Response {
   return Response.json(body, {
@@ -33,11 +33,13 @@ function requestedTemplate(value: unknown): SketchTemplate | null {
 function sketchDocumentUpdate(template: SketchTemplate, name: string): Uint8Array {
   const document = new Y.Doc();
   try {
+    const sketch =
+      template === 'spoke' ? createSpokeSeedDocument() : emptySketchDocument('sketch:blank');
     document.getMap('attune').set('sketch', {
-      version: 1,
+      version: sketch.schemaVersion,
       name,
       template,
-      entities: template === 'spoke' ? structuredClone(SPOKE_SKETCH.entities) : [],
+      document: sketch,
     });
     return Y.encodeStateAsUpdate(document);
   } finally {

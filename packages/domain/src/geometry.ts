@@ -8,6 +8,7 @@ import type {
   UniversalValidationIssue,
   ValidationResult,
 } from './model';
+import { sketchSpecification } from './sketch/document';
 
 const LOCKED_MOUNT_IDS = [
   'mount:top-left',
@@ -227,12 +228,16 @@ export function validateGeometry(
 }
 
 export function hashSpecification(
-  workspace: Pick<AttuneWorkspace, 'commitmentId' | 'fabricationQuantity' | 'geometry'>,
+  workspace: Pick<
+    AttuneWorkspace,
+    'commitmentId' | 'fabricationQuantity' | 'geometry' | 'sketchDocument'
+  >,
 ): string {
   return hashCanonical({
     commitmentId: workspace.commitmentId,
     fabricationQuantity: workspace.fabricationQuantity,
     geometry: workspace.geometry,
+    sketchDocument: sketchSpecification(workspace.sketchDocument),
   });
 }
 

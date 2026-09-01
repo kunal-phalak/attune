@@ -1,10 +1,11 @@
-import type { AttuneRole, PanelGeometry } from '@attune/domain';
+import type { AttuneRole, PanelGeometry, SketchDocument } from '@attune/domain';
 
 export interface AttuneCollaborativeDraft {
   readonly intent: string;
   readonly commitmentId: 'AT-1042';
   readonly fabricationQuantity: 4;
   readonly geometry: PanelGeometry;
+  readonly sketchDocument: SketchDocument;
   readonly draftVersion: number;
   readonly metadata: {
     readonly material: PanelGeometry['material'];

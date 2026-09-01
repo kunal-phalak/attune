@@ -4,7 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./sketch": "./src/sketch/index.ts",
+    "./planegcs": "./src/solver/planegcs-adapter.ts"
+  },
+  "dependencies": {
+    "@salusoft89/planegcs": "1.2.0",
+    "makerjs": "0.19.2"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

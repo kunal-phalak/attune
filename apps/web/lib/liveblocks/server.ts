@@ -25,7 +25,9 @@ function isCollaborativeDraft(value: unknown): value is AttuneCollaborativeDraft
     Reflect.get(value, 'fabricationQuantity') === 4 &&
     Number.isInteger(Reflect.get(value, 'draftVersion')) &&
     typeof geometry === 'object' &&
-    geometry !== null
+    geometry !== null &&
+    typeof Reflect.get(value, 'sketchDocument') === 'object' &&
+    Reflect.get(value, 'sketchDocument') !== null
   );
 }
 
@@ -35,6 +37,7 @@ export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborat
     commitmentId: workspace.commitmentId,
     fabricationQuantity: workspace.fabricationQuantity,
     geometry: structuredClone(workspace.geometry),
+    sketchDocument: structuredClone(workspace.sketchDocument),
     draftVersion: workspace.draftVersion,
     metadata: {
       material: workspace.geometry.material,

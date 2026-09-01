@@ -6,6 +6,7 @@ export const EDITOR_CHROME = {
   icon: 20,
   islandPadding: 5,
   islandGap: 2,
+  labeledIslandWidth: 126,
   panelWidth: 288,
   viewportGap: 12,
   panelIslandGap: 8,
@@ -22,12 +23,16 @@ export const EDITOR_CHROME = {
 export const EDITOR_ISLAND_WIDTH =
   EDITOR_CHROME.normalIconButton + EDITOR_CHROME.islandPadding * 2 + 2;
 
+export const EDITOR_LABELED_ISLAND_WIDTH = EDITOR_CHROME.labeledIslandWidth;
+
 export const editorChromeCssVariables: CSSProperties & Record<`--editor-${string}`, string> = {
   '--editor-compact-control-size': `${EDITOR_CHROME.compactIconButton}px`,
   '--editor-control-size': `${EDITOR_CHROME.normalIconButton}px`,
   '--editor-icon-size': `${EDITOR_CHROME.icon}px`,
   '--editor-island-padding': `${EDITOR_CHROME.islandPadding}px`,
   '--editor-island-gap': `${EDITOR_CHROME.islandGap}px`,
+  '--editor-island-width': `${EDITOR_LABELED_ISLAND_WIDTH}px`,
+  '--editor-icon-island-width': `${EDITOR_ISLAND_WIDTH}px`,
   '--editor-panel-width': `${EDITOR_CHROME.panelWidth}px`,
   '--editor-viewport-gap': `${EDITOR_CHROME.viewportGap}px`,
   '--editor-panel-gap': `${EDITOR_CHROME.panelIslandGap}px`,

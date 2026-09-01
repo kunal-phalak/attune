@@ -1,18 +1,19 @@
 'use client';
 
-import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
 import { Input } from '@cloudflare/kumo/components/input';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
+import { Sidebar, useSidebar } from '@cloudflare/kumo/components/sidebar';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import { LiveblocksProvider, RoomProvider } from '@liveblocks/react';
 import { AvatarStack } from '@liveblocks/react-ui';
-import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
+import { DASHBOARD_CHROME, dashboardChromeCssVariables } from '../lib/dashboard/dashboard-chrome';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
 import {
   filterLibraryProjects,
@@ -22,6 +23,8 @@ import {
 } from '../lib/projects/library';
 import { attuneToastManager } from './attune-ui-provider';
 import { AppIcons } from './ui/app-icons';
+import { AttuneBrandmark } from './ui/attune-brandmark';
+import { AttuneEmptyState } from './ui/attune-empty-state';
 
 export type AttuneLibraryFile = LibraryProject;
 
@@ -426,29 +429,41 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
       />
       <Dialog size="base" className="dashboard-new-project-dialog">
         <Dialog.Title>New project</Dialog.Title>
-        <Dialog.Description>
-          Start with an empty XY sketch or a simple radial example.
-        </Dialog.Description>
+        <Dialog.Description>Choose a starting point.</Dialog.Description>
         <div className="dashboard-template-actions">
           <Button
             type="button"
             variant="secondary"
-            icon={<AppIcons.File size={19} />}
+            className="dashboard-template-option"
             disabled={creating !== null}
             loading={creating === 'blank'}
+            aria-pressed={creating === 'blank'}
             onClick={() => void createProject('blank')}
           >
-            Blank sketch
+            <span className="dashboard-template-preview" aria-hidden>
+              <ProjectThumbnail template="blank" />
+            </span>
+            <span>
+              <strong>Blank sketch</strong>
+              <small>Empty XY canvas</small>
+            </span>
           </Button>
           <Button
             type="button"
             variant="secondary"
-            icon={<AppIcons.Brand size={19} />}
+            className="dashboard-template-option"
             disabled={creating !== null}
             loading={creating === 'spoke'}
+            aria-pressed={creating === 'spoke'}
             onClick={() => void createProject('spoke')}
           >
-            Spoke example
+            <span className="dashboard-template-preview" aria-hidden>
+              <ProjectThumbnail template="spoke" />
+            </span>
+            <span>
+              <strong>Spoke example</strong>
+              <small>Parametric sketch example</small>
+            </span>
           </Button>
         </div>
         <Dialog.Close
@@ -476,31 +491,165 @@ function EmptyLibrary({
   readonly canCreate: boolean;
   readonly onCreate: (template: SketchTemplate) => void;
 }) {
-  if (query.trim()) return <p className="dashboard-empty">No projects match “{query.trim()}”.</p>;
-  if (filter === 'shared') {
-    return <p className="dashboard-empty">No projects have been shared with you.</p>;
-  }
-  if (filter === 'drafts' || hasProjects) {
+  if (query.trim()) {
     return (
-      <p className="dashboard-empty">No {filter === 'drafts' ? 'drafts' : 'recent projects'}.</p>
+      <AttuneEmptyState
+        media={<AppIcons.Search size={22} />}
+        title={`No projects match “${query.trim()}”`}
+        description="Try another project name."
+      />
+    );
+  }
+  if (filter === 'shared') {
+    return (
+      <AttuneEmptyState
+        media={<AppIcons.Collaborators size={22} />}
+        title="Nothing shared with you"
+        description="Projects shared by collaborators will appear here."
+      />
+    );
+  }
+  if (filter === 'drafts') {
+    return (
+      <AttuneEmptyState
+        media={<AppIcons.File size={22} />}
+        title="No drafts yet"
+        description="Projects you’re still editing will appear here."
+        actions={
+          canCreate ? (
+            <Button type="button" variant="primary" size="sm" onClick={() => onCreate('blank')}>
+              New project
+            </Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+  if (hasProjects) {
+    return (
+      <AttuneEmptyState
+        media={<AppIcons.History size={22} />}
+        title="No recent projects"
+        description="Projects you open will appear here."
+      />
     );
   }
   return (
-    <Surface render={<section />} className="dashboard-first-project">
-      <AppIcons.Sketch size={24} weight="regular" />
-      <h2>Start your first sketch</h2>
-      <p>Create an empty XY sketch or open the radial spoke example.</p>
-      {canCreate ? (
-        <div>
-          <Button type="button" variant="primary" onClick={() => onCreate('blank')}>
-            Create blank project
-          </Button>
-          <Button type="button" variant="secondary" onClick={() => onCreate('spoke')}>
-            Open Spoke example
-          </Button>
+    <AttuneEmptyState
+      media={<AppIcons.Sketch size={24} />}
+      title="Start your first sketch"
+      description="Create a blank project or open the Spoke example."
+      actions={
+        canCreate ? (
+          <>
+            <Button type="button" variant="primary" onClick={() => onCreate('blank')}>
+              Create blank project
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => onCreate('spoke')}>
+              Open Spoke example
+            </Button>
+          </>
+        ) : undefined
+      }
+    />
+  );
+}
+
+function DashboardSidebar({
+  filter,
+  query,
+  onQueryChange,
+  searchRef,
+}: {
+  readonly filter: LibraryFilter;
+  readonly query: string;
+  readonly onQueryChange: (query: string) => void;
+  readonly searchRef: React.RefObject<HTMLInputElement | null>;
+}) {
+  const { isMobile, setOpen, setOpenMobile } = useSidebar();
+  const focusSearch = useCallback(() => {
+    if (isMobile) setOpenMobile(true);
+    else setOpen(true);
+    window.requestAnimationFrame(() => searchRef.current?.focus());
+  }, [isMobile, searchRef, setOpen, setOpenMobile]);
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        focusSearch();
+      }
+    };
+    window.addEventListener('keydown', onShortcut);
+    return () => window.removeEventListener('keydown', onShortcut);
+  }, [focusSearch]);
+
+  return (
+    <Sidebar className="dashboard-sidebar">
+      <Sidebar.Header className="dashboard-sidebar-header">
+        <Link className="dashboard-brandmark" href="/" aria-label="Attune home">
+          <AttuneBrandmark size={24} />
+        </Link>
+      </Sidebar.Header>
+      <Sidebar.Content>
+        <div className="dashboard-search-wrap">
+          <InputGroup size="sm" className="dashboard-search">
+            <InputGroup.Addon>
+              <AppIcons.Search size={16} weight="regular" aria-hidden />
+            </InputGroup.Addon>
+            <InputGroup.Input
+              ref={searchRef}
+              id="dashboard-project-search"
+              type="search"
+              value={query}
+              placeholder="Search projects"
+              onChange={(event) => onQueryChange(event.target.value)}
+              aria-label="Search projects"
+            />
+            <InputGroup.Addon align="end">
+              <InputGroup.Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                tooltip="Focus project search"
+                onClick={focusSearch}
+                aria-label="Focus project search"
+              >
+                <kbd>⌘K</kbd>
+              </InputGroup.Button>
+            </InputGroup.Addon>
+          </InputGroup>
         </div>
-      ) : null}
-    </Surface>
+        <Sidebar.Group>
+          <Sidebar.Menu>
+            {navigation.map((item) => (
+              <Sidebar.MenuButton
+                key={item.id}
+                itemId={`dashboard-${item.id}`}
+                href={`/dashboard?view=${item.id}`}
+                active={filter === item.id}
+                tooltip={item.label}
+                size="base"
+                icon={
+                  item.id === 'recents' ? (
+                    <AppIcons.History size={18} />
+                  ) : item.id === 'drafts' ? (
+                    <AppIcons.File size={18} />
+                  ) : (
+                    <AppIcons.Collaborators size={18} />
+                  )
+                }
+              >
+                {item.label}
+              </Sidebar.MenuButton>
+            ))}
+          </Sidebar.Menu>
+        </Sidebar.Group>
+      </Sidebar.Content>
+      <Sidebar.Footer className="dashboard-sidebar-footer">
+        <Sidebar.Trigger aria-label="Collapse project navigation" />
+      </Sidebar.Footer>
+    </Sidebar>
   );
 }
 
@@ -523,16 +672,6 @@ export function DashboardLibrary({
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setProjects(files), [files]);
-  useEffect(() => {
-    const focusSearch = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', focusSearch);
-    return () => window.removeEventListener('keydown', focusSearch);
-  }, []);
 
   const visibleFiles = useMemo(
     () => filterLibraryProjects(projects, filter, query),
@@ -555,71 +694,28 @@ export function DashboardLibrary({
   };
 
   return (
-    <main className="dashboard-shell">
-      <aside className="dashboard-sidebar">
-        <Link className="dashboard-wordmark" href="/">
-          <Image
-            src="/attune-lockup-blue-mark-white-wordmark-492x96.png"
-            width={123}
-            height={24}
-            alt="Attune"
-            priority
-          />
-        </Link>
-        <InputGroup size="sm" className="dashboard-search">
-          <InputGroup.Addon>
-            <AppIcons.Search size={16} weight="regular" aria-hidden />
-          </InputGroup.Addon>
-          <InputGroup.Input
-            ref={searchRef}
-            id="dashboard-project-search"
-            type="search"
-            value={query}
-            placeholder="Search projects"
-            onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search projects"
-          />
-          <InputGroup.Addon align="end">
-            <InputGroup.Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              tooltip="Focus project search"
-              onClick={() => searchRef.current?.focus()}
-              aria-label="Focus project search"
-            >
-              <kbd>⌘K</kbd>
-            </InputGroup.Button>
-          </InputGroup.Addon>
-        </InputGroup>
-        <nav aria-label="Project library">
-          {navigation.map((item) => (
-            <LinkButton
-              key={item.id}
-              href={`/dashboard?view=${item.id}`}
-              variant={filter === item.id ? 'secondary' : 'ghost'}
-              size="sm"
-              className="w-full justify-start"
-              aria-current={filter === item.id ? 'page' : undefined}
-              icon={
-                item.id === 'recents' ? (
-                  <AppIcons.History size={18} />
-                ) : item.id === 'drafts' ? (
-                  <AppIcons.File size={18} />
-                ) : (
-                  <AppIcons.Collaborators size={18} />
-                )
-              }
-            >
-              {item.label}
-            </LinkButton>
-          ))}
-        </nav>
-        <div className="dashboard-sidebar-future-space" aria-hidden />
-      </aside>
+    <Sidebar.Provider
+      contained
+      defaultOpen
+      collapsible="icon"
+      defaultWidth={DASHBOARD_CHROME.sidebarWidth}
+      animationDuration={DASHBOARD_CHROME.motionDuration}
+      mobileBreakpoint={720}
+      className="dashboard-shell"
+      style={dashboardChromeCssVariables}
+    >
+      <DashboardSidebar
+        filter={filter}
+        query={query}
+        onQueryChange={setQuery}
+        searchRef={searchRef}
+      />
       <section className="dashboard-library" aria-label="Projects">
         <header>
-          <h1>{activeLabel}</h1>
+          <div className="dashboard-page-heading">
+            <Sidebar.Trigger className="dashboard-mobile-sidebar-trigger" />
+            <h1>{activeLabel}</h1>
+          </div>
           <NewProjectDialog canCreate={canCreate} />
         </header>
         {visibleFiles.length > 0 ? (
@@ -655,6 +751,6 @@ export function DashboardLibrary({
           />
         )}
       </section>
-    </main>
+    </Sidebar.Provider>
   );
 }

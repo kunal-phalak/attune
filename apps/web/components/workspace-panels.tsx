@@ -16,6 +16,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { SketchTemplate } from '../lib/projects/library';
 import { AppIcons } from './ui/app-icons';
 import { AppScrollArea } from './ui/app-scroll-area';
+import { AttuneBrandmark } from './ui/attune-brandmark';
 import type { CameraViewState } from './workspace-canvas';
 
 function PanelShell({
@@ -88,7 +89,7 @@ export function ItemsPanel({
   return (
     <PanelShell side="left" title="Items" open={open} onClose={onClose}>
       <div className="sketch-tree-heading">
-        <AppIcons.Brand size={17} weight="bold" />
+        <AttuneBrandmark size={17} />
         <span>
           <strong>{projectName}</strong>
           <small>{items.length === 0 ? 'Empty sketch' : '10 sketch entities'}</small>

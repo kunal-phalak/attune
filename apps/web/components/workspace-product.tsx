@@ -2,8 +2,10 @@
 
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
-import { LiveblocksProvider, RoomProvider, useRoom } from '@liveblocks/react';
+import { Popover } from '@cloudflare/kumo/components/popover';
+import { Switch } from '@cloudflare/kumo/components/switch';
+import { LiveblocksProvider, RoomProvider, useRoom, useUpdateMyPresence } from '@liveblocks/react';
+import { Cursors } from '@liveblocks/react-ui';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
@@ -16,6 +18,7 @@ import {
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
 import type { SketchTemplate } from '../lib/projects/library';
 import { editorChromeCssVariables } from '../lib/sketch/editor-chrome';
+import type { EditorCursorMode } from '../lib/sketch/editor-cursors';
 import {
   CLOSED_EDITOR_PANELS,
   toggleEditorPanel,
@@ -26,6 +29,7 @@ import {
 import { viewportInsetsFor } from '../lib/sketch/viewport-insets';
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
 import { AppIcons } from './ui/app-icons';
+import { AttuneBrandmark } from './ui/attune-brandmark';
 import { WorkspaceCanvas } from './workspace-canvas';
 import {
   DraftControl,
@@ -80,6 +84,12 @@ function YjsDraftBridge({
   return null;
 }
 
+function LiveToolPresence({ tool }: { readonly tool: EditorCursorMode }) {
+  const updateMyPresence = useUpdateMyPresence();
+  useEffect(() => updateMyPresence({ currentTool: tool }), [tool, updateMyPresence]);
+  return null;
+}
+
 function WorkspaceHeader({
   collaboration,
   projectName,
@@ -99,7 +109,7 @@ function WorkspaceHeader({
           aria-label="Back to dashboard"
         />
         <span className="workspace-project-icon" aria-hidden>
-          <AppIcons.Brand size={18} weight="bold" />
+          <AttuneBrandmark size={18} />
         </span>
         <strong>{projectName}</strong>
       </div>
@@ -132,34 +142,36 @@ function WorkspaceHeader({
 
 function ToolButton({
   label,
+  keybind,
+  showLabel,
   active,
   disabled,
   icon,
   onClick,
 }: {
   readonly label: string;
+  readonly keybind?: string;
+  readonly showLabel: boolean;
   readonly active: boolean;
   readonly disabled?: boolean;
   readonly icon: ReactNode;
   readonly onClick: () => void;
 }) {
   return (
-    <Tooltip
-      content={label}
-      render={
-        <Button
-          type="button"
-          variant={active ? 'secondary' : 'ghost'}
-          size="sm"
-          shape="square"
-          icon={icon}
-          aria-label={label}
-          aria-pressed={active}
-          disabled={disabled}
-          onClick={onClick}
-        />
-      }
-    />
+    <Button
+      type="button"
+      variant={active ? 'secondary' : 'ghost'}
+      size="sm"
+      className="workspace-tool-button"
+      icon={icon}
+      aria-label={label}
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {showLabel ? <span className="workspace-tool-label">{label}</span> : null}
+      {showLabel && keybind ? <kbd>{keybind}</kbd> : null}
+    </Button>
   );
 }
 
@@ -167,12 +179,14 @@ function WorkspaceTools({
   canvasTool,
   panels,
   collaboration,
+  showLabels,
   onCanvasTool,
   onPanel,
 }: {
   readonly canvasTool: CanvasTool;
   readonly panels: EditorPanelState;
   readonly collaboration: boolean;
+  readonly showLabels: boolean;
   readonly onCanvasTool: (tool: CanvasTool) => void;
   readonly onPanel: (panel: EditorPanel) => void;
 }) {
@@ -181,18 +195,22 @@ function WorkspaceTools({
       <nav className="workspace-tool-island is-left" aria-label="Sketch tools">
         <ToolButton
           label="Select"
-          active={canvasTool === 'select'}
+          keybind="/"
+          showLabel={showLabels}
+          active={panels.leftPanel !== 'comments' && canvasTool === 'select'}
           icon={<AppIcons.Select size={20} weight="regular" />}
           onClick={() => onCanvasTool('select')}
         />
         <ToolButton
-          label="Sketch tools"
-          active={canvasTool === 'sketch'}
+          label="Sketch"
+          showLabel={showLabels}
+          active={panels.leftPanel !== 'comments' && canvasTool === 'sketch'}
           icon={<AppIcons.Sketch size={20} weight="regular" />}
           onClick={() => onCanvasTool('sketch')}
         />
         <ToolButton
           label="Comments"
+          showLabel={showLabels}
           active={panels.leftPanel === 'comments'}
           disabled={!collaboration}
           icon={<AppIcons.Comments size={20} weight="regular" />}
@@ -200,6 +218,7 @@ function WorkspaceTools({
         />
         <ToolButton
           label="Items"
+          showLabel={showLabels}
           active={panels.leftPanel === 'items'}
           icon={<AppIcons.Items size={20} weight="regular" />}
           onClick={() => onPanel('items')}
@@ -207,19 +226,63 @@ function WorkspaceTools({
       </nav>
       <nav className="workspace-tool-island is-right" aria-label="Context tools">
         <ToolButton
-          label="Sketch Constraints"
+          label="Constraints"
+          showLabel={showLabels}
           active={panels.rightPanel === 'constraints'}
           icon={<AppIcons.SketchConstraints size={20} weight="regular" />}
           onClick={() => onPanel('constraints')}
         />
         <ToolButton
           label="History"
+          showLabel={showLabels}
           active={panels.rightPanel === 'history'}
           icon={<AppIcons.History size={20} weight="regular" />}
           onClick={() => onPanel('history')}
         />
       </nav>
     </>
+  );
+}
+
+function WorkspaceSettings({
+  showLabels,
+  onShowLabelsChange,
+}: {
+  readonly showLabels: boolean;
+  readonly onShowLabelsChange: (show: boolean) => void;
+}) {
+  return (
+    <Popover>
+      <Popover.Trigger
+        render={
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            shape="square"
+            className="workspace-settings-button"
+            icon={<AppIcons.Settings size={19} />}
+            aria-label="Editor settings"
+          />
+        }
+      />
+      <Popover.Content
+        side="right"
+        align="end"
+        sideOffset={8}
+        positionMethod="fixed"
+        className="workspace-settings-popover"
+      >
+        <Popover.Title>Editor display</Popover.Title>
+        <Switch
+          size="sm"
+          variant="neutral"
+          label="Show tool labels"
+          checked={showLabels}
+          onCheckedChange={onShowLabelsChange}
+        />
+      </Popover.Content>
+    </Popover>
   );
 }
 
@@ -239,6 +302,7 @@ function WorkspaceShell({
   const [view, setView] = useState<AttuneApiView | null>(null);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
   const [panels, setPanels] = useState<EditorPanelState>(CLOSED_EDITOR_PANELS);
+  const [showToolLabels, setShowToolLabels] = useState(true);
 
   const refresh = useCallback(async () => {
     const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
@@ -253,46 +317,73 @@ function WorkspaceShell({
     void refresh();
   }, [refresh]);
 
-  const insets = viewportInsetsFor(panels);
+  const insets = viewportInsetsFor(panels, showToolLabels);
   const closeLeftPanel = () => setPanels((current) => ({ ...current, leftPanel: null }));
   const closeRightPanel = () => setPanels((current) => ({ ...current, rightPanel: null }));
   const setPanel = (panel: EditorPanel) =>
     setPanels((current) => toggleEditorPanel(current, panel));
+  const setActiveCanvasTool = (tool: CanvasTool) => {
+    setCanvasTool(tool);
+    setPanels((current) =>
+      current.leftPanel === 'comments' ? { ...current, leftPanel: null } : current,
+    );
+  };
   const draftVersion = view?.workspace.draftVersion ?? 1;
   const specHash = view?.specHash ?? `draft:${workspaceId}`;
+  const cursorMode: EditorCursorMode =
+    panels.leftPanel === 'comments'
+      ? 'comment'
+      : canvasTool === 'sketch'
+        ? 'draw'
+        : panels.rightPanel === 'constraints'
+          ? 'constraint'
+          : 'select';
+
+  const canvas = (
+    <WorkspaceCanvas
+      insets={insets}
+      projectName={projectName}
+      template={template}
+      cursorMode={cursorMode}
+      renderComments={
+        collaboration && panels.leftPanel === 'comments'
+          ? (camera) => (
+              <LiveCommentPins
+                workspaceId={workspaceId}
+                camera={camera}
+                draftVersion={draftVersion}
+                specHash={specHash}
+              />
+            )
+          : undefined
+      }
+    />
+  );
 
   return (
     <main
       className="workspace-shell"
       data-left-panel-open={panels.leftPanel !== null}
       data-right-panel-open={panels.rightPanel !== null}
+      data-tool-labels={showToolLabels}
       style={editorChromeCssVariables}
     >
-      <WorkspaceCanvas
-        insets={insets}
-        projectName={projectName}
-        template={template}
-        renderComments={
-          collaboration && panels.leftPanel === 'comments'
-            ? (camera) => (
-                <LiveCommentPins
-                  workspaceId={workspaceId}
-                  camera={camera}
-                  draftVersion={draftVersion}
-                  specHash={specHash}
-                />
-              )
-            : undefined
-        }
-      />
+      {collaboration ? (
+        <Cursors className="workspace-live-cursors attune-liveblocks-bridge">{canvas}</Cursors>
+      ) : (
+        canvas
+      )}
+      {collaboration ? <LiveToolPresence tool={cursorMode} /> : null}
       <WorkspaceHeader collaboration={collaboration} projectName={projectName} />
       <WorkspaceTools
         canvasTool={canvasTool}
         panels={panels}
         collaboration={collaboration}
-        onCanvasTool={setCanvasTool}
+        showLabels={showToolLabels}
+        onCanvasTool={setActiveCanvasTool}
         onPanel={setPanel}
       />
+      <WorkspaceSettings showLabels={showToolLabels} onShowLabelsChange={setShowToolLabels} />
       <ItemsPanel
         open={panels.leftPanel === 'items'}
         projectName={projectName}

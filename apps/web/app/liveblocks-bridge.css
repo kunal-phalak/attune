@@ -65,9 +65,23 @@
 
   #attune-overlay-root .lb-floating-thread {
     z-index: var(--attune-layer-liveblocks);
+    width: min(320px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
   }
 
-  #attune-overlay-root :where(.lb-dropdown, .lb-tooltip, .lb-composer-suggestions) {
+  #attune-overlay-root .lb-floating-composer {
+    width: min(350px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+  }
+
+  #attune-overlay-root
+    :where(
+      .lb-dropdown,
+      .lb-tooltip,
+      .lb-composer-suggestions,
+      .lb-emoji-picker,
+      .lb-reaction-picker
+    ) {
     z-index: var(--attune-layer-popups);
   }
 

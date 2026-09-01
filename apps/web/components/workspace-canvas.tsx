@@ -1,8 +1,5 @@
 'use client';
 
-import { Button } from '@cloudflare/kumo/components/button';
-import { Popover } from '@cloudflare/kumo/components/popover';
-import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import type { Canvas as SkCanvas, CanvasKit, Paint, Surface } from 'canvaskit-wasm';
 import {
   forwardRef,
@@ -16,10 +13,11 @@ import {
 
 import type { SketchTemplate } from '../lib/projects/library';
 import { Camera2D, type FitPadding, type ViewportSize } from '../lib/sketch/camera-2d';
+import { editorCursorFor, type EditorCursorMode } from '../lib/sketch/editor-cursors';
 import { adaptiveGridStep } from '../lib/sketch/grid';
 import { SPOKE_SKETCH } from '../lib/sketch/spoke-sketch';
 import type { ViewportInsets } from '../lib/sketch/viewport-insets';
-import { AppIcons } from './ui/app-icons';
+import { WorkspaceOrientationHud } from './workspace-orientation-hud';
 
 declare global {
   interface Window {
@@ -219,8 +217,12 @@ export const WorkspaceCanvas = forwardRef<
     readonly renderComments?: (view: CameraViewState) => ReactNode;
     readonly projectName: string;
     readonly template: SketchTemplate;
+    readonly cursorMode: EditorCursorMode;
   }
->(function WorkspaceCanvas({ insets, renderComments, projectName, template }, forwardedRef) {
+>(function WorkspaceCanvas(
+  { insets, renderComments, projectName, template, cursorMode },
+  forwardedRef,
+) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef(new Camera2D({ minZoom: 0.08, maxZoom: 18 }));
@@ -407,6 +409,8 @@ export const WorkspaceCanvas = forwardRef<
     event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const cursor = editorCursorFor(dragging ? 'pan' : cursorMode);
+
   return (
     <section
       ref={hostRef}
@@ -416,10 +420,12 @@ export const WorkspaceCanvas = forwardRef<
       data-camera-y={viewState.y.toFixed(2)}
       data-camera-zoom={viewState.zoom.toFixed(4)}
       data-grid-step={viewState.gridStep}
+      data-cursor-mode={dragging ? 'pan' : cursorMode}
     >
       <canvas
         ref={canvasRef}
         className={dragging ? 'is-panning' : undefined}
+        style={{ cursor: cursor.cssCursor }}
         tabIndex={0}
         aria-label="CanvasKit precision sketch surface"
         onDoubleClick={fitSketch}
@@ -429,45 +435,13 @@ export const WorkspaceCanvas = forwardRef<
         onPointerCancel={onPointerUp}
       />
       {renderComments?.(viewState)}
-      <Popover>
-        <Tooltip
-          content="Sketch plane: XY"
-          render={
-            <Popover.Trigger
-              render={
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="sketch-plane-widget"
-                  style={{ right: `${insets.right}px` }}
-                  icon={<AppIcons.View size={16} weight="bold" />}
-                  aria-label="Sketch plane: XY"
-                >
-                  XY
-                </Button>
-              }
-            />
-          }
-        />
-        <Popover.Content
-          side="bottom"
-          align="end"
-          sideOffset={8}
-          positionMethod="fixed"
-          className="sketch-orientation-popover"
-        >
-          <Popover.Title>Sketch plane</Popover.Title>
-          <p>XY is the current drawing plane.</p>
-        </Popover.Content>
-      </Popover>
-      <div
-        className="sketch-view-status"
-        style={{ right: `${insets.right}px` }}
-        aria-label={`Zoom ${Math.round(viewState.zoom * 100)} percent`}
-      >
-        {Math.round(viewState.zoom * 100)}% · grid {viewState.gridStep} mm
-      </div>
+      <WorkspaceOrientationHud
+        right={insets.right}
+        gridStep={viewState.gridStep}
+        zoom={viewState.zoom}
+        onFit={fitSketch}
+        onReset={resetView}
+      />
       {surfaceState !== 'ready' ? (
         <span
           className="sketch-surface-status"

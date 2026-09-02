@@ -33,6 +33,34 @@ export const GEOMETRY_SCHEMA = {
       type: 'object',
       properties: {
         id: { type: 'string' },
+        kind: { const: 'ellipse' },
+        name: { type: 'string' },
+        construction: { type: 'boolean' },
+        center: POINT_SCHEMA,
+        majorRadius: { type: 'number', exclusiveMinimum: 0 },
+        minorRadius: { type: 'number', exclusiveMinimum: 0 },
+        rotation: { type: 'number' },
+      },
+      required: ['id', 'kind', 'center', 'majorRadius', 'minorRadius', 'rotation'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        kind: { const: 'bspline' },
+        name: { type: 'string' },
+        construction: { type: 'boolean' },
+        degree: { const: 3 },
+        controlPoints: { type: 'array', minItems: 4, maxItems: 200, items: POINT_SCHEMA },
+      },
+      required: ['id', 'kind', 'degree', 'controlPoints'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
         kind: { const: 'line' },
         name: { type: 'string' },
         construction: { type: 'boolean' },
@@ -78,6 +106,8 @@ export const GROUP_SCHEMA = {
   properties: {
     id: { type: 'string' },
     name: { type: 'string' },
+    kind: { type: 'string', enum: ['group', 'section'] },
+    parentGroupId: { type: 'string' },
     entityIds: { type: 'array', items: { type: 'string' } },
     childGroupIds: { type: 'array', items: { type: 'string' } },
   },

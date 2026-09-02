@@ -60,12 +60,17 @@ export async function POST(request: Request) {
       'create_geometry',
       'edit_geometry',
       'move_node',
+      'transform_geometry',
+      'trim_geometry',
       'delete_geometry',
+      'set_construction',
       'create_group',
+      'rename_group',
       'move_to_group',
       'apply_constraint',
       'remove_constraint',
       'set_dimension',
+      'remove_dimension',
     ]);
     return noStoreJson(
       isSketchCommand(input.command)

@@ -44,6 +44,49 @@ interface EnvelopeValidation {
   readonly rebasedFromWorkspaceSeq: number | null;
 }
 
+function sketchConflictMessage(command: AttuneCommand, workspace: AttuneWorkspace): string {
+  if (command.type === 'apply_constraint') {
+    const type = command.constraints[0]?.type ?? 'constraint';
+    return `Adding ${type[0].toUpperCase()}${type.slice(1)} would over-constrain the selected geometry.`;
+  }
+  if (command.type === 'move_node') {
+    const entityIds = new Set(
+      workspace.sketchDocument.entities
+        .filter((entity) =>
+          'nodeId' in entity
+            ? entity.nodeId === command.nodeId
+            : 'startNodeId' in entity
+              ? [
+                  entity.startNodeId,
+                  entity.endNodeId,
+                  'centerNodeId' in entity ? entity.centerNodeId : undefined,
+                ].includes(command.nodeId)
+              : 'centerNodeId' in entity
+                ? entity.centerNodeId === command.nodeId
+                : 'controlNodeIds' in entity
+                  ? entity.controlNodeIds?.includes(command.nodeId)
+                  : false,
+        )
+        .map(({ id }) => id),
+    );
+    const blockers = workspace.sketchDocument.constraints
+      .filter(({ refs }) => refs.some(({ entityId }) => entityIds.has(entityId)))
+      .map(({ id, type }) => `${type[0].toUpperCase()}${type.slice(1)} (${id})`)
+      .slice(0, 3);
+    return blockers.length > 0
+      ? `That point cannot move while ${blockers.join(' and ')} are locked.`
+      : 'That point cannot move with the geometry’s current constraints.';
+  }
+  if (command.type === 'set_dimension') {
+    const kind = command.dimensions[0]?.kind ?? 'dimension';
+    return `That ${kind} conflicts with the geometry’s current constraints.`;
+  }
+  if (command.type === 'restore_sketch') {
+    return 'That version cannot be restored because its constraints no longer form a valid sketch.';
+  }
+  return 'The sketch change conflicts with the geometry’s current constraints.';
+}
+
 export class AttuneCommandBus {
   readonly #clock: () => string;
   readonly #idempotency = new Map<string, IdempotencyRecord>();
@@ -150,7 +193,7 @@ export class AttuneCommandBus {
     if (isSketchCommand(command) && !forecast.consequence.valid) {
       return this.#reject({
         code: 'COMMAND_CONFLICT',
-        message: 'PlaneGCS could not produce a valid, conflict-free semantic sketch consequence.',
+        message: sketchConflictMessage(command, before),
         commandType: command.type,
         envelope,
         context,

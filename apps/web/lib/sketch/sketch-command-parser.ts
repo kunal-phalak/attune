@@ -9,6 +9,7 @@ import type {
   GeometryReference,
   GroupInput,
   SketchCommandType,
+  SketchSnapshotInput,
 } from '@attune/domain';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,7 +107,32 @@ function geometry(value: unknown, patch: boolean): GeometryInput | GeometryPatch
       endAngle: number(input.endAngle, 'geometry.endAngle'),
     };
   }
-  throw new TypeError('geometry.kind must be point, line, circle, or arc.');
+  if (kind === 'ellipse') {
+    exact(input, [...base, 'center', 'majorRadius', 'minorRadius', 'rotation'], 'ellipse geometry');
+    return {
+      ...common,
+      kind,
+      center: point(input.center, 'geometry.center'),
+      majorRadius: number(input.majorRadius, 'geometry.majorRadius'),
+      minorRadius: number(input.minorRadius, 'geometry.minorRadius'),
+      rotation: number(input.rotation, 'geometry.rotation'),
+    };
+  }
+  if (kind === 'bspline') {
+    exact(input, [...base, 'degree', 'controlPoints'], 'B-spline geometry');
+    if (input.degree !== 3) throw new TypeError('B-spline degree must be 3.');
+    if (!Array.isArray(input.controlPoints))
+      throw new TypeError('B-spline controlPoints must be an array.');
+    return {
+      ...common,
+      kind,
+      degree: 3,
+      controlPoints: input.controlPoints.map((candidate, index) =>
+        point(candidate, `geometry.controlPoints[${index}]`),
+      ),
+    };
+  }
+  throw new TypeError('geometry.kind must be point, line, circle, arc, ellipse, or bspline.');
 }
 
 function geometryAnchor(value: unknown): GeometryAnchor | undefined {
@@ -193,13 +219,20 @@ function dimension(value: unknown): DimensionInput {
 
 function group(value: unknown): GroupInput {
   const input = object(value, 'group');
-  exact(input, ['id', 'name', 'entityIds', 'childGroupIds'], 'group');
+  exact(input, ['id', 'name', 'kind', 'parentGroupId', 'entityIds', 'childGroupIds'], 'group');
   if (typeof input.name !== 'string' || !input.name.trim()) {
     throw new TypeError('group.name is required.');
+  }
+  if (input.kind !== undefined && input.kind !== 'group' && input.kind !== 'section') {
+    throw new TypeError('group.kind must be group or section.');
   }
   return {
     id: id(input.id, 'group.id'),
     name: input.name.slice(0, 160),
+    ...(input.kind === 'group' || input.kind === 'section' ? { kind: input.kind } : {}),
+    ...(input.parentGroupId !== undefined
+      ? { parentGroupId: id(input.parentGroupId, 'group.parentGroupId') }
+      : {}),
     entityIds: stringArray(input.entityIds, 'group.entityIds'),
     ...(input.childGroupIds !== undefined
       ? { childGroupIds: stringArray(input.childGroupIds, 'group.childGroupIds') }
@@ -214,28 +247,90 @@ function array<T>(value: unknown, name: string, parser: (candidate: unknown) => 
   return value.map(parser);
 }
 
+function optionalArray<T>(
+  value: unknown,
+  name: string,
+  parser: (candidate: unknown) => T,
+): readonly T[] {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw new TypeError(`${name} must contain no more than 2000 items.`);
+  }
+  return value.map(parser);
+}
+
+function snapshot(value: unknown): SketchSnapshotInput {
+  const input = object(value, 'sketch snapshot');
+  exact(
+    input,
+    ['name', 'entities', 'constraints', 'dimensions', 'groups', 'parameters'],
+    'sketch snapshot',
+  );
+  if (typeof input.name !== 'string' || !input.name.trim()) {
+    throw new TypeError('sketch snapshot.name is required.');
+  }
+  return {
+    name: input.name.trim().slice(0, 160),
+    entities: optionalArray(input.entities, 'snapshot.entities', (candidate) =>
+      geometry(candidate, false),
+    ),
+    constraints: optionalArray(input.constraints, 'snapshot.constraints', constraint),
+    dimensions: optionalArray(input.dimensions, 'snapshot.dimensions', dimension),
+    groups: optionalArray(input.groups, 'snapshot.groups', group),
+    parameters: optionalArray(input.parameters, 'snapshot.parameters', (candidate) => {
+      const parameter = object(candidate, 'parameter');
+      exact(parameter, ['id', 'name', 'value', 'unit'], 'parameter');
+      if (
+        typeof parameter.name !== 'string' ||
+        (parameter.unit !== 'mm' && parameter.unit !== 'deg' && parameter.unit !== 'unitless')
+      ) {
+        throw new TypeError('parameter.name and parameter.unit are required.');
+      }
+      return {
+        id: id(parameter.id, 'parameter.id'),
+        name: parameter.name.slice(0, 160),
+        value: number(parameter.value, 'parameter.value'),
+        unit: parameter.unit,
+      };
+    }),
+  };
+}
+
 export function isSketchCommandType(type: string): type is SketchCommandType {
   return [
     'create_geometry',
     'edit_geometry',
     'move_node',
+    'transform_geometry',
+    'trim_geometry',
     'delete_geometry',
+    'set_construction',
     'create_group',
+    'rename_group',
     'move_to_group',
     'apply_constraint',
     'remove_constraint',
     'set_dimension',
+    'remove_dimension',
+    'restore_sketch',
   ].includes(type);
 }
 
 export function parseSketchCommand(value: Record<string, unknown>): AttuneCommand {
   switch (value.type) {
     case 'create_geometry':
-      exact(value, ['type', 'entities', 'groupId'], 'create_geometry command');
+      exact(
+        value,
+        ['type', 'entities', 'groupId', 'group', 'constraints'],
+        'create_geometry command',
+      );
       return {
         type: value.type,
         entities: array(value.entities, 'entities', (candidate) => geometry(candidate, false)),
         ...(value.groupId !== undefined ? { groupId: id(value.groupId, 'groupId') } : {}),
+        ...(value.group !== undefined ? { group: group(value.group) } : {}),
+        ...(value.constraints !== undefined
+          ? { constraints: array(value.constraints, 'constraints', constraint) }
+          : {}),
       };
     case 'edit_geometry':
       exact(value, ['type', 'entities'], 'edit_geometry command');
@@ -250,12 +345,54 @@ export function parseSketchCommand(value: Record<string, unknown>): AttuneComman
         nodeId: id(value.nodeId, 'nodeId'),
         position: point(value.position, 'position'),
       };
+    case 'transform_geometry':
+      exact(
+        value,
+        ['type', 'entityIds', 'pivot', 'translation', 'rotation', 'scale'],
+        'transform_geometry command',
+      );
+      return {
+        type: value.type,
+        entityIds: stringArray(value.entityIds, 'entityIds'),
+        pivot: point(value.pivot, 'pivot'),
+        ...(value.translation !== undefined
+          ? { translation: point(value.translation, 'translation') }
+          : {}),
+        ...(value.rotation !== undefined ? { rotation: number(value.rotation, 'rotation') } : {}),
+        ...(value.scale !== undefined ? { scale: number(value.scale, 'scale') } : {}),
+      };
+    case 'trim_geometry':
+      exact(value, ['type', 'entityId', 'pickPoint'], 'trim_geometry command');
+      return {
+        type: value.type,
+        entityId: id(value.entityId, 'entityId'),
+        pickPoint: point(value.pickPoint, 'pickPoint'),
+      };
     case 'delete_geometry':
       exact(value, ['type', 'entityIds'], 'delete_geometry command');
       return { type: value.type, entityIds: stringArray(value.entityIds, 'entityIds') };
+    case 'set_construction':
+      exact(value, ['type', 'entityIds', 'construction'], 'set_construction command');
+      if (typeof value.construction !== 'boolean')
+        throw new TypeError('construction must be boolean.');
+      return {
+        type: value.type,
+        entityIds: stringArray(value.entityIds, 'entityIds'),
+        construction: value.construction,
+      };
     case 'create_group':
       exact(value, ['type', 'groups'], 'create_group command');
       return { type: value.type, groups: array(value.groups, 'groups', group) };
+    case 'rename_group':
+      exact(value, ['type', 'groupId', 'name'], 'rename_group command');
+      if (typeof value.name !== 'string' || !value.name.trim()) {
+        throw new TypeError('rename_group.name is required.');
+      }
+      return {
+        type: value.type,
+        groupId: id(value.groupId, 'groupId'),
+        name: value.name.trim().slice(0, 160),
+      };
     case 'move_to_group':
       exact(value, ['type', 'entityIds', 'groupId'], 'move_to_group command');
       return {
@@ -272,6 +409,12 @@ export function parseSketchCommand(value: Record<string, unknown>): AttuneComman
     case 'set_dimension':
       exact(value, ['type', 'dimensions'], 'set_dimension command');
       return { type: value.type, dimensions: array(value.dimensions, 'dimensions', dimension) };
+    case 'remove_dimension':
+      exact(value, ['type', 'dimensionIds'], 'remove_dimension command');
+      return { type: value.type, dimensionIds: stringArray(value.dimensionIds, 'dimensionIds') };
+    case 'restore_sketch':
+      exact(value, ['type', 'snapshot'], 'restore_sketch command');
+      return { type: value.type, snapshot: snapshot(value.snapshot) };
     default:
       throw new TypeError('Unsupported semantic sketch command.');
   }

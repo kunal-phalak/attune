@@ -1,6 +1,7 @@
 import {
   createAt1042Workspace,
   hashCanonical,
+  rectangleCreation,
   type AttuneCommand,
   type ConstraintSolver,
 } from '@attune/domain';
@@ -150,11 +151,67 @@ describe('semantic forecast and shared human/WebMCP execution', () => {
     expect(humanResult.receipt.command).toBe('move_node');
     expect(humanBus.receipts()).toHaveLength(1);
     expect(humanResult.workspace.sketchDocument.source).toEqual(
-      expect.objectContaining({ status: 'modified', modifiedNodeIds: [node.id] }),
+      expect.objectContaining({
+        status: 'modified',
+        modifiedNodeIds: expect.arrayContaining([node.id]),
+      }),
     );
     expect(
       humanResult.workspace.sketchDocument.nodes.find(({ id }) => id === node.id)?.sourceRefs,
     ).toEqual(node.sourceRefs);
+  });
+
+  it('keeps create, transform, and constrain after-states identical across human and WebMCP paths', () => {
+    const humanBus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
+    const agentBus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
+    const rectangle = rectangleCreation(
+      'rectangle:equivalence',
+      { x: 300, y: 10 },
+      { x: 400, y: 90 },
+    );
+    const create: AttuneCommand = {
+      type: 'create_geometry',
+      entities: [
+        ...rectangle.entities,
+        { id: 'circle:equivalence', kind: 'circle', center: { x: 350, y: 50 }, radius: 20 },
+      ],
+      constraints: rectangle.constraints,
+      group: rectangle.group,
+    };
+    const transform: AttuneCommand = {
+      type: 'transform_geometry',
+      entityIds: ['circle:equivalence'],
+      pivot: { x: 350, y: 50 },
+      translation: { x: 5, y: -2 },
+      scale: 1.2,
+    };
+    const constrain: AttuneCommand = {
+      type: 'apply_constraint',
+      constraints: [
+        {
+          id: 'constraint:circle:fixed',
+          type: 'fixed',
+          refs: [{ entityId: 'circle:equivalence' }],
+        },
+      ],
+    };
+
+    for (const [index, command] of [create, transform, constrain].entries()) {
+      const humanObserved = humanBus.inspect('buyer').workspace;
+      const agentObserved = agentBus.inspect('buyer').workspace;
+      const humanResult = humanBus.execute(
+        command,
+        semanticEnvelope(humanBus, humanObserved, command, `human-editor-${index}`),
+        human,
+      );
+      const agentResult = agentBus.execute(
+        command,
+        semanticEnvelope(agentBus, agentObserved, command, `agent-editor-${index}`),
+        agent,
+      );
+      expect(humanResult.receipt.afterHash).toBe(agentResult.receipt.afterHash);
+      expect(humanResult.receipt.specHashAfter).toBe(agentResult.receipt.specHashAfter);
+    }
   });
 });
 

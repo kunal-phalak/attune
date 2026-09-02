@@ -75,11 +75,19 @@ export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<st
   const value = object(input, 'modify_geometry input');
   const operation = value.operation;
   if (operation === 'create_geometry') {
-    exact(value, ['operation', 'entities', 'group_id'], 'create_geometry input');
+    exact(
+      value,
+      ['operation', 'entities', 'group_id', 'group', 'constraints'],
+      'create_geometry input',
+    );
     return {
       type: operation,
       entities: collection(value.entities, 'entities'),
       ...(typeof value.group_id === 'string' ? { groupId: value.group_id } : {}),
+      ...(value.group !== undefined ? { group: object(value.group, 'group') } : {}),
+      ...(value.constraints !== undefined
+        ? { constraints: collection(value.constraints, 'constraints') }
+        : {}),
     };
   }
   if (operation === 'edit_geometry') {
@@ -93,13 +101,57 @@ export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<st
     }
     return { type: operation, nodeId: value.node_id, position: object(value.position, 'position') };
   }
+  if (operation === 'transform_geometry') {
+    exact(
+      value,
+      ['operation', 'entity_ids', 'pivot', 'translation', 'rotation', 'scale'],
+      'transform_geometry input',
+    );
+    return {
+      type: operation,
+      entityIds: strings(value.entity_ids, 'entity_ids'),
+      pivot: object(value.pivot, 'pivot'),
+      ...(value.translation !== undefined
+        ? { translation: object(value.translation, 'translation') }
+        : {}),
+      ...(value.rotation !== undefined ? { rotation: finite(value.rotation, 'rotation') } : {}),
+      ...(value.scale !== undefined ? { scale: finite(value.scale, 'scale') } : {}),
+    };
+  }
+  if (operation === 'trim_geometry') {
+    exact(value, ['operation', 'entity_id', 'pick_point'], 'trim_geometry input');
+    if (typeof value.entity_id !== 'string' || value.entity_id.length === 0) {
+      throw new TypeError('entity_id is required.');
+    }
+    return {
+      type: operation,
+      entityId: value.entity_id,
+      pickPoint: object(value.pick_point, 'pick_point'),
+    };
+  }
   if (operation === 'delete_geometry') {
     exact(value, ['operation', 'entity_ids'], 'delete_geometry input');
     return { type: operation, entityIds: strings(value.entity_ids, 'entity_ids') };
   }
+  if (operation === 'set_construction') {
+    exact(value, ['operation', 'entity_ids', 'construction'], 'set_construction input');
+    if (typeof value.construction !== 'boolean') throw new TypeError('construction is required.');
+    return {
+      type: operation,
+      entityIds: strings(value.entity_ids, 'entity_ids'),
+      construction: value.construction,
+    };
+  }
   if (operation === 'create_group') {
     exact(value, ['operation', 'groups'], 'create_group input');
     return { type: operation, groups: collection(value.groups, 'groups') };
+  }
+  if (operation === 'rename_group') {
+    exact(value, ['operation', 'group_id', 'name'], 'rename_group input');
+    if (typeof value.group_id !== 'string' || typeof value.name !== 'string') {
+      throw new TypeError('group_id and name are required.');
+    }
+    return { type: operation, groupId: value.group_id, name: value.name };
   }
   if (operation === 'move_to_group') {
     exact(value, ['operation', 'entity_ids', 'group_id'], 'move_to_group input');
@@ -134,6 +186,13 @@ function constraintCommand(input: unknown): Readonly<Record<string, unknown>> {
     return {
       type: value.operation,
       dimensions: collection(value.dimensions, 'dimensions'),
+    };
+  }
+  if (value.operation === 'remove_dimension') {
+    exact(value, ['operation', 'dimension_ids'], 'remove_dimension input');
+    return {
+      type: value.operation,
+      dimensionIds: strings(value.dimension_ids, 'dimension_ids'),
     };
   }
   throw new TypeError('constrain_geometry.operation is unsupported.');
@@ -228,7 +287,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'modify_geometry',
       title: 'Batch modify semantic geometry',
       description:
-        'Create, edit, or delete semantic geometry, move a shared topology node, or create/move groups. One server request forecasts, solves, safely rebases disjoint edits, and commits through the command bus.',
+        'Create, transform, trim, edit, or delete semantic geometry, move a shared topology node, or create/move sections and groups. One request forecasts, solves, safely rebases disjoint edits, and commits through the command bus.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -238,15 +297,23 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
               'create_geometry',
               'edit_geometry',
               'move_node',
+              'transform_geometry',
+              'trim_geometry',
               'delete_geometry',
+              'set_construction',
               'create_group',
+              'rename_group',
               'move_to_group',
             ],
           },
           entities: { type: 'array', minItems: 1, maxItems: 200, items: GEOMETRY_SCHEMA },
+          constraints: { type: 'array', minItems: 1, maxItems: 200, items: CONSTRAINT_SCHEMA },
           entity_ids: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'string' } },
+          entity_id: { type: 'string' },
+          group: GROUP_SCHEMA,
           groups: { type: 'array', minItems: 1, maxItems: 200, items: GROUP_SCHEMA },
           group_id: { type: 'string' },
+          name: { type: 'string', minLength: 1, maxLength: 160 },
           node_id: { type: 'string' },
           position: {
             type: 'object',
@@ -254,6 +321,27 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
             required: ['x', 'y'],
             additionalProperties: false,
           },
+          pivot: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' } },
+            required: ['x', 'y'],
+            additionalProperties: false,
+          },
+          translation: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' } },
+            required: ['x', 'y'],
+            additionalProperties: false,
+          },
+          pick_point: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' } },
+            required: ['x', 'y'],
+            additionalProperties: false,
+          },
+          rotation: { type: 'number' },
+          scale: { type: 'number', exclusiveMinimum: 0 },
+          construction: { type: 'boolean' },
         },
         required: ['operation'],
         additionalProperties: false,
@@ -273,7 +361,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         properties: {
           operation: {
             type: 'string',
-            enum: ['apply_constraint', 'remove_constraint', 'set_dimension'],
+            enum: ['apply_constraint', 'remove_constraint', 'set_dimension', 'remove_dimension'],
           },
           constraints: {
             type: 'array',
@@ -292,6 +380,12 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
             minItems: 1,
             maxItems: 200,
             items: DIMENSION_SCHEMA,
+          },
+          dimension_ids: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 200,
+            items: { type: 'string' },
           },
         },
         required: ['operation'],

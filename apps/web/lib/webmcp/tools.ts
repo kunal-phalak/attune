@@ -36,6 +36,13 @@ function strings(value: unknown, name: string): readonly string[] {
   });
 }
 
+function string(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new TypeError(`${name} must be a stable public reference.`);
+  }
+  return value;
+}
+
 function empty(input: unknown): void {
   if (input === undefined || input === null) return;
   const value = object(input, 'tool input');
@@ -52,12 +59,34 @@ function finite(candidate: unknown, name: string): number {
 function focus(input: unknown): AgentContextFocus {
   if (input === undefined || input === null) return {};
   const value = object(input, 'inspect_context input');
-  exact(value, ['entity_ids', 'group_ids', 'region'], 'inspect_context input');
+  exact(
+    value,
+    [
+      'entity_ids',
+      'node_ids',
+      'constraint_ids',
+      'group_ids',
+      'active_group_id',
+      'active_human_tool',
+      'region',
+    ],
+    'inspect_context input',
+  );
   const region = value.region === undefined ? undefined : object(value.region, 'region');
   if (region) exact(region, ['min_x', 'min_y', 'max_x', 'max_y'], 'region');
   return {
     ...(value.entity_ids ? { entityIds: strings(value.entity_ids, 'entity_ids') } : {}),
+    ...(value.node_ids ? { nodeIds: strings(value.node_ids, 'node_ids') } : {}),
+    ...(value.constraint_ids
+      ? { constraintIds: strings(value.constraint_ids, 'constraint_ids') }
+      : {}),
     ...(value.group_ids ? { groupIds: strings(value.group_ids, 'group_ids') } : {}),
+    ...(value.active_group_id
+      ? { activeGroupId: string(value.active_group_id, 'active_group_id') }
+      : {}),
+    ...(value.active_human_tool
+      ? { activeHumanTool: string(value.active_human_tool, 'active_human_tool') }
+      : {}),
     ...(region
       ? {
           region: {
@@ -216,12 +245,16 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'inspect_context',
       title: 'Inspect semantic sketch context',
       description:
-        'Read compact authoritative sketch context by stable entity IDs, group IDs, or world region, including solver DOF, ranked candidates, actions, and unseen human changes.',
+        'Read compact authoritative sketch context by stable entity, node, constraint, or group IDs and world region, including nearby semantic refs, active human tool, solver DOF, ranked candidates, relevant actions, and unseen human changes.',
       inputSchema: {
         type: 'object',
         properties: {
           entity_ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
+          node_ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
+          constraint_ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
           group_ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
+          active_group_id: { type: 'string' },
+          active_human_tool: { type: 'string' },
           region: {
             type: 'object',
             properties: {

@@ -8,21 +8,28 @@ export interface ViewportInsets {
   readonly left: number;
 }
 
-function hudInset(panelOpen: boolean, showLabels: boolean): number {
+function hudInset(panelOpen: boolean, showLabels: boolean, panelWidth: number): number {
   const islandWidth = showLabels ? EDITOR_LABELED_ISLAND_WIDTH : EDITOR_ISLAND_WIDTH;
   return (
     EDITOR_CHROME.viewportGap +
-    (panelOpen ? EDITOR_CHROME.panelWidth + EDITOR_CHROME.panelIslandGap : 0) +
+    (panelOpen ? panelWidth + EDITOR_CHROME.panelIslandGap : 0) +
     islandWidth +
     EDITOR_CHROME.hudSafeGap
   );
 }
 
-export function viewportInsetsFor(panels: EditorPanelState, showLabels = true): ViewportInsets {
+export function viewportInsetsFor(
+  panels: EditorPanelState,
+  showLabels = true,
+  panelWidths: { readonly left: number; readonly right: number } = {
+    left: EDITOR_CHROME.panelWidth,
+    right: EDITOR_CHROME.panelWidth,
+  },
+): ViewportInsets {
   return {
     top: EDITOR_CHROME.headerHeight + EDITOR_CHROME.viewportGap,
-    right: hudInset(panels.rightPanel !== null, showLabels),
+    right: hudInset(panels.rightPanel !== null, showLabels, panelWidths.right),
     bottom: EDITOR_CHROME.viewportGap,
-    left: hudInset(panels.leftPanel !== null, showLabels),
+    left: hudInset(panels.leftPanel !== null, showLabels, panelWidths.left),
   };
 }

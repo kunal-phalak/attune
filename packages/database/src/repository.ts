@@ -104,6 +104,7 @@ export interface ExecutePersistedCommandInput {
   readonly command: AttuneCommand;
   readonly envelope: CommandEnvelope;
   readonly context: TrustedExecutionContext;
+  readonly timing?: (name: string, durationMs: number) => void;
 }
 
 export interface ExternalMaterializationInput {
@@ -123,6 +124,34 @@ export type ExternalMaterializationReservation =
 type DatabaseTransaction = Parameters<
   Parameters<ReturnType<typeof getDatabase>['transaction']>[0]
 >[0];
+
+interface RepositoryCacheEntry<T> {
+  readonly expiresAt: number;
+  readonly value: T;
+}
+
+interface RepositoryGlobal {
+  attuneProvisionedUsers?: Map<string, RepositoryCacheEntry<string>>;
+  attuneWorkspaceIdentities?: Map<
+    string,
+    RepositoryCacheEntry<Omit<WorkspaceIdentity, 'principalId'>>
+  >;
+}
+
+const REPOSITORY_CACHE_TTL_MS = 60_000;
+const REPOSITORY_CACHE_LIMIT = 256;
+
+function repositoryGlobal(): typeof globalThis & RepositoryGlobal {
+  return globalThis;
+}
+
+function boundedCache<K, V>(cache: Map<K, V>): Map<K, V> {
+  if (cache.size >= REPOSITORY_CACHE_LIMIT) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
+  return cache;
+}
 
 function commandFingerprint(input: ExecutePersistedCommandInput): string {
   return hashCanonical({
@@ -436,8 +465,24 @@ async function persistRejection(
     .onConflictDoNothing();
 }
 
-export async function ensureJudgeWorkspace(): Promise<void> {
+let judgeWorkspaceReady = false;
+let judgeWorkspaceSetupPromise: Promise<void> | undefined;
+
+async function initializeJudgeWorkspace(): Promise<void> {
   const database = getDatabase();
+  const currentRows = await database
+    .select({ workspace: workspaces.currentSpecification })
+    .from(workspaces)
+    .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
+    .limit(1);
+  const current = currentRows[0]?.workspace;
+  if (
+    current &&
+    Reflect.get(current, 'scenarioVersion') === 3 &&
+    current.providerCapabilityProfile
+  ) {
+    return;
+  }
   const initial = createAt1042Workspace();
   const providerProfile = createJudgeProviderCapabilityProfile();
   const now = new Date().toISOString();
@@ -608,6 +653,19 @@ export async function ensureJudgeWorkspace(): Promise<void> {
   });
 }
 
+export function ensureJudgeWorkspace(): Promise<void> {
+  if (judgeWorkspaceReady) return Promise.resolve();
+  judgeWorkspaceSetupPromise ??= initializeJudgeWorkspace()
+    .then(() => {
+      judgeWorkspaceReady = true;
+    })
+    .catch((error: unknown) => {
+      judgeWorkspaceSetupPromise = undefined;
+      throw error;
+    });
+  return judgeWorkspaceSetupPromise;
+}
+
 export async function activeDelegationForWorkspace(
   workspaceId: string,
   role: AttuneRole,
@@ -689,6 +747,13 @@ export async function identityForWorkspace(
   userId: string,
   principalId: string,
 ): Promise<WorkspaceIdentity | null> {
+  const cache = (repositoryGlobal().attuneWorkspaceIdentities ??= new Map());
+  const cacheKey = `${workspaceId}\u0000${userId}`;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return immutableCopy({ ...cached.value, principalId });
+  }
+  if (cached) cache.delete(cacheKey);
   const rows = await getDatabase()
     .select({
       userId: users.id,
@@ -700,7 +765,12 @@ export async function identityForWorkspace(
     .where(and(eq(workspaceMemberships.workspaceId, workspaceId), eq(users.id, userId)))
     .limit(1);
   const row = rows[0];
-  return row ? { ...row, principalId } : null;
+  if (!row) return null;
+  boundedCache(cache).set(cacheKey, {
+    expiresAt: Date.now() + REPOSITORY_CACHE_TTL_MS,
+    value: immutableCopy(row),
+  });
+  return { ...row, principalId };
 }
 
 export async function identityForLiveblocksRoom(
@@ -743,6 +813,11 @@ export async function ensureAuthenticatedUser(input: {
   readonly displayName: string;
 }): Promise<string> {
   const userId = `user:${hashCanonical(input.authUserId).slice(0, 24)}`;
+  const cache = (repositoryGlobal().attuneProvisionedUsers ??= new Map());
+  const cacheKey = hashCanonical(input);
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) cache.delete(cacheKey);
   const organizationId = `organization:personal:${hashCanonical(input.authUserId).slice(0, 20)}`;
   await getDatabase().transaction(async (transaction) => {
     await transaction
@@ -768,6 +843,10 @@ export async function ensureAuthenticatedUser(input: {
         target: [organizationMemberships.organizationId, organizationMemberships.userId],
         set: { roles: ['buyer'] },
       });
+  });
+  boundedCache(cache).set(cacheKey, {
+    expiresAt: Date.now() + REPOSITORY_CACHE_TTL_MS,
+    value: userId,
   });
   return userId;
 }
@@ -994,43 +1073,54 @@ export async function readWorkspaceBundle(
   workspaceId: string,
   observationCursor?: number,
   observingAgentPrincipal?: string,
+  timing?: (name: string, durationMs: number) => void,
 ): Promise<WorkspaceBundle> {
   const database = getDatabase();
-  const workspaceRows = await database
-    .select({
-      workspace: workspaces.currentSpecification,
-      projectName: projects.name,
-      fileName: workspaceFiles.name,
-      fileKind: workspaceFiles.kind,
-      liveblocksRoomId: workspaces.liveblocksRoomId,
-      needStartedAt: workspaces.needStartedAt,
-    })
-    .from(workspaces)
-    .innerJoin(projects, eq(projects.id, workspaces.projectId))
-    .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
+  const parallelLoadStartedAt = performance.now();
+  const [workspaceRows, receiptRows, transitionRows, rejectionRows, initialDetectedRows] =
+    await Promise.all([
+      database
+        .select({
+          workspace: workspaces.currentSpecification,
+          projectName: projects.name,
+          fileName: workspaceFiles.name,
+          fileKind: workspaceFiles.kind,
+          liveblocksRoomId: workspaces.liveblocksRoomId,
+          needStartedAt: workspaces.needStartedAt,
+        })
+        .from(workspaces)
+        .innerJoin(projects, eq(projects.id, workspaces.projectId))
+        .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
+        .where(eq(workspaces.id, workspaceId))
+        .limit(1),
+      database
+        .select({ receipt: changeReceipts.receipt })
+        .from(changeReceipts)
+        .where(eq(changeReceipts.workspaceId, workspaceId))
+        .orderBy(asc(changeReceipts.receiptSeq)),
+      database
+        .select({ transition: capabilityTransitions.transition })
+        .from(capabilityTransitions)
+        .where(eq(capabilityTransitions.workspaceId, workspaceId))
+        .orderBy(asc(capabilityTransitions.workspaceSeq)),
+      database
+        .select({ rejection: commandRejections.rejection })
+        .from(commandRejections)
+        .where(eq(commandRejections.workspaceId, workspaceId))
+        .orderBy(asc(commandRejections.createdAt)),
+      database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(agentInterventionObservations)
+        .where(eq(agentInterventionObservations.workspaceId, workspaceId)),
+    ]);
+  timing?.('neon_parallel_load', performance.now() - parallelLoadStartedAt);
   const row = workspaceRows[0];
   if (!row) throw new Error(`Attune workspace ${workspaceId} was not found.`);
+  const normalizationStartedAt = performance.now();
   const authoritativeWorkspace = workspaceWithCurrentContract(row.workspace);
+  timing?.('document_normalization', performance.now() - normalizationStartedAt);
 
-  const [receiptRows, transitionRows, rejectionRows] = await Promise.all([
-    database
-      .select({ receipt: changeReceipts.receipt })
-      .from(changeReceipts)
-      .where(eq(changeReceipts.workspaceId, workspaceId))
-      .orderBy(asc(changeReceipts.receiptSeq)),
-    database
-      .select({ transition: capabilityTransitions.transition })
-      .from(capabilityTransitions)
-      .where(eq(capabilityTransitions.workspaceId, workspaceId))
-      .orderBy(asc(capabilityTransitions.workspaceSeq)),
-    database
-      .select({ rejection: commandRejections.rejection })
-      .from(commandRejections)
-      .where(eq(commandRejections.workspaceId, workspaceId))
-      .orderBy(asc(commandRejections.createdAt)),
-  ]);
+  const historyStartedAt = performance.now();
   const receipts = receiptRows.map(({ receipt }) => receipt);
   const observation = interventionSummary(
     receipts,
@@ -1060,12 +1150,16 @@ export async function readWorkspaceBundle(
     }
   }
 
-  const detectedRows = await database
-    .select({ count: sql<number>`count(*)::int` })
-    .from(agentInterventionObservations)
-    .where(eq(agentInterventionObservations.workspaceId, workspaceId));
+  const detectedRows = observingAgentPrincipal
+    ? await database
+        .select({ count: sql<number>`count(*)::int` })
+        .from(agentInterventionObservations)
+        .where(eq(agentInterventionObservations.workspaceId, workspaceId))
+    : initialDetectedRows;
+  timing?.('receipt_history', performance.now() - historyStartedAt);
 
-  return immutableCopy({
+  const serializationStartedAt = performance.now();
+  const result = immutableCopy({
     workspaceId,
     projectName: row.projectName,
     fileName: row.fileName,
@@ -1079,6 +1173,8 @@ export async function readWorkspaceBundle(
     observation,
     humanInterventionsDetected: detectedRows[0]?.count ?? 0,
   });
+  timing?.('serialization', performance.now() - serializationStartedAt);
+  return result;
 }
 
 export async function executePersistedCommand(
@@ -1092,8 +1188,11 @@ export async function executePersistedCommand(
     );
   }
   const database = getDatabase();
+  const hashStartedAt = performance.now();
   const fingerprint = commandFingerprint(input);
+  input.timing?.('hash', performance.now() - hashStartedAt);
   let rejection: CommandRejection | undefined;
+  const transactionStartedAt = performance.now();
 
   try {
     return await database.transaction(async (transaction) => {
@@ -1178,19 +1277,23 @@ export async function executePersistedCommand(
           commandId: input.envelope.commandId,
           observed: workspaceWithCurrentContract(observed),
         });
-        const priorReceipts = await transaction
-          .select({ receipt: changeReceipts.receipt })
-          .from(changeReceipts)
-          .where(
-            and(
-              eq(changeReceipts.workspaceId, input.workspaceId),
-              gt(changeReceipts.receiptSeq, observedWorkspaceSeq),
-            ),
-          )
-          .orderBy(asc(changeReceipts.receiptSeq));
+        const priorReceipts =
+          observedWorkspaceSeq === current.workspaceSeq
+            ? []
+            : await transaction
+                .select({ receipt: changeReceipts.receipt })
+                .from(changeReceipts)
+                .where(
+                  and(
+                    eq(changeReceipts.workspaceId, input.workspaceId),
+                    gt(changeReceipts.receiptSeq, observedWorkspaceSeq),
+                  ),
+                )
+                .orderBy(asc(changeReceipts.receiptSeq));
         receiptHistory = priorReceipts.map(({ receipt }) => receipt);
       }
 
+      const commandBusStartedAt = performance.now();
       const bus = new AttuneCommandBus(
         current,
         undefined,
@@ -1203,8 +1306,11 @@ export async function executePersistedCommand(
       } catch (error) {
         rejection = bus.rejections().at(-1);
         throw error;
+      } finally {
+        input.timing?.('command_bus_solver', performance.now() - commandBusStartedAt);
       }
 
+      const persistenceStartedAt = performance.now();
       const updated = await transaction
         .update(workspaces)
         .set({
@@ -1294,11 +1400,17 @@ export async function executePersistedCommand(
           .set({ observationCursor: result.workspace.workspaceSeq })
           .where(eq(delegationGrants.grantId, input.context.delegation.grantId));
       }
-      return immutableCopy(result);
+      input.timing?.('receipt_history_persist', performance.now() - persistenceStartedAt);
+      const serializationStartedAt = performance.now();
+      const copied = immutableCopy(result);
+      input.timing?.('serialization', performance.now() - serializationStartedAt);
+      return copied;
     });
   } catch (error) {
     await persistRejection(input.workspaceId, rejection);
     throw error;
+  } finally {
+    input.timing?.('neon_transaction', performance.now() - transactionStartedAt);
   }
 }
 

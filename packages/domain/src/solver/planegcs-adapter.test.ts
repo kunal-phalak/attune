@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { hashCanonical } from '../hash';
 import { createSpokeSeedDocument } from '../maker/makerjs-adapter';
+import { createSketchDocument } from '../sketch/document';
 import { geometryNodeIds } from '../sketch/geometry';
 import { toPlaneGcs } from './planegcs-adapter';
 import { createPlaneGcsSolver } from './planegcs-runtime';
@@ -14,6 +15,40 @@ beforeAll(async () => {
 });
 
 afterAll(() => solver.dispose());
+
+describe('point-on-line PlaneGCS projection', () => {
+  it('projects point-line coincident relationships as point-on-line constraints', () => {
+    const document = createSketchDocument({
+      id: 'sketch:point-on-line',
+      name: 'Point on line',
+      entities: [
+        { id: 'line:a', kind: 'line', start: { x: 0, y: 0 }, end: { x: 10, y: 0 } },
+        { id: 'point:a', kind: 'point', position: { x: 4, y: 3 } },
+      ],
+      constraints: [
+        {
+          id: 'constraint:coincident',
+          version: 1,
+          type: 'coincident',
+          refs: [{ entityId: 'point:a' }, { entityId: 'line:a' }],
+        },
+      ],
+      dimensions: [],
+      groups: [],
+      parameters: [],
+    });
+    const projection = toPlaneGcs(document);
+
+    expect(projection.primitives).toContainEqual(
+      expect.objectContaining({
+        id: 'constraint:coincident',
+        type: 'point_on_line_pl',
+        l_id: 'line:a',
+      }),
+    );
+    expect(projection.diagnostics).toEqual([]);
+  });
+});
 
 describe('shared-topology PlaneGCS projection', () => {
   it('projects every Attune node once and makes incident entities reference it', () => {

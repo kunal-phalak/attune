@@ -2,6 +2,7 @@ export * from './agent-tasks';
 export * from './geometry';
 export * from './hash';
 export * from './intent/candidate-engine';
+export * from './intent/constraint-tools';
 export * from './intent/curve-proximity';
 export * from './intent/marquee';
 export * from './intent/selection-context';

@@ -105,6 +105,25 @@
     width: 276px;
   }
 
+  .workspace-version-actions {
+    display: grid;
+    gap: 4px;
+    margin-top: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--color-kumo-line);
+  }
+
+  .workspace-version-actions > button {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .workspace-version-actions > small {
+    color: var(--color-kumo-subtle);
+    font-size: 0.875rem;
+    line-height: 1.35;
+  }
+
   .workspace-version-preview {
     position: absolute;
     z-index: var(--attune-layer-controls);
@@ -147,16 +166,19 @@
   .workspace-tool-island {
     position: absolute;
     z-index: var(--attune-layer-controls);
-    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 4px);
+    top: calc(var(--editor-header-height) + var(--editor-viewport-gap));
     display: flex;
+    box-sizing: border-box;
     width: var(--editor-island-width);
     flex-direction: column;
     gap: var(--editor-island-gap);
     padding: var(--editor-island-padding);
-    border: 1px solid color-mix(in oklch, var(--color-kumo-line) 88%, transparent);
+    border: 0;
     border-radius: var(--editor-panel-radius);
-    background: color-mix(in oklch, var(--color-kumo-base) 94%, transparent);
-    box-shadow: 0 5px 18px rgb(23 30 40 / 8%);
+    background: color-mix(in oklch, var(--color-kumo-base) 97%, transparent);
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--color-kumo-line) 90%, transparent),
+      0 5px 16px rgb(23 30 40 / 9%);
     transition: transform var(--editor-motion-duration) var(--editor-motion-ease);
     backdrop-filter: blur(12px);
   }
@@ -168,8 +190,11 @@
   .workspace-tool-button {
     box-sizing: border-box;
     width: 100%;
+    min-height: var(--editor-control-size);
     min-width: 0;
+    border-radius: 7px !important;
     justify-content: flex-start !important;
+    text-align: left !important;
   }
 
   .workspace-shell[data-tool-labels='false'] .workspace-tool-button {
@@ -190,6 +215,7 @@
     overflow: hidden;
     font-size: 0.875rem;
     font-weight: 500;
+    line-height: 1.2;
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -200,19 +226,27 @@
   }
 
   .workspace-tool-island.is-geometry {
-    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 156px);
+    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 134px);
   }
 
   .workspace-tool-island.is-right {
     right: var(--editor-viewport-gap);
   }
 
+  .workspace-tool-island.is-right.is-constraints {
+    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 54px);
+  }
+
+  .workspace-tool-island.is-right.is-dimensions {
+    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 428px);
+  }
+
   .workspace-shell[data-left-panel-open='true'] .workspace-tool-island.is-left {
-    transform: translateX(calc(var(--editor-panel-width) + var(--editor-panel-gap)));
+    transform: translateX(calc(var(--editor-left-panel-width) + var(--editor-panel-gap)));
   }
 
   .workspace-shell[data-right-panel-open='true'] .workspace-tool-island.is-right {
-    transform: translateX(calc(-1 * (var(--editor-panel-width) + var(--editor-panel-gap))));
+    transform: translateX(calc(-1 * (var(--editor-right-panel-width) + var(--editor-panel-gap))));
   }
 
   .workspace-settings-button {
@@ -224,7 +258,7 @@
   }
 
   .workspace-shell[data-left-panel-open='true'] .workspace-settings-button {
-    transform: translateX(calc(var(--editor-panel-width) + var(--editor-panel-gap)));
+    transform: translateX(calc(var(--editor-left-panel-width) + var(--editor-panel-gap)));
   }
 
   .workspace-settings-popover {
@@ -235,19 +269,25 @@
     margin-top: 8px;
   }
 
+  .workspace-sidebar-provider {
+    display: contents;
+  }
+
   .workspace-overlay-panel {
     position: absolute;
     z-index: var(--attune-layer-panels);
     top: calc(var(--editor-header-height) + var(--editor-viewport-gap));
     bottom: var(--editor-viewport-gap);
     display: flex;
-    width: var(--editor-panel-width);
+    height: auto !important;
+    width: var(--sidebar-width, var(--editor-panel-width));
     min-height: 0;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid color-mix(in oklch, var(--color-kumo-line) 90%, transparent);
     background: color-mix(in oklch, var(--color-kumo-base) 97%, transparent);
-    box-shadow: 0 12px 34px rgb(23 30 40 / 10%);
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--color-kumo-line) 90%, transparent),
+      0 12px 34px rgb(23 30 40 / 10%);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -261,11 +301,13 @@
 
   .workspace-overlay-panel.is-left {
     left: var(--editor-viewport-gap);
+    width: var(--sidebar-width, var(--editor-left-panel-width));
     transform: translateX(-12px);
   }
 
   .workspace-overlay-panel.is-right {
     right: var(--editor-viewport-gap);
+    width: var(--sidebar-width, var(--editor-right-panel-width));
     transform: translateX(12px);
   }
 
@@ -277,24 +319,24 @@
     transition-delay: 0s;
   }
 
-  .workspace-overlay-panel > header {
+  .workspace-overlay-panel [data-sidebar='header'] {
     display: flex;
-    height: 48px;
+    height: 44px;
     flex: 0 0 auto;
     align-items: center;
     justify-content: space-between;
-    padding: 0 8px 0 14px;
+    padding: 0 7px 0 10px;
     border-bottom: 1px solid var(--color-kumo-line);
   }
 
-  .workspace-overlay-panel > header button {
+  .workspace-overlay-panel [data-sidebar='header'] button {
     width: var(--editor-close-size);
     height: var(--editor-close-size);
     min-width: var(--editor-close-size);
     min-height: var(--editor-close-size);
   }
 
-  .workspace-overlay-panel > header > strong {
+  .workspace-overlay-panel [data-sidebar='header'] > strong {
     font-size: 0.875rem;
     font-weight: 600;
   }
@@ -307,7 +349,27 @@
     flex: 1;
     flex-direction: column;
     overflow: hidden;
-    padding: 12px;
+    padding: 0;
+    text-align: left;
+  }
+
+  .workspace-overlay-panel-content > [data-sidebar='viewport'] {
+    padding: 6px !important;
+  }
+
+  .workspace-overlay-panel-content > [data-sidebar='viewport'] > * {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100%;
+  }
+
+  .workspace-overlay-panel-content > [data-orientation='vertical'] {
+    opacity: 0.3 !important;
+  }
+
+  .workspace-overlay-panel-content > [data-orientation='vertical'][data-hovering],
+  .workspace-overlay-panel-content > [data-orientation='vertical'][data-scrolling] {
+    opacity: 1 !important;
   }
 
   .sketch-orientation-hud {
@@ -553,6 +615,40 @@
     background: var(--color-kumo-fill-hover);
   }
 
+  .sketch-version-list li {
+    padding: 0;
+  }
+
+  .sketch-version-list li > button {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: flex-start;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: 7px;
+    color: inherit;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sketch-version-list li > button > span {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .sketch-version-list li[data-selected='true'] > button {
+    background: var(--color-kumo-fill);
+  }
+
+  .sketch-version-list strong,
+  .sketch-version-list small {
+    font-size: 0.875rem;
+    line-height: 1.35;
+    text-align: left;
+  }
+
   .sketch-item-icon {
     display: grid;
     width: 18px;
@@ -574,10 +670,13 @@
   }
 
   .sketch-panel-note {
+    max-width: 100%;
     margin: 8px 2px 12px;
     color: var(--color-kumo-subtle);
     font-size: 0.875rem;
     line-height: 1.55;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .sketch-panel-subtitle {
@@ -1177,90 +1276,57 @@
     pointer-events: none;
   }
 
-  .sketch-constraint-badge,
-  .sketch-dimension-label {
+  .sketch-constraint-hit-target,
+  .sketch-dimension-hit-target {
     position: absolute;
     box-sizing: border-box;
     translate: -50% -50%;
     pointer-events: auto;
-    transition-property: color, background-color, border-color, opacity, scale;
-    transition-duration: 120ms;
-    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+    border: 0;
+    background: transparent;
   }
 
-  .sketch-constraint-badge {
+  .sketch-constraint-hit-target {
     display: grid;
-    min-width: 22px;
-    height: 22px;
-    padding: 0 5px;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    padding: 0;
     place-items: center;
-    border: 1px solid rgb(75 91 105 / 22%);
-    border-radius: 6px;
-    color: #5d6a75;
-    background: rgb(247 248 249 / 92%);
-    box-shadow: 0 1px 4px rgb(24 35 45 / 10%);
-    font:
-      600 11px/1 ui-sans-serif,
-      system-ui,
-      sans-serif;
-    backdrop-filter: blur(8px);
+    border-radius: 5px;
+    color: var(--color-kumo-subtle);
+    background: color-mix(in oklch, var(--color-kumo-base) 94%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-kumo-line) 86%, transparent);
+    font-size: 9px;
+    line-height: 1;
   }
 
-  .sketch-constraint-badge:hover,
-  .sketch-constraint-badge[data-related='true'] {
-    color: #1e6f9f;
-    border-color: rgb(35 126 184 / 45%);
-    scale: 1.04;
+  .sketch-constraint-hit-target[data-overflow='true'] {
+    width: auto;
+    padding: 0 4px;
   }
 
-  .sketch-constraint-badge[data-selected='true'] {
+  .sketch-constraint-hit-target[data-related='true'] {
+    color: #237eb8;
+    box-shadow: 0 0 0 1px rgb(35 126 184 / 55%);
+  }
+
+  .sketch-constraint-hit-target[data-selected='true'] {
     color: #9a430e;
-    border-color: #e87020;
     background: #fff3e9;
+    box-shadow: 0 0 0 1px rgb(232 112 32 / 92%);
   }
 
-  .sketch-constraint-badge[data-conflict='true'] {
+  .sketch-constraint-hit-target[data-conflict='true'] {
     color: #b51f32;
-    border-color: #cd303e;
     background: #fff0f2;
+    box-shadow: 0 0 0 1px rgb(205 48 62 / 90%);
   }
 
-  .sketch-constraint-badge[data-overflow='true'] {
-    min-width: 28px;
-    border-radius: 999px;
-  }
-
-  .sketch-dimension-label,
-  .sketch-temporary-measurement {
-    border: 1px solid rgb(55 91 116 / 20%);
-    border-radius: 6px;
-    color: #2f536c;
-    background: rgb(247 248 249 / 92%);
-    box-shadow: 0 2px 7px rgb(24 35 45 / 8%);
-    font:
-      600 11px/1.2 ui-monospace,
-      SFMono-Regular,
-      Menlo,
-      monospace;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-    backdrop-filter: blur(8px);
-  }
-
-  .sketch-dimension-label {
-    min-height: 24px;
-    padding: 4px 7px;
-  }
-
-  .sketch-dimension-label[data-kind='driving'] {
-    color: #2b7555;
-    border-color: rgb(34 139 94 / 38%);
-  }
-
-  .sketch-dimension-label[data-selected='true'] {
-    color: #9a430e;
-    border-color: #e87020;
-    background: #fff3e9;
+  .sketch-dimension-hit-target {
+    width: 96px;
+    height: 24px;
+    opacity: 0;
   }
 
   .sketch-dimension-editor,
@@ -1279,19 +1345,31 @@
 
   .sketch-dimension-popover-anchor {
     position: absolute;
-    right: 12px;
-    bottom: 12px;
+    z-index: var(--attune-layer-annotations);
     width: 1px;
     height: 1px;
+    translate: -50% -50%;
   }
 
-  .sketch-temporary-measurement {
-    position: absolute;
-    z-index: var(--attune-layer-annotations);
-    padding: 5px 7px;
-    color: #9a430e;
-    border-color: rgb(232 112 32 / 34%);
-    pointer-events: none;
+  .sketch-number-field {
+    display: flex;
+    height: 36px;
+    align-items: center;
+    border-radius: 8px;
+    background: var(--color-kumo-base);
+    box-shadow: 0 0 0 1px var(--color-kumo-line);
+  }
+
+  .sketch-number-field input {
+    width: 100%;
+    height: 100%;
+    padding: 0 10px;
+    border: 0;
+    outline: 0;
+    color: var(--color-kumo-default);
+    background: transparent;
+    font-size: 0.875rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .sketch-selection-context,
@@ -1347,7 +1425,7 @@
     background: transparent;
     font: inherit;
     cursor: pointer;
-    transition-property: color, background-color, scale;
+    transition-property: scale;
     transition-duration: 120ms;
     transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
   }
@@ -1373,7 +1451,52 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    margin-top: 6px;
+    margin-top: 2px;
+  }
+
+  .sketch-tree-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+    padding: 0 0 6px;
+  }
+
+  .sketch-item-context-positioner {
+    z-index: calc(var(--attune-layer-popovers) + 1);
+  }
+
+  .sketch-item-context-menu {
+    min-width: 178px;
+    padding: 4px;
+    border-radius: 9px;
+    color: var(--color-kumo-default);
+    background: var(--color-kumo-base);
+    box-shadow:
+      0 0 0 1px var(--color-kumo-line),
+      0 10px 28px rgb(24 35 45 / 14%);
+  }
+
+  .sketch-item-context-item {
+    display: flex;
+    min-height: 32px;
+    align-items: center;
+    padding: 5px 8px;
+    border-radius: 6px;
+    outline: 0;
+    font-size: 0.875rem;
+    cursor: default;
+  }
+
+  .sketch-item-context-item[data-highlighted] {
+    background: var(--color-kumo-tint);
+  }
+
+  .sketch-item-context-item[data-destructive='true'] {
+    color: var(--color-kumo-danger);
+  }
+
+  .sketch-item-context-item[data-disabled] {
+    opacity: 0.5;
   }
 
   .sketch-item-branch {
@@ -1383,11 +1506,11 @@
   .sketch-item-branch-row,
   .sketch-item-ungrouped > .sketch-item-branch-row {
     display: flex;
-    min-height: 34px;
+    min-height: 30px;
     min-width: 0;
     align-items: center;
     gap: 7px;
-    padding: 3px 6px;
+    padding: 2px 4px;
     border-radius: 7px;
   }
 
@@ -1502,13 +1625,13 @@
   }
 
   .sketch-item-branch strong {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
   }
 
   .sketch-item-branch small {
     margin-top: 1px;
     color: var(--color-kumo-subtle);
-    font-size: 0.67rem;
+    font-size: 0.75rem;
   }
 
   .sketch-item-branch ul {
@@ -1532,20 +1655,20 @@
   .sketch-item-ungrouped strong,
   .sketch-item-ungrouped small {
     display: block;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
   }
 
   .sketch-item-ungrouped small {
     margin-top: 1px;
     color: var(--color-kumo-subtle);
-    font-size: 0.67rem;
+    font-size: 0.75rem;
   }
 
   .sketch-item-branch li {
     display: flex;
-    min-height: 32px;
+    min-height: 30px;
     align-items: center;
-    padding: 3px 6px;
+    padding: 2px 4px;
     border-radius: 7px;
   }
 

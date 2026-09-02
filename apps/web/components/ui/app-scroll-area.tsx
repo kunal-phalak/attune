@@ -28,7 +28,7 @@ export function AppScrollArea({
           {children}
         </ScrollArea.Content>
       </ScrollArea.Viewport>
-      <ScrollArea.Scrollbar className="flex w-2 touch-none select-none p-0.5 opacity-0 transition-opacity duration-100 data-[hovering]:opacity-100 data-[scrolling]:opacity-100 data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:w-auto data-[orientation=horizontal]:flex-col">
+      <ScrollArea.Scrollbar className="flex w-2 touch-none select-none p-0.5 opacity-30 transition-opacity duration-100 data-[hovering]:opacity-100 data-[scrolling]:opacity-100 data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:w-auto data-[orientation=horizontal]:flex-col">
         <ScrollArea.Thumb className="flex-1 rounded-full bg-kumo-interact" />
       </ScrollArea.Scrollbar>
       <ScrollArea.Corner className="bg-kumo-recessed" />

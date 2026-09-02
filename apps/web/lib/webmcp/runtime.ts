@@ -17,7 +17,11 @@ export interface RuntimeStatus {
 
 export interface AgentContextFocus {
   readonly entityIds?: readonly string[];
+  readonly nodeIds?: readonly string[];
+  readonly constraintIds?: readonly string[];
   readonly groupIds?: readonly string[];
+  readonly activeGroupId?: string;
+  readonly activeHumanTool?: string;
   readonly region?: {
     readonly minX: number;
     readonly minY: number;
@@ -103,7 +107,11 @@ function contextParameters(focus?: AgentContextFocus): Readonly<Record<string, s
   return {
     format: 'context',
     ...(focus?.entityIds?.length ? { entity_ids: focus.entityIds.join(',') } : {}),
+    ...(focus?.nodeIds?.length ? { node_ids: focus.nodeIds.join(',') } : {}),
+    ...(focus?.constraintIds?.length ? { constraint_ids: focus.constraintIds.join(',') } : {}),
     ...(focus?.groupIds?.length ? { group_ids: focus.groupIds.join(',') } : {}),
+    ...(focus?.activeGroupId ? { active_group_id: focus.activeGroupId } : {}),
+    ...(focus?.activeHumanTool ? { active_human_tool: focus.activeHumanTool } : {}),
     ...(focus?.region
       ? {
           min_x: focus.region.minX,

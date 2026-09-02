@@ -5,19 +5,22 @@ import {
   executeHumanSemanticCommand,
   inspectForHuman,
 } from '../../../../lib/attune-runtime';
+import { ServerTimingTrace } from '../../../../lib/server-timing';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  const timing = new ServerTimingTrace();
   try {
     const workspaceId = parseWorkspaceId(new URL(request.url).searchParams.get('workspace_id'));
-    return noStoreJson(await inspectForHuman(workspaceId));
+    return timing.apply(noStoreJson(await inspectForHuman(workspaceId, 'buyer', timing.record)));
   } catch (error) {
-    return attuneErrorResponse(error);
+    return timing.apply(attuneErrorResponse(error));
   }
 }
 
 export async function POST(request: Request) {
+  const timing = new ServerTimingTrace();
   try {
     const workspaceId = parseWorkspaceId(new URL(request.url).searchParams.get('workspace_id'));
     const input = parseCommandExecutionInput(await request.json(), [
@@ -41,13 +44,15 @@ export async function POST(request: Request) {
       'remove_dimension',
       'restore_sketch',
     ]);
-    return noStoreJson(
-      isSketchCommand(input.command)
-        ? await executeHumanSemanticCommand(workspaceId, input)
-        : await executeHumanCommand(workspaceId, input),
+    return timing.apply(
+      noStoreJson(
+        isSketchCommand(input.command)
+          ? await executeHumanSemanticCommand(workspaceId, input, 'buyer', timing.record)
+          : await executeHumanCommand(workspaceId, input),
+      ),
     );
   } catch (error) {
-    return attuneErrorResponse(error);
+    return timing.apply(attuneErrorResponse(error));
   }
 }
 import { isSketchCommand } from '@attune/domain';

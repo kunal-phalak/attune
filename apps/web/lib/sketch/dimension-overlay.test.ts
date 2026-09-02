@@ -47,4 +47,31 @@ describe('dimension overlay layout', () => {
       }),
     ).toEqual([]);
   });
+
+  it('keeps a label near its dimension when several constraint glyphs occupy the anchor', () => {
+    const constrainedDocument = createSketchDocument({
+      ...document,
+      dimensions: [
+        {
+          id: 'dimension:line',
+          version: 1,
+          kind: 'distance',
+          refs: [
+            { entityId: 'line', anchor: 'start' },
+            { entityId: 'line', anchor: 'end' },
+          ],
+          value: 40,
+          driving: true,
+        },
+      ],
+    });
+    const labels = projectDimensionOverlay(
+      constrainedDocument,
+      camera,
+      { entityIds: [], dimensionIds: [] },
+      Array.from({ length: 9 }, (_, index) => ({ x: 40 + index * 18, y: 44 - index * 3 })),
+      { width: 320, height: 240 },
+    );
+    expect(Math.hypot(labels[0].screen.x - 40, labels[0].screen.y - 44)).toBeLessThan(90);
+  });
 });

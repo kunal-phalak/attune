@@ -26,7 +26,9 @@ export function capabilityTransition(
   const afterKeys = new Set(afterReferences.map(referenceKey));
 
   return {
-    transitionId: `capability-transition:${after.workspaceSeq}`,
+    // A sequence is only unique inside one workspace. The receipt carries the
+    // workspace-scoped command identity, so it also keeps the persisted primary key unique.
+    transitionId: `capability-transition:${receiptId}`,
     receiptId,
     workspaceSeq: after.workspaceSeq,
     capabilityEpoch: after.capabilityEpoch,

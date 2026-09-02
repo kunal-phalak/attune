@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createSketchDocument } from '../sketch/document';
-import { rankSnapCandidates, snapSketchPoint } from './snap';
+import { chooseSnapCandidateWithHysteresis, rankSnapCandidates, snapSketchPoint } from './snap';
 
 const document = createSketchDocument({
   id: 'sketch:snap-candidates',
@@ -17,6 +17,23 @@ const document = createSketchDocument({
 });
 
 describe('ranked screen-space snap candidates', () => {
+  it('retains a captured candidate through a larger release radius', () => {
+    const captured = {
+      kind: 'endpoint' as const,
+      point: { x: 10, y: 0 },
+      distance: 8,
+      score: 1,
+      label: 'Endpoint',
+      entityId: 'line',
+      anchor: 'end' as const,
+    };
+    const outsideCapture = { ...captured, distance: 12 };
+    expect(chooseSnapCandidateWithHysteresis(captured, [outsideCapture], { cameraZoom: 1 })).toBe(
+      outsideCapture,
+    );
+    expect(chooseSnapCandidateWithHysteresis(null, [outsideCapture], { cameraZoom: 1 })).toBeNull();
+  });
+
   it('ranks an endpoint above a nearby grid point', () => {
     const result = snapSketchPoint(
       document,

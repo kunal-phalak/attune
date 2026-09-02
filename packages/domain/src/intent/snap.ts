@@ -56,8 +56,42 @@ export interface SnapOptions {
   readonly excludeEntityIds?: readonly string[];
 }
 
+export interface SnapHysteresisOptions {
+  readonly captureScreenDistance?: number;
+  readonly releaseScreenDistance?: number;
+  readonly cameraZoom: number;
+}
+
 function pointDistance(first: SketchPoint2D, second: SketchPoint2D): number {
   return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function sameCandidate(left: SnapCandidate, right: SnapCandidate): boolean {
+  return (
+    left.kind === right.kind &&
+    left.entityId === right.entityId &&
+    left.anchor === right.anchor &&
+    pointDistance(left.point, right.point) <= 1e-7
+  );
+}
+
+/**
+ * Keeps a captured semantic snap until the pointer crosses a larger release radius. The caller
+ * should rank candidates using at least `releaseScreenDistance` so the retained candidate remains
+ * observable outside the initial capture radius.
+ */
+export function chooseSnapCandidateWithHysteresis(
+  previous: SnapCandidate | null,
+  candidates: readonly SnapCandidate[],
+  options: SnapHysteresisOptions,
+): SnapCandidate | null {
+  const capture = (options.captureScreenDistance ?? 10) / options.cameraZoom;
+  const release = (options.releaseScreenDistance ?? 15) / options.cameraZoom;
+  if (previous) {
+    const retained = candidates.find((candidate) => sameCandidate(candidate, previous));
+    if (retained && retained.distance <= release) return retained;
+  }
+  return candidates.find(({ distance }) => distance <= capture) ?? null;
 }
 
 function weight(kind: SnapCandidateKind, tool: SnapOptions['currentTool']): number {

@@ -7,6 +7,19 @@ export type CanvasTool =
   | 'ellipse'
   | 'bspline'
   | 'trim';
+export type ConstraintTool =
+  | 'coincident'
+  | 'horizontal'
+  | 'vertical'
+  | 'parallel'
+  | 'perpendicular'
+  | 'tangent'
+  | 'concentric'
+  | 'equal'
+  | 'fixed'
+  | 'distance'
+  | 'radius'
+  | 'diameter';
 export type LeftPanel = 'items' | 'comments';
 export type RightPanel = 'constraints' | 'history';
 export type EditorPanel = LeftPanel | RightPanel;

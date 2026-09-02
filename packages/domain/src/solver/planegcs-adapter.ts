@@ -88,10 +88,24 @@ function projectRelation(
     temporary(primitive, 'temporary' in source && source.temporary === true);
 
   switch (type) {
-    case 'coincident':
-      return p1 && p2
-        ? withTemporary({ id: source.id, type: 'p2p_coincident', p1_id: p1, p2_id: p2 })
+    case 'coincident': {
+      if (p1 && p2) {
+        return withTemporary({ id: source.id, type: 'p2p_coincident', p1_id: p1, p2_id: p2 });
+      }
+      const pointIndex = entities.findIndex(
+        (entity, index) => entity && refs[index] && internalPointId(refs[index], entity),
+      );
+      const lineIndex = entities.findIndex(
+        (entity, index) => entity?.kind === 'line' && (refs[index]?.anchor ?? 'self') === 'self',
+      );
+      const point = pointIndex >= 0 ? entities[pointIndex] : undefined;
+      const pointReference = pointIndex >= 0 ? refs[pointIndex] : undefined;
+      const line = lineIndex >= 0 ? entities[lineIndex] : undefined;
+      const pointId = point && pointReference ? internalPointId(pointReference, point) : undefined;
+      return pointId && line?.kind === 'line'
+        ? withTemporary({ id: source.id, type: 'point_on_line_pl', p_id: pointId, l_id: line.id })
         : undefined;
+    }
     case 'horizontal':
       if (refs.length === 1 && first.kind === 'line') {
         return withTemporary({ id: source.id, type: 'horizontal_l', l_id: first.id });

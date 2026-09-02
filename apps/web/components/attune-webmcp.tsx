@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   attuneWorkspaceEndpoint,
+  isAttuneApiView,
   requestAttuneView,
   type AttuneApiView,
   type CapabilityRole,
@@ -27,10 +28,12 @@ export interface AttuneWebMcpStatus {
 export function AttuneWebMcp({
   workspaceId,
   perspective,
+  initialView,
   onStatus,
 }: {
   readonly workspaceId: string;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly initialView?: AttuneApiView;
   readonly onStatus?: (status: AttuneWebMcpStatus) => void;
 }) {
   const [registration, setRegistration] = useState<RegistrationState>('checking');
@@ -38,8 +41,8 @@ export function AttuneWebMcp({
     execution: 'idle',
     lastAction: null,
   });
-  const [view, setView] = useState<AttuneApiView | null>(null);
-  const viewRef = useRef<AttuneApiView | null>(null);
+  const [view, setView] = useState<AttuneApiView | null>(initialView ?? null);
+  const viewRef = useRef<AttuneApiView | null>(initialView ?? null);
   const updateView = useCallback((next: AttuneApiView) => {
     viewRef.current = next;
     setView(next);
@@ -63,11 +66,17 @@ export function AttuneWebMcp({
   const workspaceReady = view !== null;
 
   useEffect(() => {
-    void refresh().catch(() => setRegistration('failed'));
-    const reload = () => void refresh().catch(() => setRegistration('failed'));
+    if (!initialView) void refresh().catch(() => setRegistration('failed'));
+    const reload = (event: Event) => {
+      if (event instanceof CustomEvent && isAttuneApiView(event.detail)) {
+        updateView(event.detail);
+        return;
+      }
+      void refresh().catch(() => setRegistration('failed'));
+    };
     window.addEventListener('attune:workspace-changed', reload);
     return () => window.removeEventListener('attune:workspace-changed', reload);
-  }, [refresh]);
+  }, [initialView, refresh, updateView]);
 
   useEffect(() => {
     const context = document.modelContext;

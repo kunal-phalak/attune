@@ -5,9 +5,15 @@ import {
   applySketchCommand,
   arcPoint,
   bsplineCreation,
+  chooseSnapCandidateWithHysteresis,
   circleCreation,
+  constraintInputForTool,
+  constraintToolApplicability,
+  defaultDimensionValue,
+  dimensionInputForTool,
   ellipsePoint,
   ellipseCreation,
+  EMPTY_SELECTION_SET,
   geometryBounds,
   geometryNodeIds,
   hitTestSketch,
@@ -19,7 +25,6 @@ import {
   replaceSelection,
   selectEntitiesInMarquee,
   selectionCount,
-  snapSketchPoint,
   threePointArcCreation,
   trimSegmentAtPoint,
   toggleSelection,
@@ -33,9 +38,15 @@ import {
   type SnapCandidate,
 } from '@attune/domain/editor';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Input } from '@cloudflare/kumo/components/input';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import type { Canvas as SkCanvas, CanvasKit, Paint, Surface } from 'canvaskit-wasm';
+import { NumberField } from '@cloudflare/kumo/primitives/number-field';
+import type {
+  Canvas as SkCanvas,
+  CanvasKit,
+  Image as SkImage,
+  Paint,
+  Surface,
+} from 'canvaskit-wasm';
 import {
   forwardRef,
   useEffect,
@@ -58,16 +69,21 @@ import {
   projectConstraintOverlay,
   type ConstraintOverlayBadge,
 } from '../lib/sketch/constraint-overlay';
-import { projectDimensionOverlay } from '../lib/sketch/dimension-overlay';
+import {
+  projectDimensionOverlay,
+  type DimensionOverlayLabel,
+} from '../lib/sketch/dimension-overlay';
 import { editorCursorFor, type EditorCursorMode } from '../lib/sketch/editor-cursors';
+import { editorToastManager } from '../lib/sketch/editor-toast';
 import { adaptiveGridStep } from '../lib/sketch/grid';
-import type { CanvasTool } from '../lib/sketch/panel-state';
+import type { CanvasTool, ConstraintTool } from '../lib/sketch/panel-state';
 import {
   previewGeometryTransform,
   selectionBounds,
   type GeometryTransform,
 } from '../lib/sketch/transform-preview';
 import type { ViewportInsets } from '../lib/sketch/viewport-insets';
+import { AppIcons } from './ui/app-icons';
 import { WorkspaceOrientationHud } from './workspace-orientation-hud';
 
 declare global {
@@ -79,6 +95,10 @@ declare global {
 }
 
 let canvasKitPromise: Promise<CanvasKit> | undefined;
+const canvasTextImages = new Map<
+  string,
+  { readonly image: SkImage; readonly width: number; readonly height: number }
+>();
 
 function loadCanvasKit(): Promise<CanvasKit> {
   canvasKitPromise ??= new Promise<CanvasKit>((resolve, reject) => {
@@ -182,6 +202,21 @@ interface CreationSession {
   readonly current: SketchPoint2D | null;
   readonly snapCandidates: readonly SnapCandidate[];
 }
+
+type DimensionEditorState =
+  | {
+      readonly mode: 'edit';
+      readonly id: string;
+      readonly value: number;
+      readonly screen: SketchPoint2D;
+    }
+  | {
+      readonly mode: 'create';
+      readonly id: string;
+      readonly kind: 'distance' | 'radius' | 'diameter';
+      readonly value: number;
+      readonly screen: SketchPoint2D;
+    };
 
 interface MarqueeVisual {
   readonly origin: SketchPoint2D;
@@ -420,7 +455,7 @@ function drawSketch(
   const conflict = paint(canvasKit, canvasKit.Color(205, 48, 62, 1), 2.25 / camera.zoom);
   const selectedUnder = paint(canvasKit, canvasKit.Color(232, 112, 32, 1), 2 / camera.zoom);
   const halo = paint(canvasKit, canvasKit.Color(246, 143, 62, 0.62), 3.6 / camera.zoom);
-  const hoverPaint = paint(canvasKit, canvasKit.Color(72, 161, 211, 1), 2.15 / camera.zoom);
+  const hoverPaint = paint(canvasKit, canvasKit.Color(72, 161, 211, 0.58), 3 / camera.zoom);
   const construction = paint(canvasKit, canvasKit.Color(104, 124, 141, 0.75), 1.2 / camera.zoom);
   const selectedIds = new Set(selection.entityIds);
   const relatedIds = new Set(hover.constraintEntityIds);
@@ -438,6 +473,8 @@ function drawSketch(
       const related = relatedIds.has(primitive.id);
       const remote = remoteSelections.find(({ entityIds }) => entityIds.includes(primitive.id));
       if (selected || related) drawPrimitive(canvas, primitive, halo);
+      if (!selected && primitive.id === hover.entityId)
+        drawPrimitive(canvas, primitive, hoverPaint);
       if (remote) {
         const remoteHalo = paint(
           canvasKit,
@@ -455,9 +492,7 @@ function drawSketch(
             ? selectedUnder
             : state?.fullyDefined
               ? full
-              : primitive.id === hover.entityId
-                ? hoverPaint
-                : under;
+              : under;
       drawPrimitive(canvas, primitive, semantic);
     }
     const visibleNodes = new Set([
@@ -608,7 +643,7 @@ function drawCreationGuides(
   const dash = canvasKit.PathEffect.MakeDash([7 / camera.zoom, 5 / camera.zoom]);
   guide.setPathEffect(dash);
   try {
-    for (const candidate of session.snapCandidates.slice(0, 3)) {
+    for (const [index, candidate] of session.snapCandidates.slice(0, 3).entries()) {
       if (candidate.guide) {
         canvas.drawLine(
           candidate.guide.from.x,
@@ -618,7 +653,9 @@ function drawCreationGuides(
           guide,
         );
       }
-      canvas.drawCircle(candidate.point.x, candidate.point.y, 5 / camera.zoom, active);
+      if (index === 0) {
+        canvas.drawCircle(candidate.point.x, candidate.point.y, 5 / camera.zoom, active);
+      }
     }
     const preview = creationPreview(session);
     preview.forEach((primitive) => drawPrimitive(canvas, primitive, active));
@@ -701,6 +738,189 @@ function drawScreenArrow(
       tip.y + Math.sin(angle + offset) * length,
       line,
     );
+  }
+}
+
+function drawCanvasText(
+  canvasKit: CanvasKit,
+  canvas: SkCanvas,
+  text: string,
+  screen: SketchPoint2D,
+  color: readonly [number, number, number],
+  size = 11,
+  rotation = 0,
+): void {
+  const key = `${text}|${color.join(',')}|${size}`;
+  let cached = canvasTextImages.get(key);
+  if (!cached) {
+    const scale = 2;
+    const source = document.createElement('canvas');
+    const context = source.getContext('2d');
+    if (!context) return;
+    context.font = `500 ${size * scale}px Geist, system-ui, sans-serif`;
+    const width = Math.ceil(context.measureText(text).width / scale + 8);
+    const height = Math.ceil(size * 1.65 + 6);
+    source.width = width * scale;
+    source.height = height * scale;
+    context.scale(scale, scale);
+    context.font = `500 ${size}px Geist, system-ui, sans-serif`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.lineJoin = 'round';
+    context.strokeStyle = 'rgba(247, 248, 249, 0.92)';
+    context.lineWidth = 3.2;
+    context.fillStyle = `rgb(${color.join(' ')})`;
+    context.strokeText(text, width / 2, height / 2);
+    context.fillText(text, width / 2, height / 2);
+    cached = { image: canvasKit.MakeImageFromCanvasImageSource(source), width, height };
+    canvasTextImages.set(key, cached);
+    if (canvasTextImages.size > 96) {
+      const oldest = canvasTextImages.entries().next();
+      if (!oldest.done && oldest.value[0] !== key) {
+        oldest.value[1].image.delete();
+        canvasTextImages.delete(oldest.value[0]);
+      }
+    }
+  }
+  const imagePaint = new canvasKit.Paint();
+  imagePaint.setAntiAlias(true);
+  try {
+    canvas.save();
+    canvas.translate(screen.x, screen.y);
+    if (rotation) canvas.rotate((rotation * 180) / Math.PI, 0, 0);
+    canvas.drawImageRect(
+      cached.image,
+      [0, 0, cached.image.width(), cached.image.height()],
+      [-cached.width / 2, -cached.height / 2, cached.width / 2, cached.height / 2],
+      imagePaint,
+      true,
+    );
+    canvas.restore();
+  } finally {
+    imagePaint.delete();
+  }
+}
+
+function lineIntersection(
+  first: Extract<GeometryEntity, { kind: 'line' }>,
+  second: Extract<GeometryEntity, { kind: 'line' }>,
+): SketchPoint2D | null {
+  const ax = first.end.x - first.start.x;
+  const ay = first.end.y - first.start.y;
+  const bx = second.end.x - second.start.x;
+  const by = second.end.y - second.start.y;
+  const determinant = ax * by - ay * bx;
+  if (Math.abs(determinant) <= 1e-8) return null;
+  const dx = second.start.x - first.start.x;
+  const dy = second.start.y - first.start.y;
+  const firstParameter = (dx * by - dy * bx) / determinant;
+  const secondParameter = (dx * ay - dy * ax) / determinant;
+  if (
+    firstParameter < -0.02 ||
+    firstParameter > 1.02 ||
+    secondParameter < -0.02 ||
+    secondParameter > 1.02
+  )
+    return null;
+  return {
+    x: first.start.x + ax * firstParameter,
+    y: first.start.y + ay * firstParameter,
+  };
+}
+
+function drawPerpendicularMarks(
+  canvasKit: CanvasKit,
+  canvas: SkCanvas,
+  camera: Camera2D,
+  document: SketchDocument,
+): void {
+  const marker = paint(canvasKit, canvasKit.Color(82, 96, 108, 0.78), 1.2);
+  try {
+    for (const constraint of document.constraints.filter(
+      ({ type, temporary }) => type === 'perpendicular' && !temporary,
+    )) {
+      const entities = constraint.refs.map(({ entityId }) =>
+        document.entities.find(({ id }) => id === entityId),
+      );
+      const [first, second] = entities;
+      if (first?.kind !== 'line' || second?.kind !== 'line') continue;
+      const intersection = lineIntersection(first, second);
+      if (!intersection) continue;
+      const screen = camera.worldToScreen(intersection);
+      const firstDirection = {
+        x: first.end.x - first.start.x,
+        y: -(first.end.y - first.start.y),
+      };
+      const secondDirection = {
+        x: second.end.x - second.start.x,
+        y: -(second.end.y - second.start.y),
+      };
+      const firstLength = Math.max(1e-9, Math.hypot(firstDirection.x, firstDirection.y));
+      const secondLength = Math.max(1e-9, Math.hypot(secondDirection.x, secondDirection.y));
+      const a = { x: firstDirection.x / firstLength, y: firstDirection.y / firstLength };
+      const b = { x: secondDirection.x / secondLength, y: secondDirection.y / secondLength };
+      const size = 9;
+      const firstPoint = { x: screen.x + a.x * size, y: screen.y + a.y * size };
+      const corner = {
+        x: screen.x + (a.x + b.x) * size,
+        y: screen.y + (a.y + b.y) * size,
+      };
+      const secondPoint = { x: screen.x + b.x * size, y: screen.y + b.y * size };
+      canvas.drawLine(firstPoint.x, firstPoint.y, corner.x, corner.y, marker);
+      canvas.drawLine(corner.x, corner.y, secondPoint.x, secondPoint.y, marker);
+    }
+  } finally {
+    marker.delete();
+  }
+}
+
+function drawDimensionLabels(
+  canvasKit: CanvasKit,
+  canvas: SkCanvas,
+  labels: readonly DimensionOverlayLabel[],
+): void {
+  for (const label of labels) {
+    drawCanvasText(
+      canvasKit,
+      canvas,
+      label.text,
+      label.screen,
+      label.selected ? [154, 67, 14] : label.kind === 'driving' ? [43, 117, 85] : [47, 83, 108],
+      11,
+      label.rotation,
+    );
+  }
+}
+
+function drawCreationScreenOverlay(
+  canvasKit: CanvasKit,
+  canvas: SkCanvas,
+  camera: Camera2D,
+  session: CreationSession | null,
+): void {
+  if (!session?.current) return;
+  const current = camera.worldToScreen(session.current);
+  const primary = session.snapCandidates[0];
+  if (primary) {
+    drawCanvasText(
+      canvasKit,
+      canvas,
+      primary.label,
+      { x: current.x, y: current.y - 17 },
+      [78, 91, 102],
+    );
+  }
+  const measurement = creationMeasurement(session);
+  if (measurement) {
+    measurement.split(' · ').forEach((part, index) => {
+      drawCanvasText(
+        canvasKit,
+        canvas,
+        part,
+        { x: current.x + 18, y: current.y + 24 + index * 15 },
+        [154, 67, 14],
+      );
+    });
   }
 }
 
@@ -799,6 +1019,7 @@ function renderSurface(
   surface: Surface,
   camera: Camera2D,
   metrics: CanvasMetrics,
+  insets: ViewportInsets,
   document: SketchDocument | null,
   selection: SelectionSet,
   hover: EditorHover,
@@ -835,7 +1056,29 @@ function renderSurface(
   drawTrimPreview(canvasKit, canvas, camera, trimPreview);
   drawCreationGuides(canvasKit, canvas, camera, creation);
   canvas.restore();
-  drawSelectedDimensionGeometry(canvasKit, canvas, camera, metrics, document, selection);
+  if (document) {
+    const badges = projectConstraintOverlay(document, camera, selection);
+    const dimensions = projectDimensionOverlay(
+      document,
+      camera,
+      selection,
+      badges.map(({ screen }) => screen),
+      { ...metrics, ...insets },
+    );
+    for (const entityId of new Set(
+      dimensions
+        .filter(({ entityIds }) => entityIds.length === 1)
+        .flatMap(({ entityIds }) => entityIds),
+    )) {
+      drawSelectedDimensionGeometry(canvasKit, canvas, camera, metrics, document, {
+        ...EMPTY_SELECTION_SET,
+        entityIds: [entityId],
+      });
+    }
+    drawPerpendicularMarks(canvasKit, canvas, camera, document);
+    drawDimensionLabels(canvasKit, canvas, dimensions);
+  }
+  drawCreationScreenOverlay(canvasKit, canvas, camera, creation);
   drawMarquee(canvasKit, canvas, marquee);
   canvas.restore();
   surface.flush();
@@ -860,6 +1103,33 @@ function selectionPivot(document: SketchDocument, entityIds: readonly string[]):
   return bounds
     ? { x: (bounds.minX + bounds.maxX) / 2, y: (bounds.minY + bounds.maxY) / 2 }
     : { x: 0, y: 0 };
+}
+
+function ConstraintBadgeGraphic({ badge }: { readonly badge: ConstraintOverlayBadge }) {
+  if (badge.kind === 'overflow') return <span>{badge.label}</span>;
+  const Icon =
+    badge.constraintType === 'coincident'
+      ? AppIcons.Coincident
+      : badge.constraintType === 'horizontal'
+        ? AppIcons.Horizontal
+        : badge.constraintType === 'vertical'
+          ? AppIcons.Vertical
+          : badge.constraintType === 'parallel'
+            ? AppIcons.Parallel
+            : badge.constraintType === 'perpendicular'
+              ? AppIcons.Perpendicular
+              : badge.constraintType === 'tangent'
+                ? AppIcons.Tangent
+                : badge.constraintType === 'equal'
+                  ? AppIcons.Equal
+                  : badge.constraintType === 'concentric'
+                    ? AppIcons.Concentric
+                    : badge.constraintType === 'fixed'
+                      ? AppIcons.Fixed
+                      : badge.constraintType === 'radius'
+                        ? AppIcons.Radius
+                        : AppIcons.Dimension;
+  return <Icon size={12} weight="regular" aria-hidden />;
 }
 
 function formatSketchNumber(value: number): string {
@@ -899,6 +1169,24 @@ function creationMeasurement(session: CreationSession): string {
     : '';
 }
 
+function constraintToolApplicabilityMessage(tool: ConstraintTool): string {
+  const instructions: Record<ConstraintTool, string> = {
+    coincident: 'Coincident — choose two points, or a point and a line.',
+    horizontal: 'Horizontal — choose a line.',
+    vertical: 'Vertical — choose a line.',
+    parallel: 'Parallel — choose two lines.',
+    perpendicular: 'Perpendicular — choose two lines.',
+    tangent: 'Tangent — choose two compatible curves.',
+    concentric: 'Concentric — choose two circles or arcs.',
+    equal: 'Equal — choose two lines, or two circles/arcs.',
+    fixed: 'Fix / Unfix — choose geometry.',
+    distance: 'Distance — choose a line.',
+    radius: 'Radius — choose a circle or arc.',
+    diameter: 'Diameter — choose a circle or arc.',
+  };
+  return instructions[tool];
+}
+
 export const WorkspaceCanvas = forwardRef<
   WorkspaceCanvasHandle,
   {
@@ -910,6 +1198,7 @@ export const WorkspaceCanvas = forwardRef<
     readonly projectName: string;
     readonly cursorMode: EditorCursorMode;
     readonly tool: CanvasTool;
+    readonly constraintTool: ConstraintTool | null;
     readonly document: SketchDocument | null;
     readonly selection: SelectionSet;
     readonly autoConstrain: boolean;
@@ -921,6 +1210,7 @@ export const WorkspaceCanvas = forwardRef<
     }[];
     readonly onSelectionChange: (selection: SelectionSet) => void;
     readonly onToolChange?: (tool: CanvasTool) => void;
+    readonly onConstraintToolChange?: (tool: ConstraintTool | null) => void;
     readonly onCommand?: (command: SketchCommand) => Promise<SketchDocument>;
   }
 >(function WorkspaceCanvas(
@@ -931,6 +1221,7 @@ export const WorkspaceCanvas = forwardRef<
     document,
     cursorMode,
     tool,
+    constraintTool,
     selection,
     autoConstrain,
     profileFill,
@@ -938,13 +1229,13 @@ export const WorkspaceCanvas = forwardRef<
     remoteSelections = EMPTY_REMOTE_SELECTIONS,
     onSelectionChange,
     onToolChange,
+    onConstraintToolChange,
     onCommand,
   },
   forwardedRef,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const measurementRef = useRef<HTMLOutputElement>(null);
   const cameraRef = useRef(new Camera2D({ minZoom: 0.08, maxZoom: 18 }));
   const surfaceRef = useRef<Surface | null>(null);
   const metricsRef = useRef<CanvasMetrics>({ width: 0, height: 0, pixelRatio: 1 });
@@ -952,6 +1243,7 @@ export const WorkspaceCanvas = forwardRef<
   const profileFillRef = useRef(profileFill);
   const remoteSelectionsRef = useRef(remoteSelections);
   const authoritativeRef = useRef(document);
+  const persistedDocumentRef = useRef(document);
   const displayDocumentRef = useRef(document);
   const selectionRef = useRef(selection);
   const hoverRef = useRef<EditorHover>(EMPTY_HOVER);
@@ -959,11 +1251,14 @@ export const WorkspaceCanvas = forwardRef<
   const creationRef = useRef<CreationSession | null>(null);
   const trimPreviewRef = useRef<GeometryEntity | null>(null);
   const pointerRef = useRef<PointerSession | null>(null);
-  const committingRef = useRef(false);
+  const committingRef = useRef(0);
+  const commitGenerationRef = useRef(0);
   const redrawRef = useRef<() => void>(() => undefined);
   const initializedRef = useRef(false);
   const cameraAnimationRef = useRef<number | null>(null);
   const previewFrameRef = useRef<number | null>(null);
+  const renderFrameRef = useRef<number | null>(null);
+  const snapLockRef = useRef<SnapCandidate | null>(null);
   const pendingPreviewRef = useRef<{
     readonly dragSessionId: string;
     readonly generation: number;
@@ -980,10 +1275,7 @@ export const WorkspaceCanvas = forwardRef<
   );
   const [surfaceState, setSurfaceState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [, setOverlayRevision] = useState(0);
-  const [dimensionEditor, setDimensionEditor] = useState<{
-    readonly id: string;
-    readonly value: string;
-  } | null>(null);
+  const [dimensionEditor, setDimensionEditor] = useState<DimensionEditorState | null>(null);
   const [viewState, setViewState] = useState<CameraViewState>({
     x: 0,
     y: 0,
@@ -1124,44 +1416,61 @@ export const WorkspaceCanvas = forwardRef<
     command: SketchCommand,
     preserveCurrentPreview = false,
   ): Promise<SketchDocument | null> => {
-    if (!onCommand || committingRef.current) return null;
-    committingRef.current = true;
+    if (!onCommand) return null;
+    const generation = ++commitGenerationRef.current;
+    committingRef.current += 1;
     setInteractionState('committing');
     setInteractionMessage(null);
-    if (!preserveCurrentPreview && authoritativeRef.current) {
+    const optimisticBase = displayDocumentRef.current ?? authoritativeRef.current;
+    if (!preserveCurrentPreview && optimisticBase) {
       try {
-        displayDocumentRef.current = applySketchCommand(authoritativeRef.current, command).document;
+        displayDocumentRef.current = applySketchCommand(optimisticBase, command).document;
+        authoritativeRef.current = displayDocumentRef.current;
         redraw();
       } catch {
         // The authority remains responsible for validation; unsupported local previews stay put.
       }
+    } else if (displayDocumentRef.current) {
+      authoritativeRef.current = displayDocumentRef.current;
     }
     try {
       const authoritative = await onCommand(command);
-      authoritativeRef.current = authoritative;
-      displayDocumentRef.current = authoritative;
-      updateSelection(pruneSelection(selectionRef.current, authoritative));
-      setInteractionMessage(null);
-      redraw();
+      persistedDocumentRef.current = authoritative;
+      if (generation === commitGenerationRef.current) {
+        authoritativeRef.current = authoritative;
+        displayDocumentRef.current = authoritative;
+        updateSelection(pruneSelection(selectionRef.current, authoritative));
+        setInteractionMessage(null);
+        redraw();
+      }
       return authoritative;
     } catch (error) {
-      displayDocumentRef.current = authoritativeRef.current;
+      if (generation === commitGenerationRef.current) {
+        authoritativeRef.current = persistedDocumentRef.current;
+        displayDocumentRef.current = persistedDocumentRef.current;
+      }
       const raw = error instanceof Error ? error.message : '';
       const label = command.type === 'apply_constraint' ? command.constraints[0]?.type : undefined;
-      setInteractionMessage(
-        raw.match(/fixed/i)
-          ? 'That geometry cannot move while its Fix constraint is locked.'
-          : command.type === 'apply_constraint'
-            ? `Adding ${label ? label[0].toUpperCase() + label.slice(1) : 'that constraint'} would over-constrain the selected geometry.`
-            : command.type === 'set_dimension'
-              ? 'That dimension conflicts with the geometry’s current constraints.'
-              : raw || 'The sketch change was not accepted.',
-      );
+      const message = raw.match(/fixed/i)
+        ? 'That geometry cannot move while its Fix constraint is locked.'
+        : command.type === 'apply_constraint'
+          ? `Adding ${label ? label[0].toUpperCase() + label.slice(1) : 'that constraint'} would over-constrain the selected geometry.`
+          : command.type === 'set_dimension'
+            ? 'That dimension conflicts with the geometry’s current constraints.'
+            : raw || 'The sketch change was not accepted.';
+      setInteractionMessage(null);
+      editorToastManager.add({
+        variant: 'error',
+        title:
+          command.type === 'apply_constraint' ? 'Constraint conflict' : 'Sketch change rejected',
+        description: message,
+      });
       redraw();
       return null;
     } finally {
-      committingRef.current = false;
-      setInteractionState('idle');
+      committingRef.current = Math.max(0, committingRef.current - 1);
+      if (!pointerRef.current)
+        setInteractionState(committingRef.current === 0 ? 'idle' : 'committing');
     }
   };
 
@@ -1204,23 +1513,28 @@ export const WorkspaceCanvas = forwardRef<
           publishView();
         };
         redrawRef.current = () => {
-          const surface = surfaceRef.current;
-          if (!surface) return;
-          renderSurface(
-            canvasKit,
-            surface,
-            cameraRef.current,
-            metricsRef.current,
-            displayDocumentRef.current,
-            selectionRef.current,
-            hoverRef.current,
-            definitionRef.current,
-            creationRef.current,
-            marqueeVisual(),
-            trimPreviewRef.current,
-            profileFillRef.current,
-            remoteSelectionsRef.current,
-          );
+          if (renderFrameRef.current !== null) return;
+          renderFrameRef.current = requestAnimationFrame(() => {
+            renderFrameRef.current = null;
+            const surface = surfaceRef.current;
+            if (!surface) return;
+            renderSurface(
+              canvasKit,
+              surface,
+              cameraRef.current,
+              metricsRef.current,
+              insetsRef.current,
+              displayDocumentRef.current,
+              selectionRef.current,
+              hoverRef.current,
+              definitionRef.current,
+              creationRef.current,
+              marqueeVisual(),
+              trimPreviewRef.current,
+              profileFillRef.current,
+              remoteSelectionsRef.current,
+            );
+          });
         };
         observer = new ResizeObserver(resize);
         observer.observe(host);
@@ -1239,12 +1553,14 @@ export const WorkspaceCanvas = forwardRef<
       redrawRef.current = () => undefined;
       cancelCameraAnimation();
       if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
+      if (renderFrameRef.current !== null) cancelAnimationFrame(renderFrameRef.current);
     };
   }, []);
 
   useEffect(() => {
-    authoritativeRef.current = document;
-    if (!pointerRef.current && !committingRef.current) displayDocumentRef.current = document;
+    persistedDocumentRef.current = document;
+    if (committingRef.current === 0) authoritativeRef.current = document;
+    if (!pointerRef.current && committingRef.current === 0) displayDocumentRef.current = document;
     if (document) {
       const nextSelection = pruneSelection(selectionRef.current, document);
       selectionRef.current = nextSelection;
@@ -1295,10 +1611,19 @@ export const WorkspaceCanvas = forwardRef<
     else if (creationRef.current?.tool !== tool) {
       creationRef.current = { tool, points: [], current: null, snapCandidates: [] };
     }
-    if (measurementRef.current) measurementRef.current.hidden = true;
+    snapLockRef.current = null;
     trimPreviewRef.current = null;
     redraw();
   }, [tool]);
+
+  useEffect(() => {
+    snapLockRef.current = null;
+    if (!constraintTool) setDimensionEditor(null);
+    setInteractionMessage(
+      constraintTool ? constraintToolApplicabilityMessage(constraintTool) : null,
+    );
+    redraw();
+  }, [constraintTool]);
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -1331,6 +1656,7 @@ export const WorkspaceCanvas = forwardRef<
 
   const hitVisibleNode = (sketch: SketchDocument, screen: SketchPoint2D) => {
     const visible = new Set([
+      ...(constraintTool === 'coincident' ? sketch.nodes.map(({ id }) => id) : []),
       ...selectionRef.current.nodeIds,
       ...sketch.entities
         .filter(({ id }) => selectionRef.current.entityIds.includes(id))
@@ -1347,6 +1673,119 @@ export const WorkspaceCanvas = forwardRef<
       }))
       .filter(({ distance }) => distance <= 9)
       .toSorted((left, right) => left.distance - right.distance)[0]?.node;
+  };
+
+  const reportConstraintIssue = (message: string) => {
+    setInteractionMessage(message);
+    editorToastManager.add({
+      variant: 'warning',
+      title: 'Constraint conflict',
+      description: message,
+    });
+  };
+
+  const applyConstraintToolSelection = async (
+    activeTool: ConstraintTool,
+    sketch: SketchDocument,
+    nextSelection: SelectionSet,
+    anchorScreen: SketchPoint2D,
+  ) => {
+    if (activeTool === 'distance' || activeTool === 'radius' || activeTool === 'diameter') {
+      const entity = sketch.entities.find(({ id }) => id === nextSelection.entityIds[0]);
+      const value = entity ? defaultDimensionValue(entity, activeTool) : null;
+      if (value === null) {
+        setInteractionMessage(constraintToolApplicabilityMessage(activeTool));
+        return;
+      }
+      setDimensionEditor({
+        mode: 'create',
+        id: `dimension:${activeTool}:${crypto.randomUUID()}`,
+        kind: activeTool,
+        value,
+        screen: anchorScreen,
+      });
+      setInteractionMessage(null);
+      return;
+    }
+
+    const applicability = constraintToolApplicability(sketch, nextSelection, activeTool);
+    if (activeTool === 'fixed' && nextSelection.entityIds[0]) {
+      const entityId = nextSelection.entityIds[0];
+      const existing = sketch.constraints.filter(
+        ({ type, refs }) =>
+          type === 'fixed' && refs.some((reference) => reference.entityId === entityId),
+      );
+      if (existing.length > 0) {
+        const accepted = await commitCommand({
+          type: 'remove_constraint',
+          constraintIds: existing.map(({ id }) => id),
+        });
+        if (accepted) onConstraintToolChange?.(null);
+        return;
+      }
+    }
+    if (applicability.status === 'incomplete') {
+      setInteractionMessage(applicability.message);
+      return;
+    }
+    if (applicability.status !== 'ready') {
+      reportConstraintIssue(applicability.message);
+      return;
+    }
+
+    const constraint = constraintInputForTool(
+      sketch,
+      nextSelection,
+      activeTool,
+      `constraint:${activeTool}:${crypto.randomUUID()}`,
+    );
+    if (!constraint) {
+      reportConstraintIssue(applicability.message);
+      return;
+    }
+    try {
+      const preview = applySketchCommand(sketch, {
+        type: 'apply_constraint',
+        constraints: [constraint],
+      }).document;
+      const analysis = await getBrowserPlaneGcsPreviewRuntime().analyze(preview);
+      if (analysis.conflicts.length > 0) {
+        reportConstraintIssue(
+          `${constraintToolApplicabilityMessage(activeTool).split(' — ')[0]} conflicts with the selected geometry.`,
+        );
+        return;
+      }
+      const accepted = await commitCommand({ type: 'apply_constraint', constraints: [constraint] });
+      if (accepted) onConstraintToolChange?.(null);
+    } catch (error) {
+      reportConstraintIssue(
+        error instanceof Error ? error.message : 'That constraint cannot be applied here.',
+      );
+    }
+  };
+
+  const stableSnap = (
+    sketch: SketchDocument,
+    world: SketchPoint2D,
+    options: Parameters<typeof rankSnapCandidates>[2],
+  ) => {
+    const candidates = rankSnapCandidates(sketch, world, {
+      ...options,
+      screenTolerance: 15,
+      cameraZoom: cameraRef.current.zoom,
+    });
+    const primary = chooseSnapCandidateWithHysteresis(snapLockRef.current, candidates, {
+      cameraZoom: cameraRef.current.zoom,
+      captureScreenDistance: 10,
+      releaseScreenDistance: 15,
+    });
+    snapLockRef.current = primary;
+    return {
+      point: primary?.point ?? world,
+      candidates: primary
+        ? [primary, ...candidates.filter((candidate) => candidate !== primary)]
+        : candidates,
+    };
   };
 
   const startTransform = (
@@ -1371,16 +1810,6 @@ export const WorkspaceCanvas = forwardRef<
       transform: { pivot },
     };
     setInteractionState('dragging');
-  };
-
-  const updateMeasurement = (session: CreationSession, screen: SketchPoint2D) => {
-    const output = measurementRef.current;
-    if (!output) return;
-    const text = creationMeasurement(session);
-    output.hidden = text.length === 0;
-    output.textContent = text;
-    output.style.left = `${screen.x + 14}px`;
-    output.style.top = `${screen.y - 30}px`;
   };
 
   const commitCreation = (
@@ -1487,10 +1916,8 @@ export const WorkspaceCanvas = forwardRef<
         snapCandidates: [],
       };
       const origin = current.points.at(-1);
-      const snapped = snapSketchPoint(sketch, world, {
+      const snapped = stableSnap(sketch, world, {
         gridStep: adaptiveGridStep(cameraRef.current.zoom),
-        screenTolerance: 10,
-        cameraZoom: cameraRef.current.zoom,
         currentTool: current.tool,
         ...(origin ? { origin } : {}),
       });
@@ -1524,7 +1951,6 @@ export const WorkspaceCanvas = forwardRef<
         };
       }
       event.currentTarget.releasePointerCapture(event.pointerId);
-      updateMeasurement(creationRef.current, screen);
       redraw();
       return;
     }
@@ -1534,6 +1960,37 @@ export const WorkspaceCanvas = forwardRef<
       camera: cameraRef.current.state(),
       selectedEntityId: selectionRef.current.entityIds[0] ?? null,
     });
+    if (constraintTool) {
+      const node = constraintTool === 'coincident' ? hitVisibleNode(sketch, screen) : undefined;
+      let next: SelectionSet | null = null;
+      if (node) {
+        const selectionSize =
+          selectionRef.current.nodeIds.length + selectionRef.current.entityIds.length;
+        next =
+          constraintTool === 'coincident' && selectionSize > 0 && selectionSize < 2
+            ? addToSelection(selectionRef.current, 'node', [node.id])
+            : selectionRef.current.nodeIds.length === 0 || selectionRef.current.nodeIds.length >= 2
+              ? replaceSelection('node', [node.id])
+              : addToSelection(selectionRef.current, 'node', [node.id]);
+      } else if (hit?.kind === 'entity') {
+        const selected = selectionRef.current.entityIds;
+        const selectionSize = selected.length + selectionRef.current.nodeIds.length;
+        next =
+          constraintTool === 'coincident' && selectionSize > 0 && selectionSize < 2
+            ? addToSelection(selectionRef.current, 'entity', [hit.id])
+            : selected.length === 0 || selected.length >= 2
+              ? replaceSelection('entity', [hit.id])
+              : addToSelection(selectionRef.current, 'entity', [hit.id]);
+      }
+      if (next) {
+        updateSelection(next);
+        void applyConstraintToolSelection(constraintTool, sketch, next, screen);
+      } else {
+        setInteractionMessage(constraintToolApplicabilityMessage(constraintTool));
+      }
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (tool === 'trim') {
       if (hit?.kind === 'entity') {
         void commitCommand({ type: 'trim_geometry', entityId: hit.id, pickPoint: world });
@@ -1546,10 +2003,6 @@ export const WorkspaceCanvas = forwardRef<
     if (node) {
       const state = definitionRef.current?.nodes[node.id];
       updateSelection(toggleSelection(selectionRef.current, 'node', node.id, event.shiftKey));
-      if (committingRef.current) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-        return;
-      }
       pointerRef.current = {
         mode: 'drag-node',
         id: event.pointerId,
@@ -1569,7 +2022,7 @@ export const WorkspaceCanvas = forwardRef<
       const alreadySelected = selectionRef.current.entityIds.includes(hit.id);
       const next = toggleSelection(selectionRef.current, 'entity', hit.id, event.shiftKey);
       updateSelection(next);
-      if (event.shiftKey || committingRef.current) {
+      if (event.shiftKey) {
         event.currentTarget.releasePointerCapture(event.pointerId);
         return;
       }
@@ -1604,19 +2057,16 @@ export const WorkspaceCanvas = forwardRef<
           snapCandidates: [],
         };
         const origin = current.points.at(-1);
-        const candidates = rankSnapCandidates(sketch, world, {
+        const snapped = stableSnap(sketch, world, {
           gridStep: adaptiveGridStep(cameraRef.current.zoom),
-          screenTolerance: 10,
-          cameraZoom: cameraRef.current.zoom,
           currentTool: current.tool,
           ...(origin ? { origin } : {}),
         });
         creationRef.current = {
           ...current,
-          current: candidates[0]?.point ?? world,
-          snapCandidates: candidates,
+          current: snapped.point,
+          snapCandidates: snapped.candidates,
         };
-        updateMeasurement(creationRef.current, screen);
         redraw();
         return;
       }
@@ -1662,10 +2112,8 @@ export const WorkspaceCanvas = forwardRef<
     }
     if (pointer.mode === 'drag-node') {
       if (pointer.immobile && definitionRef.current?.nodes[pointer.nodeId]?.fullyDefined) return;
-      const snapped = snapSketchPoint(pointer.base, world, {
+      const snapped = stableSnap(pointer.base, world, {
         gridStep: adaptiveGridStep(cameraRef.current.zoom),
-        screenTolerance: 10,
-        cameraZoom: cameraRef.current.zoom,
         excludeEntityIds: selectionRef.current.entityIds,
       });
       pointer.target = snapped.point;
@@ -1728,6 +2176,7 @@ export const WorkspaceCanvas = forwardRef<
     }
     if (pointer.mode === 'pan') return;
     getBrowserPlaneGcsPreviewRuntime().cancel(pointer.dragSessionId);
+    snapLockRef.current = null;
     if (!commit) {
       displayDocumentRef.current = authoritativeRef.current;
       redraw();
@@ -1789,6 +2238,9 @@ export const WorkspaceCanvas = forwardRef<
           current: null,
           snapCandidates: [],
         };
+      } else if (constraintTool) {
+        setDimensionEditor(null);
+        onConstraintToolChange?.(null);
       } else if (tool !== 'select' && tool !== 'trim') {
         creationRef.current = null;
         onToolChange?.('select');
@@ -1845,7 +2297,7 @@ export const WorkspaceCanvas = forwardRef<
       cameraRef.current,
       selection,
       constraintBadges.map(({ screen }) => screen),
-      viewState,
+      { ...viewState, ...insets },
     );
   })();
 
@@ -1868,7 +2320,8 @@ export const WorkspaceCanvas = forwardRef<
       ({ type, refs }) =>
         type === 'fixed' && refs.some(({ entityId }) => selection.entityIds.includes(entityId)),
     ) ?? [];
-  const cursor = editorCursorFor(interactionState === 'dragging' ? 'pan' : cursorMode);
+  const panning = pointerRef.current?.mode === 'pan';
+  const cursor = editorCursorFor(panning ? 'pan' : cursorMode);
   const commentPlacement = commentPointer
     ? { screen: commentPointer, world: cameraRef.current.screenToWorld(commentPointer) }
     : null;
@@ -1894,11 +2347,7 @@ export const WorkspaceCanvas = forwardRef<
     >
       <canvas
         ref={canvasRef}
-        className={
-          interactionState === 'dragging' || interactionState === 'previewing'
-            ? 'is-panning'
-            : undefined
-        }
+        className={panning ? 'is-panning' : undefined}
         style={{ cursor: cursor.cssCursor }}
         tabIndex={0}
         aria-label="CanvasKit precision sketch surface"
@@ -1921,7 +2370,7 @@ export const WorkspaceCanvas = forwardRef<
           <button
             type="button"
             key={badge.id}
-            className="sketch-constraint-badge"
+            className="sketch-constraint-hit-target"
             data-selected={badge.selected}
             data-related={badge.related}
             data-conflict={badge.conflict}
@@ -1941,20 +2390,24 @@ export const WorkspaceCanvas = forwardRef<
             }}
             onPointerDown={(event) => clickConstraint(event, badge)}
           >
-            {badge.label}
+            <ConstraintBadgeGraphic badge={badge} />
+            <span className="visually-hidden">{badge.title}</span>
           </button>
         ))}
         {dimensions.map((dimension) => {
           const current = authoritativeRef.current?.dimensions.find(
             ({ id }) => id === dimension.id,
           );
-          const editing = dimensionEditor?.id === dimension.id;
-          const trigger = (
+          return (
             <button
               type="button"
-              className="sketch-dimension-label"
-              data-kind={dimension.kind}
-              data-selected={dimension.selected}
+              key={dimension.id}
+              className="sketch-dimension-hit-target"
+              aria-label={
+                dimension.kind === 'driving'
+                  ? `${dimension.text}; double-click to edit`
+                  : dimension.text
+              }
               style={{ left: dimension.screen.x, top: dimension.screen.y }}
               onPointerDown={(event) => {
                 event.stopPropagation();
@@ -1971,58 +2424,92 @@ export const WorkspaceCanvas = forwardRef<
               }}
               onDoubleClick={() => {
                 if (typeof current?.value !== 'number') return;
-                setDimensionEditor({ id: dimension.id, value: String(current.value) });
+                setDimensionEditor({
+                  mode: 'edit',
+                  id: dimension.id,
+                  value: current.value,
+                  screen: dimension.screen,
+                });
               }}
-            >
-              {dimension.text}
-            </button>
-          );
-          if (dimension.kind !== 'driving') return <span key={dimension.id}>{trigger}</span>;
-          return (
-            <Popover
-              key={dimension.id}
-              open={editing}
-              onOpenChange={(open) => {
-                if (!open) setDimensionEditor(null);
-              }}
-            >
-              <Popover.Trigger render={trigger} />
-              <Popover.Content side="right" sideOffset={8} className="sketch-dimension-editor">
-                <Popover.Title>Edit dimension</Popover.Title>
-                <Input
-                  size="sm"
-                  inputMode="decimal"
-                  aria-label="Dimension value in millimetres"
-                  value={editing ? dimensionEditor.value : ''}
-                  onChange={(event) =>
-                    setDimensionEditor({ id: dimension.id, value: event.target.value })
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') setDimensionEditor(null);
-                    if (event.key !== 'Enter' || !current) return;
-                    const value = Number(dimensionEditor?.value);
-                    if (!Number.isFinite(value) || value <= 0) return;
-                    void commitCommand({
-                      type: 'set_dimension',
-                      dimensions: [{ ...current, value }],
-                    });
-                    setDimensionEditor(null);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDimensionEditor(null)}
-                >
-                  Cancel
-                </Button>
-              </Popover.Content>
-            </Popover>
+            />
           );
         })}
       </div>
-      <output ref={measurementRef} className="sketch-temporary-measurement" hidden />
+      <Popover
+        open={dimensionEditor !== null}
+        onOpenChange={(open) => {
+          if (!open) setDimensionEditor(null);
+        }}
+      >
+        <Popover.Trigger
+          nativeButton={false}
+          render={
+            <span
+              className="sketch-dimension-popover-anchor"
+              style={
+                dimensionEditor
+                  ? { left: dimensionEditor.screen.x, top: dimensionEditor.screen.y }
+                  : undefined
+              }
+            />
+          }
+        />
+        <Popover.Content side="right" sideOffset={8} className="sketch-dimension-editor">
+          <Popover.Title>
+            {dimensionEditor?.mode === 'create' ? `Set ${dimensionEditor.kind}` : 'Edit dimension'}
+          </Popover.Title>
+          <NumberField.Root
+            value={dimensionEditor?.value ?? null}
+            min={0.001}
+            onValueChange={(value) => {
+              if (dimensionEditor && value !== null)
+                setDimensionEditor({ ...dimensionEditor, value });
+            }}
+          >
+            <NumberField.Group className="sketch-number-field">
+              <NumberField.Input
+                aria-label="Dimension value in millimetres"
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setDimensionEditor(null);
+                    onConstraintToolChange?.(null);
+                  }
+                  if (event.key !== 'Enter' || !dimensionEditor || !authoritativeRef.current)
+                    return;
+                  const sketch = authoritativeRef.current;
+                  if (!Number.isFinite(dimensionEditor.value) || dimensionEditor.value <= 0) return;
+                  if (dimensionEditor.mode === 'edit') {
+                    const current = sketch.dimensions.find(({ id }) => id === dimensionEditor.id);
+                    if (current) {
+                      void commitCommand({
+                        type: 'set_dimension',
+                        dimensions: [{ ...current, value: dimensionEditor.value }],
+                      });
+                    }
+                  } else {
+                    const input = dimensionInputForTool(
+                      sketch,
+                      selectionRef.current,
+                      dimensionEditor.kind,
+                      dimensionEditor.id,
+                      dimensionEditor.value,
+                    );
+                    if (input) {
+                      void commitCommand({ type: 'set_dimension', dimensions: [input] }).then(
+                        (accepted) => accepted && onConstraintToolChange?.(null),
+                      );
+                    }
+                  }
+                  setDimensionEditor(null);
+                }}
+              />
+            </NumberField.Group>
+          </NumberField.Root>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setDimensionEditor(null)}>
+            Cancel
+          </Button>
+        </Popover.Content>
+      </Popover>
       {selectedCount > 0 ? (
         <output className="sketch-selection-context">
           <strong>
@@ -2083,11 +2570,6 @@ export const WorkspaceCanvas = forwardRef<
       ) : null}
       {interactionMessage ? (
         <output className="sketch-interaction-message">{interactionMessage}</output>
-      ) : null}
-      {interactionState === 'committing' ? (
-        <output className="sketch-sync-state" aria-label="Synchronizing sketch">
-          Syncing…
-        </output>
       ) : null}
       {renderComments?.(viewState, commentPlacement)}
       <WorkspaceOrientationHud right={insets.right} />

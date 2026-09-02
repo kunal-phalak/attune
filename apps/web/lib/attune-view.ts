@@ -288,6 +288,7 @@ export class AttuneHttpError extends Error {
     readonly code: string,
     message: string,
     readonly retryable = false,
+    readonly changedEntities: readonly string[] = [],
   ) {
     super(message);
     this.name = 'AttuneHttpError';
@@ -401,14 +402,29 @@ export async function requestHumanSemanticMutation(
   if (!response.ok) {
     const error =
       typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : undefined;
+    const code =
+      typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
     const message =
       typeof error === 'object' && error !== null
         ? Reflect.get(error, 'message')
         : 'The semantic mutation failed.';
+    const retryable =
+      typeof error === 'object' && error !== null && Reflect.get(error, 'retryable') === true;
+    const rawChangedEntities: readonly unknown[] =
+      typeof error === 'object' &&
+      error !== null &&
+      Array.isArray(Reflect.get(error, 'changedEntities'))
+        ? Reflect.get(error, 'changedEntities')
+        : [];
+    const changedEntities = rawChangedEntities.filter(
+      (entity): entity is string => typeof entity === 'string',
+    );
     throw new AttuneHttpError(
       response.status,
-      'SEMANTIC_MUTATION_FAILED',
+      typeof code === 'string' ? code : 'SEMANTIC_MUTATION_FAILED',
       typeof message === 'string' ? message : 'The semantic mutation failed.',
+      retryable,
+      changedEntities,
     );
   }
   if (!isHumanSemanticMutationResponse(payload)) {

@@ -32,6 +32,7 @@ import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp'
 
 import { requireWorkspaceIdentity } from './auth/session';
 import { snapshotCollaborativeDraft } from './liveblocks/server';
+import { measureServerPhase, type ServerTimingRecorder } from './server-timing';
 
 export interface CommandExecutionInput {
   readonly command: AttuneCommand;
@@ -128,16 +129,20 @@ async function viewForBundle(
   bundle: WorkspaceBundle,
   role: AttuneRole,
   delegation?: DelegationGrant,
+  timing?: ServerTimingRecorder,
 ) {
-  const solver = await getPlaneGcsSolver();
-  const solve = solver.solve(bundle.workspace.sketchDocument);
+  const { solve, solver } = await measureServerPhase(timing, 'plane_gcs_solve', async () => {
+    const runtimeSolver = await getPlaneGcsSolver();
+    return { solver: runtimeSolver, solve: runtimeSolver.solve(bundle.workspace.sketchDocument) };
+  });
+  const viewStartedAt = performance.now();
   const selection = createSelectionContext(solve.document);
   const bus = new AttuneCommandBus(bundle.workspace, undefined, solver);
   const inspection = bus.inspect(role);
   const delegatedCapabilities = delegation
     ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
     : inspection.capabilities;
-  return {
+  const view = {
     ...inspection,
     capabilities: delegatedCapabilities,
     perspective: role,
@@ -199,13 +204,22 @@ async function viewForBundle(
       solve: solve.document.lastSolve ?? null,
     },
   };
+  timing?.('view_compile', performance.now() - viewStartedAt);
+  return view;
 }
 
-async function inspectHuman(workspaceId: string, role: AttuneRole) {
-  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  await trustedHumanContext(workspaceId, role);
-  const bundle = await readWorkspaceBundle(workspaceId);
+/** Builds the editor view after the caller has already established workspace membership. */
+export function viewForTrustedBundle(bundle: WorkspaceBundle, role: AttuneRole) {
   return viewForBundle(bundle, role);
+}
+
+async function inspectHuman(workspaceId: string, role: AttuneRole, timing?: ServerTimingRecorder) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  await measureServerPhase(timing, 'auth', () => trustedHumanContext(workspaceId, role));
+  const bundle = await measureServerPhase(timing, 'neon_workspace_load', () =>
+    readWorkspaceBundle(workspaceId, undefined, undefined, timing),
+  );
+  return viewForBundle(bundle, role, undefined, timing);
 }
 
 export async function inspectForDelegatedAgent(
@@ -272,8 +286,12 @@ export async function inspectAgentContext(
   return snapshot;
 }
 
-export function inspectForHuman(workspaceId: string, role: AttuneRole = 'buyer') {
-  return inspectHuman(workspaceId, role);
+export function inspectForHuman(
+  workspaceId: string,
+  role: AttuneRole = 'buyer',
+  timing?: ServerTimingRecorder,
+) {
+  return inspectHuman(workspaceId, role, timing);
 }
 
 export function inspectForProvider(workspaceId: string) {
@@ -311,6 +329,7 @@ export async function executeSemanticCommand(
   workspaceId: string,
   input: CommandExecutionInput,
   context: TrustedExecutionContext,
+  timing?: ServerTimingRecorder,
 ) {
   if (!isSketchCommand(input.command)) {
     throw new TypeError('executeSemanticCommand accepts semantic sketch commands only.');
@@ -321,7 +340,9 @@ export async function executeSemanticCommand(
     command: input.command,
     envelope: input.envelope,
     context,
+    timing,
   });
+  const contextStartedAt = performance.now();
   const capabilityIds = result.capabilities
     .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
     .map(({ id }) => id);
@@ -331,6 +352,7 @@ export async function executeSemanticCommand(
     capabilityIds,
     observation: result.observation,
   });
+  timing?.('semantic_context', performance.now() - contextStartedAt);
   return {
     result,
     nextContext,
@@ -355,12 +377,12 @@ export async function executeHumanSemanticCommand(
   workspaceId: string,
   input: CommandExecutionInput,
   role: AttuneRole = 'buyer',
+  timing?: ServerTimingRecorder,
 ) {
-  const execution = await executeSemanticCommand(
-    workspaceId,
-    input,
-    await trustedHumanContext(workspaceId, role),
+  const context = await measureServerPhase(timing, 'auth', () =>
+    trustedHumanContext(workspaceId, role),
   );
+  const execution = await executeSemanticCommand(workspaceId, input, context, timing);
   return { mutation: execution.mutation, workspace: execution.result.workspace };
 }
 

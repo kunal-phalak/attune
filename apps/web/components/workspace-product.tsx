@@ -6,22 +6,33 @@ import { LayerCard } from '@cloudflare/kumo';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import { Switch } from '@cloudflare/kumo/components/switch';
+import { Toasty } from '@cloudflare/kumo/components/toast';
+import { Toolbar } from '@cloudflare/kumo/components/toolbar';
+import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
 import { LiveblocksProvider, RoomProvider, useRoom, useUpdateMyPresence } from '@liveblocks/react';
 import { Cursors } from '@liveblocks/react-ui';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 
 import {
   attuneWorkspaceEndpoint,
   requestHumanSemanticMutation,
-  requestAttuneView,
   type AttuneApiView,
   type CapabilityRole,
 } from '../lib/attune-view';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
-import type { SketchTemplate } from '../lib/projects/library';
 import { editorChromeCssVariables } from '../lib/sketch/editor-chrome';
 import type { EditorCursorMode } from '../lib/sketch/editor-cursors';
+import { editorToastManager } from '../lib/sketch/editor-toast';
 import {
   receiptHistoryLabel,
   semanticHistoryLabel,
@@ -31,12 +42,14 @@ import {
   CLOSED_EDITOR_PANELS,
   toggleEditorPanel,
   type CanvasTool,
+  type ConstraintTool,
   type EditorPanel,
   type EditorPanelState,
 } from '../lib/sketch/panel-state';
 import { sketchSnapshotFromDocument } from '../lib/sketch/versions';
 import { viewportInsetsFor } from '../lib/sketch/viewport-insets';
 import type { AttuneCollaborativeDraft } from '../liveblocks.config';
+import { AttuneWebMcp } from './attune-webmcp';
 import { AppIcons } from './ui/app-icons';
 import { AttuneBrandmark } from './ui/attune-brandmark';
 import { Kbd } from './ui/kbd';
@@ -48,7 +61,6 @@ import {
   LiveCommentPins,
   LiveCommentsRail,
   PresenceHeader,
-  SketchConstraintsPanel,
   type SketchVersionPreview,
 } from './workspace-panels';
 
@@ -67,35 +79,6 @@ function draftFrom(view: AttuneApiView): AttuneCollaborativeDraft {
   };
 }
 
-function YjsDraftBridge({
-  workspaceId,
-  perspective,
-}: {
-  readonly workspaceId: string;
-  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
-}) {
-  const room = useRoom();
-  const provider = useMemo(() => getYjsProviderForRoom(room), [room]);
-
-  useEffect(() => {
-    let active = true;
-    const synchronize = async () => {
-      const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
-      const view = await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId));
-      if (!active) return;
-      const map = provider.getYDoc().getMap('attune');
-      const next = draftFrom(view);
-      if (JSON.stringify(map.get('draft')) !== JSON.stringify(next)) map.set('draft', next);
-    };
-    void synchronize();
-    return () => {
-      active = false;
-    };
-  }, [perspective, provider, workspaceId]);
-
-  return null;
-}
-
 function LiveToolPresence({ tool }: { readonly tool: EditorCursorMode }) {
   const updateMyPresence = useUpdateMyPresence();
   useEffect(() => updateMyPresence({ currentTool: tool }), [tool, updateMyPresence]);
@@ -106,10 +89,12 @@ function WorkspaceHeader({
   collaboration,
   projectName,
   onVersionPreview,
+  onSaveVersion,
 }: {
   readonly collaboration: boolean;
   readonly projectName: string;
   readonly onVersionPreview: (preview: SketchVersionPreview | null) => void;
+  readonly onSaveVersion?: () => Promise<void>;
 }) {
   return (
     <header className="workspace-header">
@@ -127,7 +112,11 @@ function WorkspaceHeader({
         </span>
         <strong>{projectName}</strong>
       </div>
-      <DraftControl collaboration={collaboration} onPreview={onVersionPreview} />
+      <DraftControl
+        collaboration={collaboration}
+        onPreview={onVersionPreview}
+        onSaveVersion={onSaveVersion}
+      />
       <div className="workspace-header-right">{collaboration ? <PresenceHeader /> : null}</div>
     </header>
   );
@@ -150,28 +139,11 @@ function ToolButton({
   readonly icon: ReactNode;
   readonly onClick: () => void;
 }) {
-  if (!showLabel) {
-    return (
-      <Button
-        type="button"
-        variant="ghost"
-        size="base"
-        shape="square"
-        className="workspace-tool-button"
-        icon={icon}
-        aria-label={label}
-        aria-pressed={active}
-        disabled={disabled}
-        onClick={onClick}
-      />
-    );
-  }
-  return (
-    <Button
+  const control = (
+    <Toolbar.Button
       type="button"
-      variant="ghost"
-      size="base"
-      className="workspace-tool-button px-2"
+      shape={showLabel ? 'base' : 'square'}
+      className={showLabel ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
       icon={icon}
       aria-label={label}
       aria-pressed={active}
@@ -179,30 +151,41 @@ function ToolButton({
       disabled={disabled}
       onClick={onClick}
     >
-      <span className="workspace-tool-label">{label}</span>
-      {keybind ? <Kbd className="shrink-0">{keybind}</Kbd> : null}
-    </Button>
+      {showLabel ? <span className="workspace-tool-label">{label}</span> : null}
+      {showLabel && keybind ? <Kbd className="shrink-0">{keybind}</Kbd> : null}
+    </Toolbar.Button>
+  );
+  return (
+    <Tooltip content={keybind && !showLabel ? `${label} (${keybind})` : label} render={control} />
   );
 }
 
 function WorkspaceTools({
   canvasTool,
+  constraintTool,
   panels,
   collaboration,
   showLabels,
   onCanvasTool,
+  onConstraintTool,
   onPanel,
 }: {
   readonly canvasTool: CanvasTool;
+  readonly constraintTool: ConstraintTool | null;
   readonly panels: EditorPanelState;
   readonly collaboration: boolean;
   readonly showLabels: boolean;
   readonly onCanvasTool: (tool: CanvasTool) => void;
+  readonly onConstraintTool: (tool: ConstraintTool | null) => void;
   readonly onPanel: (panel: EditorPanel) => void;
 }) {
   return (
-    <>
-      <nav className="workspace-tool-island is-left is-primary" aria-label="Primary tools">
+    <TooltipProvider>
+      <Toolbar
+        orientation="vertical"
+        className="workspace-tool-island is-left is-primary"
+        aria-label="Primary tools"
+      >
         <ToolButton
           label="Select"
           keybind="/"
@@ -226,8 +209,12 @@ function WorkspaceTools({
           icon={<AppIcons.Items size={20} weight="regular" />}
           onClick={() => onPanel('items')}
         />
-      </nav>
-      <nav className="workspace-tool-island is-left is-geometry" aria-label="Geometry tools">
+      </Toolbar>
+      <Toolbar
+        orientation="vertical"
+        className="workspace-tool-island is-left is-geometry"
+        aria-label="Geometry tools"
+      >
         {(
           [
             ['line', 'Line', 'L', AppIcons.Line],
@@ -249,15 +236,12 @@ function WorkspaceTools({
             onClick={() => onCanvasTool(geometryTool)}
           />
         ))}
-      </nav>
-      <nav className="workspace-tool-island is-right" aria-label="Context tools">
-        <ToolButton
-          label="Constraints"
-          showLabel={showLabels}
-          active={panels.rightPanel === 'constraints'}
-          icon={<AppIcons.SketchConstraints size={20} weight="regular" />}
-          onClick={() => onPanel('constraints')}
-        />
+      </Toolbar>
+      <Toolbar
+        orientation="vertical"
+        className="workspace-tool-island is-right is-context"
+        aria-label="Context tools"
+      >
         <ToolButton
           label="History"
           showLabel={showLabels}
@@ -265,8 +249,85 @@ function WorkspaceTools({
           icon={<AppIcons.History size={20} weight="regular" />}
           onClick={() => onPanel('history')}
         />
-      </nav>
-    </>
+      </Toolbar>
+      <Toolbar
+        orientation="vertical"
+        className="workspace-tool-island is-right is-constraints"
+        aria-label="Constraint tools"
+      >
+        {(
+          [
+            [
+              'coincident',
+              'Coincident',
+              AppIcons.Coincident,
+              'Choose two points, or a point and line',
+            ],
+            ['horizontal', 'Horizontal', AppIcons.Horizontal, 'Choose a line'],
+            ['vertical', 'Vertical', AppIcons.Vertical, 'Choose a line'],
+            ['parallel', 'Parallel', AppIcons.Parallel, 'Choose two lines'],
+            ['perpendicular', 'Perpendicular', AppIcons.Perpendicular, 'Choose two lines'],
+            ['tangent', 'Tangent', AppIcons.Tangent, 'Choose two compatible curves'],
+            ['concentric', 'Concentric', AppIcons.Concentric, 'Choose two circles or arcs'],
+            ['equal', 'Equal', AppIcons.Equal, 'Choose two lines, or two circles/arcs'],
+            ['fixed', 'Fix / Unfix', AppIcons.Fixed, 'Choose geometry'],
+          ] as const
+        ).map(([type, label, Icon, instruction]) => (
+          <Tooltip
+            key={type}
+            side="left"
+            content={`${label} — ${instruction.toLowerCase()}`}
+            render={
+              <Toolbar.Button
+                type="button"
+                shape={showLabels ? 'base' : 'square'}
+                className={showLabels ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
+                icon={<Icon size={20} weight="regular" />}
+                aria-label={`${label} — ${instruction}`}
+                aria-pressed={constraintTool === type}
+                data-active={constraintTool === type || undefined}
+                onClick={() => onConstraintTool(constraintTool === type ? null : type)}
+              >
+                {showLabels ? <span className="workspace-tool-label">{label}</span> : null}
+              </Toolbar.Button>
+            }
+          />
+        ))}
+      </Toolbar>
+      <Toolbar
+        orientation="vertical"
+        className="workspace-tool-island is-right is-dimensions"
+        aria-label="Dimension tools"
+      >
+        {(
+          [
+            ['distance', 'Distance', AppIcons.Dimension, 'Choose a line'],
+            ['radius', 'Radius', AppIcons.Radius, 'Choose a circle or arc'],
+            ['diameter', 'Diameter', AppIcons.Dimension, 'Choose a circle or arc'],
+          ] as const
+        ).map(([type, label, Icon, instruction]) => (
+          <Tooltip
+            key={type}
+            side="left"
+            content={`${label} — ${instruction.toLowerCase()}`}
+            render={
+              <Toolbar.Button
+                type="button"
+                shape={showLabels ? 'base' : 'square'}
+                className={showLabels ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
+                icon={<Icon size={20} weight="regular" />}
+                aria-label={`${label} — ${instruction}`}
+                aria-pressed={constraintTool === type}
+                data-active={constraintTool === type || undefined}
+                onClick={() => onConstraintTool(constraintTool === type ? null : type)}
+              >
+                {showLabels ? <span className="workspace-tool-label">{label}</span> : null}
+              </Toolbar.Button>
+            }
+          />
+        ))}
+      </Toolbar>
+    </TooltipProvider>
   );
 }
 
@@ -337,22 +398,28 @@ function WorkspaceShell({
   perspective,
   actorName,
   projectName,
-  template,
+  initialView,
+  onAuthoritativeView,
+  onSaveVersion,
 }: {
   readonly workspaceId: string;
   readonly collaboration: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly actorName: string;
   readonly projectName: string;
-  readonly template: SketchTemplate;
+  readonly initialView: AttuneApiView;
+  readonly onAuthoritativeView?: (view: AttuneApiView) => void;
+  readonly onSaveVersion?: () => Promise<void>;
 }) {
-  const [view, setView] = useState<AttuneApiView | null>(null);
+  const [view, setView] = useState<AttuneApiView | null>(initialView);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
+  const [constraintTool, setConstraintTool] = useState<ConstraintTool | null>(null);
   const [selection, setSelection] = useState<SelectionSet>(EMPTY_SELECTION_SET);
   const [panels, setPanels] = useState<EditorPanelState>(CLOSED_EDITOR_PANELS);
   const [showToolLabels, setShowToolLabels] = useState(true);
   const [autoConstrain, setAutoConstrain] = useState(true);
   const [profileFill, setProfileFill] = useState(true);
+  const [panelWidths, setPanelWidths] = useState({ left: 288, right: 288 });
   const [versionPreview, setVersionPreview] = useState<SketchVersionPreview | null>(null);
   const [optimisticHistory, setOptimisticHistory] = useState<
     readonly {
@@ -364,29 +431,32 @@ function WorkspaceShell({
     }[]
   >([]);
   const viewRef = useRef<AttuneApiView | null>(null);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   viewRef.current = view;
 
-  const refresh = useCallback(async () => {
-    const path = perspective === 'provider' ? '/api/attune/provider' : '/api/attune/human';
-    try {
-      setView(await requestAttuneView(attuneWorkspaceEndpoint(path, workspaceId)));
-    } catch {
-      setView(null);
-    }
-  }, [perspective, workspaceId]);
-
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    onAuthoritativeView?.(initialView);
+  }, [initialView, onAuthoritativeView]);
 
-  const insets = viewportInsetsFor(panels, showToolLabels);
+  const insets = viewportInsetsFor(panels, showToolLabels, panelWidths);
   const closeLeftPanel = () => setPanels((current) => ({ ...current, leftPanel: null }));
   const closeRightPanel = () => setPanels((current) => ({ ...current, rightPanel: null }));
   const setPanel = (panel: EditorPanel) =>
     setPanels((current) => toggleEditorPanel(current, panel));
   const setActiveCanvasTool = (tool: CanvasTool) => {
     setCanvasTool(tool);
+    setConstraintTool(null);
+    setPanels((current) =>
+      current.leftPanel === 'comments' ? { ...current, leftPanel: null } : current,
+    );
+  };
+  const setActiveConstraintTool = (tool: ConstraintTool | null) => {
+    setConstraintTool(tool);
+    if (tool) {
+      setCanvasTool('select');
+      setSelection(EMPTY_SELECTION_SET);
+    }
     setPanels((current) =>
       current.leftPanel === 'comments' ? { ...current, leftPanel: null } : current,
     );
@@ -398,47 +468,57 @@ function WorkspaceShell({
       ? 'comment'
       : canvasTool !== 'select' && canvasTool !== 'trim'
         ? 'draw'
-        : panels.rightPanel === 'constraints'
+        : constraintTool
           ? 'constraint'
           : 'select';
 
   const applySketchCommand = useCallback(
-    async (command: SketchCommand) => {
-      const current = viewRef.current;
-      if (!current) throw new Error('The authoritative sketch is not loaded.');
-      const historyLabel = semanticHistoryLabel(command, current.workspace.sketchDocument);
-      const applied = await requestHumanSemanticMutation(
-        attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
-        current,
-        command,
-      );
-      const next: AttuneApiView = {
-        ...current,
-        specHash: applied.mutation.specificationHash,
-        workspace: applied.workspace,
-        semantic: {
-          ...current.semantic,
-          documentRevision: applied.workspace.sketchDocument.revision,
-          solve: applied.workspace.sketchDocument.lastSolve ?? null,
-        },
+    (command: SketchCommand) => {
+      const execute = async () => {
+        const current = viewRef.current;
+        if (!current) throw new Error('The authoritative sketch is not loaded.');
+        const historyLabel = semanticHistoryLabel(command, current.workspace.sketchDocument);
+        const applied = await requestHumanSemanticMutation(
+          attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
+          current,
+          command,
+        );
+        const next: AttuneApiView = {
+          ...current,
+          specHash: applied.mutation.specificationHash,
+          workspace: applied.workspace,
+          semantic: {
+            ...current.semantic,
+            documentRevision: applied.workspace.sketchDocument.revision,
+            solve: applied.workspace.sketchDocument.lastSolve ?? null,
+          },
+        };
+        viewRef.current = next;
+        setView(next);
+        onAuthoritativeView?.(next);
+        setOptimisticHistory((events) => [
+          {
+            id: `history:${applied.mutation.workspaceSequence}`,
+            workspaceSeq: applied.mutation.workspaceSequence,
+            label: historyLabel,
+            actor: actorName,
+            createdAt: new Date().toISOString(),
+          },
+          ...events.filter(
+            ({ workspaceSeq }) => workspaceSeq !== applied.mutation.workspaceSequence,
+          ),
+        ]);
+        window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: next }));
+        return applied.workspace.sketchDocument;
       };
-      viewRef.current = next;
-      setView(next);
-      setOptimisticHistory((events) => [
-        {
-          id: `history:${applied.mutation.workspaceSequence}`,
-          workspaceSeq: applied.mutation.workspaceSequence,
-          label: historyLabel,
-          actor: actorName,
-          createdAt: new Date().toISOString(),
-        },
-        ...events.filter(({ workspaceSeq }) => workspaceSeq !== applied.mutation.workspaceSequence),
-      ]);
-      window.dispatchEvent(new Event('attune:workspace-changed'));
-      void refresh();
-      return applied.workspace.sketchDocument;
+      const pending = mutationQueueRef.current.then(execute);
+      mutationQueueRef.current = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      return pending;
     },
-    [actorName, refresh, workspaceId],
+    [actorName, onAuthoritativeView, workspaceId],
   );
 
   const receiptSequences = new Set(view?.records.receipts.map(({ workspaceSeq }) => workspaceSeq));
@@ -464,6 +544,7 @@ function WorkspaceShell({
       projectName={projectName}
       cursorMode={cursorMode}
       tool={canvasTool}
+      constraintTool={constraintTool}
       document={versionPreview?.document ?? view?.workspace.sketchDocument ?? null}
       selection={selection}
       autoConstrain={autoConstrain}
@@ -471,6 +552,7 @@ function WorkspaceShell({
       readOnly={versionPreview !== null}
       onSelectionChange={setSelection}
       onToolChange={setActiveCanvasTool}
+      onConstraintToolChange={setActiveConstraintTool}
       onCommand={perspective === 'buyer' && !versionPreview ? applySketchCommand : undefined}
       renderComments={
         collaboration && panels.leftPanel === 'comments'
@@ -489,97 +571,166 @@ function WorkspaceShell({
   );
 
   return (
-    <main
-      className="workspace-shell"
-      data-left-panel-open={panels.leftPanel !== null}
-      data-right-panel-open={panels.rightPanel !== null}
-      data-tool-labels={showToolLabels}
-      style={editorChromeCssVariables}
-    >
-      {collaboration ? (
-        <Cursors className="workspace-live-cursors attune-liveblocks-bridge">{canvas}</Cursors>
-      ) : (
-        canvas
-      )}
-      {collaboration ? <LiveToolPresence tool={cursorMode} /> : null}
-      <WorkspaceHeader
-        collaboration={collaboration}
-        projectName={projectName}
-        onVersionPreview={setVersionPreview}
-      />
-      {versionPreview ? (
-        <output className="workspace-version-preview">
-          <span>
-            Viewing version from{' '}
-            {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(versionPreview.createdAt)}
-          </span>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setVersionPreview(null)}>
-            Back to current
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            onClick={() => {
-              void applySketchCommand({
-                type: 'restore_sketch',
-                snapshot: sketchSnapshotFromDocument(versionPreview.document),
-              }).then(() => setVersionPreview(null));
-            }}
-          >
-            Restore this version
-          </Button>
-        </output>
-      ) : null}
-      <LayerCard render={<section />} className="workspace-mobile-notice" aria-live="polite">
-        <p>Attune's editor works best on a larger screen.</p>
-      </LayerCard>
-      <WorkspaceTools
-        canvasTool={canvasTool}
-        panels={panels}
-        collaboration={collaboration}
-        showLabels={showToolLabels}
-        onCanvasTool={setActiveCanvasTool}
-        onPanel={setPanel}
-      />
-      <WorkspaceSettings
-        showLabels={showToolLabels}
-        autoConstrain={autoConstrain}
-        profileFill={profileFill}
-        onShowLabelsChange={setShowToolLabels}
-        onAutoConstrainChange={setAutoConstrain}
-        onProfileFillChange={setProfileFill}
-      />
-      <ItemsPanel
-        open={panels.leftPanel === 'items'}
-        projectName={projectName}
-        template={template}
-        document={view?.workspace.sketchDocument ?? null}
-        selection={selection}
-        onSelectionChange={setSelection}
-        onCommand={perspective === 'buyer' ? applySketchCommand : undefined}
-        onClose={closeLeftPanel}
-      />
-      {collaboration ? (
-        <LiveCommentsRail
-          open={panels.leftPanel === 'comments'}
+    <Toasty toastManager={editorToastManager}>
+      <main
+        className="workspace-shell"
+        data-left-panel-open={panels.leftPanel !== null}
+        data-right-panel-open={panels.rightPanel !== null}
+        data-tool-labels={showToolLabels}
+        style={
+          {
+            ...editorChromeCssVariables,
+            '--editor-left-panel-width': `${panelWidths.left}px`,
+            '--editor-right-panel-width': `${panelWidths.right}px`,
+          } as CSSProperties
+        }
+      >
+        <AttuneWebMcp
           workspaceId={workspaceId}
-          onClose={closeLeftPanel}
+          perspective={perspective}
+          initialView={initialView}
         />
-      ) : null}
-      <SketchConstraintsPanel
-        open={panels.rightPanel === 'constraints'}
-        document={view?.workspace.sketchDocument ?? null}
-        selection={selection}
-        onCommand={perspective === 'buyer' ? applySketchCommand : undefined}
-        onClose={closeRightPanel}
-      />
-      <HistoryPanel
-        open={panels.rightPanel === 'history'}
-        events={historyEvents}
-        onClose={closeRightPanel}
-      />
-    </main>
+        {collaboration ? (
+          <Cursors className="workspace-live-cursors attune-liveblocks-bridge">{canvas}</Cursors>
+        ) : (
+          canvas
+        )}
+        {collaboration ? <LiveToolPresence tool={cursorMode} /> : null}
+        <WorkspaceHeader
+          collaboration={collaboration}
+          projectName={projectName}
+          onVersionPreview={setVersionPreview}
+          onSaveVersion={onSaveVersion}
+        />
+        {versionPreview ? (
+          <output className="workspace-version-preview">
+            <span>
+              Viewing version from{' '}
+              {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(
+                versionPreview.createdAt,
+              )}
+            </span>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setVersionPreview(null)}>
+              Back to current
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                void applySketchCommand({
+                  type: 'restore_sketch',
+                  snapshot: sketchSnapshotFromDocument(versionPreview.document),
+                }).then(() => setVersionPreview(null));
+              }}
+            >
+              Restore this version
+            </Button>
+          </output>
+        ) : null}
+        <LayerCard render={<section />} className="workspace-mobile-notice" aria-live="polite">
+          <p>Attune's editor works best on a larger screen.</p>
+        </LayerCard>
+        <WorkspaceTools
+          canvasTool={canvasTool}
+          constraintTool={constraintTool}
+          panels={panels}
+          collaboration={collaboration}
+          showLabels={showToolLabels}
+          onCanvasTool={setActiveCanvasTool}
+          onConstraintTool={setActiveConstraintTool}
+          onPanel={setPanel}
+        />
+        <WorkspaceSettings
+          showLabels={showToolLabels}
+          autoConstrain={autoConstrain}
+          profileFill={profileFill}
+          onShowLabelsChange={setShowToolLabels}
+          onAutoConstrainChange={setAutoConstrain}
+          onProfileFillChange={setProfileFill}
+        />
+        <ItemsPanel
+          open={panels.leftPanel === 'items'}
+          document={view?.workspace.sketchDocument ?? null}
+          selection={selection}
+          onSelectionChange={setSelection}
+          onCommand={perspective === 'buyer' ? applySketchCommand : undefined}
+          onClose={closeLeftPanel}
+          onWidthChange={(left) => setPanelWidths((current) => ({ ...current, left }))}
+        />
+        {collaboration ? (
+          <LiveCommentsRail
+            open={panels.leftPanel === 'comments'}
+            workspaceId={workspaceId}
+            onClose={closeLeftPanel}
+            onWidthChange={(left) => setPanelWidths((current) => ({ ...current, left }))}
+          />
+        ) : null}
+        <HistoryPanel
+          open={panels.rightPanel === 'history'}
+          events={historyEvents}
+          onClose={closeRightPanel}
+          onWidthChange={(right) => setPanelWidths((current) => ({ ...current, right }))}
+        />
+      </main>
+    </Toasty>
+  );
+}
+
+function CollaborativeWorkspaceShell({
+  roomId,
+  ...props
+}: Omit<
+  ComponentProps<typeof WorkspaceShell>,
+  'collaboration' | 'onAuthoritativeView' | 'onSaveVersion'
+> & { readonly roomId: string }) {
+  const room = useRoom();
+  const provider = useMemo(() => getYjsProviderForRoom(room), [room]);
+  const saveVersion = useCallback(async () => {
+    try {
+      const response = await fetch('/api/liveblocks-versions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, workspaceId: props.workspaceId }),
+      });
+      if (!response.ok) throw new Error('The synchronized draft could not be versioned.');
+      editorToastManager.add({
+        variant: 'success',
+        title: 'Version saved',
+        description: 'The current synchronized draft is now available in version history.',
+      });
+    } catch (error) {
+      editorToastManager.add({
+        variant: 'error',
+        title: 'Version not saved',
+        description: error instanceof Error ? error.message : 'Try again after synchronization.',
+      });
+      throw error;
+    }
+  }, [props.workspaceId, roomId]);
+  const mirrorAuthoritativeView = useCallback(
+    (view: AttuneApiView) => {
+      try {
+        const map = provider.getYDoc().getMap('attune');
+        const next = draftFrom(view);
+        if (JSON.stringify(map.get('draft')) !== JSON.stringify(next)) map.set('draft', next);
+      } catch {
+        editorToastManager.add({
+          variant: 'warning',
+          title: 'Sketch saved',
+          description: 'Collaboration sync is delayed. Your saved sketch is intact.',
+        });
+      }
+    },
+    [provider],
+  );
+  return (
+    <WorkspaceShell
+      {...props}
+      collaboration
+      onAuthoritativeView={mirrorAuthoritativeView}
+      onSaveVersion={saveVersion}
+    />
   );
 }
 
@@ -590,7 +741,7 @@ export function WorkspaceProduct({
   perspective,
   actor,
   projectName,
-  template,
+  initialView,
 }: {
   readonly workspaceId: string;
   readonly roomId: string;
@@ -598,7 +749,7 @@ export function WorkspaceProduct({
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly actor: { readonly id: string; readonly name: string; readonly role: CapabilityRole };
   readonly projectName: string;
-  readonly template: SketchTemplate;
+  readonly initialView: AttuneApiView;
 }) {
   const resolver = useMemo(() => workspaceUserResolver(roomId), [roomId]);
   if (!collaboration) {
@@ -609,7 +760,7 @@ export function WorkspaceProduct({
         perspective={perspective}
         actorName={actor.name}
         projectName={projectName}
-        template={template}
+        initialView={initialView}
       />
     );
   }
@@ -619,14 +770,13 @@ export function WorkspaceProduct({
         id={roomId}
         initialPresence={{ cursor: null, selection: [], currentTool: 'select', activeActor: actor }}
       >
-        <YjsDraftBridge workspaceId={workspaceId} perspective={perspective} />
-        <WorkspaceShell
+        <CollaborativeWorkspaceShell
+          roomId={roomId}
           workspaceId={workspaceId}
-          collaboration
           perspective={perspective}
           actorName={actor.name}
           projectName={projectName}
-          template={template}
+          initialView={initialView}
         />
       </RoomProvider>
     </LiveblocksProvider>

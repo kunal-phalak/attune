@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
 import { WorkspaceProduct } from '../../../components/workspace-product';
+import { viewForTrustedBundle } from '../../../lib/attune-runtime';
 import { currentAttuneUser } from '../../../lib/auth/session';
 import { liveblocksConfigured } from '../../../lib/liveblocks/server';
 
@@ -50,6 +51,7 @@ export default async function WorkspacePage({
   const perspective = requestedPerspective === 'provider' ? 'provider' : 'buyer';
   if (!identity.roles.includes(perspective)) notFound();
   const bundle = await readWorkspaceBundle(workspaceId);
+  const initialView = await viewForTrustedBundle(bundle, perspective);
   return (
     <WorkspaceProduct
       workspaceId={workspaceId}
@@ -57,7 +59,7 @@ export default async function WorkspacePage({
       collaboration={liveblocksConfigured()}
       perspective={perspective}
       projectName={bundle.projectName}
-      template={bundle.fileKind === 'sketch:blank' ? 'blank' : 'spoke'}
+      initialView={initialView}
       actor={{
         id: user.userId,
         name: user.displayName,

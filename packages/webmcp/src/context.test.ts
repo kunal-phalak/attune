@@ -16,7 +16,16 @@ describe('compact AgentContextSnapshot', () => {
       workspace,
       role: 'buyer',
       capabilityIds: ['edit_draft'],
-      focus: { entityIds: [entity.id] },
+      focus: {
+        entityIds: [entity.id],
+        nodeIds: [entity.startNodeId!],
+        constraintIds: workspace.sketchDocument.constraints
+          .filter((constraint) => constraint.refs.some(({ entityId }) => entityId === entity.id))
+          .slice(0, 1)
+          .map(({ id }) => id),
+        activeGroupId: group.id,
+        activeHumanTool: 'line',
+      },
       observation: {
         previousWorkspaceSeq: 0,
         currentWorkspaceSeq: 1,
@@ -33,13 +42,23 @@ describe('compact AgentContextSnapshot', () => {
       },
     });
 
-    expect(context.geometry.map(({ id }) => id)).toEqual([entity.id]);
-    expect(context.nodes.map(({ id }) => id).toSorted()).toEqual(
-      [entity.startNodeId, entity.endNodeId].toSorted((left, right) =>
-        (left ?? '').localeCompare(right ?? ''),
-      ),
+    expect(context.geometry.map(({ id }) => id)).toEqual(expect.arrayContaining([entity.id]));
+    expect(context.nodes.map(({ id }) => id)).toEqual(
+      expect.arrayContaining([entity.startNodeId, entity.endNodeId]),
     );
     expect(context.groups.map(({ id }) => id)).toEqual([group.id]);
+    expect(context.selection).toEqual(
+      expect.objectContaining({
+        entityIds: [entity.id],
+        nodeIds: [entity.startNodeId],
+        activeGroupId: group.id,
+        activeHumanTool: 'line',
+      }),
+    );
+    expect(context.nearbySemanticRefs).toEqual(expect.arrayContaining([entity.id]));
+    expect(context.relevantActions).toEqual(
+      expect.arrayContaining(['modify_geometry', 'constrain_geometry', 'continue_line']),
+    );
     expect(context.unseenChanges).toEqual([
       {
         sequence: 1,

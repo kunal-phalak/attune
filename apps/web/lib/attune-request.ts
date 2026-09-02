@@ -235,7 +235,11 @@ function commaSeparatedIds(value: string | null, name: string): readonly string[
 
 export function parseAgentContextFocus(parameters: URLSearchParams): SelectionContextRequest {
   const entityIds = commaSeparatedIds(parameters.get('entity_ids'), 'entity_ids');
+  const nodeIds = commaSeparatedIds(parameters.get('node_ids'), 'node_ids');
+  const constraintIds = commaSeparatedIds(parameters.get('constraint_ids'), 'constraint_ids');
   const groupIds = commaSeparatedIds(parameters.get('group_ids'), 'group_ids');
+  const activeGroupId = parameters.get('active_group_id');
+  const activeHumanTool = parameters.get('active_human_tool');
   const regionValues = [
     parameters.get('min_x'),
     parameters.get('min_y'),
@@ -256,7 +260,15 @@ export function parseAgentContextFocus(parameters: URLSearchParams): SelectionCo
     : undefined;
   return {
     ...(entityIds ? { entityIds } : {}),
+    ...(nodeIds ? { nodeIds } : {}),
+    ...(constraintIds ? { constraintIds } : {}),
     ...(groupIds ? { groupIds } : {}),
+    ...(activeGroupId
+      ? { activeGroupId: requiredIdentifier(activeGroupId, 'active_group_id') }
+      : {}),
+    ...(activeHumanTool
+      ? { activeHumanTool: requiredIdentifier(activeHumanTool, 'active_human_tool') }
+      : {}),
     ...(worldRegion ? { worldRegion } : {}),
   };
 }

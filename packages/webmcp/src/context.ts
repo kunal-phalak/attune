@@ -19,9 +19,14 @@ export interface AgentContextSnapshot {
   readonly specificationHash: string;
   readonly selection: {
     readonly entityIds: readonly string[];
+    readonly nodeIds: readonly string[];
+    readonly constraintIds: readonly string[];
     readonly groupIds: readonly string[];
     readonly hoveredEntityId: string | null;
+    readonly activeGroupId: string | null;
+    readonly activeHumanTool: string | null;
   };
+  readonly nearbySemanticRefs: readonly string[];
   readonly geometry: readonly (GeometryEntity & {
     readonly bounds: ReturnType<typeof geometryBounds>;
   })[];
@@ -62,6 +67,7 @@ export interface AgentContextSnapshot {
     readonly semanticRefs: readonly string[];
   }[];
   readonly availableActions: readonly string[];
+  readonly relevantActions: readonly string[];
 }
 
 export interface AgentMutationResult {
@@ -91,6 +97,7 @@ export interface AgentMutationResult {
     | 'solver'
     | 'candidates'
     | 'availableActions'
+    | 'relevantActions'
   >;
 }
 
@@ -105,11 +112,36 @@ function geometryIds(
   const ids = new Set([
     ...selection.selectedEntityIds,
     ...selection.nearbyEntities.map(({ entityId }) => entityId),
+    ...workspace.sketchDocument.entities
+      .filter((entity) =>
+        geometryNodeIds(entity).some((id) => selection.selectedNodeIds.includes(id)),
+      )
+      .map(({ id }) => id),
+    ...selection.activeConstraints.flatMap(({ refs }) => refs.map(({ entityId }) => entityId)),
   ]);
   if (ids.size === 0 && Object.keys(request).length === 0) {
     workspace.sketchDocument.entities.forEach(({ id }) => ids.add(id));
   }
   return [...ids].toSorted();
+}
+
+function relevantActions(
+  geometry: readonly GeometryEntity[],
+  selection: ReturnType<typeof createSelectionContext>,
+  available: readonly string[],
+): readonly string[] {
+  const actions = new Set(['inspect_context', 'check_design']);
+  if (!available.includes('modify_geometry')) return [...actions];
+  if (geometry.length > 0) actions.add('modify_geometry');
+  if (selection.selectedEntityIds.length > 0 || selection.selectedNodeIds.length > 0) {
+    actions.add('move_geometry');
+    actions.add('delete_geometry');
+  }
+  if (selection.selectedEntityIds.length > 0) actions.add('constrain_geometry');
+  if (selection.selectedConstraintIds.length > 0) actions.add('remove_constraint');
+  if (selection.activeHumanTool) actions.add(`continue_${selection.activeHumanTool}`);
+  actions.add('forecast_change');
+  return [...actions];
 }
 
 function meaningfulActions(capabilityIds: ReadonlySet<CapabilityId>): readonly string[] {
@@ -172,9 +204,19 @@ export function compileAgentContext(input: {
     specificationHash: hashSpecification(input.workspace),
     selection: {
       entityIds: selection.selectedEntityIds,
+      nodeIds: selection.selectedNodeIds,
+      constraintIds: selection.selectedConstraintIds,
       groupIds: selection.selectedGroupIds,
       hoveredEntityId: selection.hoveredEntity?.entityId ?? null,
+      activeGroupId: selection.activeGroupId,
+      activeHumanTool: selection.activeHumanTool,
     },
+    nearbySemanticRefs: [
+      ...selection.nearbyEntities.map(({ entityId }) => entityId),
+      ...nodes.map(({ id }) => id),
+      ...constraints.map(({ id }) => id),
+      ...groups.map(({ id }) => id),
+    ].filter((id, index, all) => all.indexOf(id) === index),
     geometry,
     nodes,
     groups,
@@ -188,6 +230,11 @@ export function compileAgentContext(input: {
     candidates: rankConstraintCandidates(input.workspace.sketchDocument, selection).slice(0, 8),
     unseenChanges: interventionContext(input.observation),
     availableActions: meaningfulActions(new Set(input.capabilityIds)),
+    relevantActions: relevantActions(
+      geometry,
+      selection,
+      meaningfulActions(new Set(input.capabilityIds)),
+    ),
   };
   if (contextCache.size >= MAX_CONTEXTS) {
     contextCache.delete(contextCache.keys().next().value ?? '');
@@ -227,6 +274,7 @@ export function compileAgentMutationResult(
       solver: context.solver,
       candidates: context.candidates,
       availableActions: context.availableActions,
+      relevantActions: context.relevantActions,
     },
   };
 }

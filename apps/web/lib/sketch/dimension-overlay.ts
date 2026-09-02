@@ -15,6 +15,8 @@ export interface DimensionOverlayLabel {
   readonly screen: SketchPoint2D;
   readonly entityIds: readonly string[];
   readonly selected: boolean;
+  /** Screen-space radians, normalized so text never renders upside down. */
+  readonly rotation: number;
 }
 
 function format(value: number): string {
@@ -26,6 +28,15 @@ function midpoint(first: SketchPoint2D, second: SketchPoint2D): SketchPoint2D {
   return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
 }
 
+function readableRotation(rotation: number): number {
+  let result = rotation;
+  while (result > Math.PI) result -= Math.PI * 2;
+  while (result <= -Math.PI) result += Math.PI * 2;
+  if (result > Math.PI / 2) result -= Math.PI;
+  if (result < -Math.PI / 2) result += Math.PI;
+  return result;
+}
+
 function entityLabel(
   document: SketchDocument,
   entityId: string,
@@ -34,6 +45,7 @@ function entityLabel(
   readonly text: string;
   readonly anchor: SketchPoint2D;
   readonly offset: SketchPoint2D;
+  readonly rotation: number;
 }[] {
   const entity = document.entities.find(({ id }) => id === entityId);
   if (!entity) return [];
@@ -45,6 +57,9 @@ function entityLabel(
         text: `${format(length)} mm`,
         anchor: midpoint(entity.start, entity.end),
         offset: { x: 0, y: -30 },
+        rotation: readableRotation(
+          -Math.atan2(entity.end.y - entity.start.y, entity.end.x - entity.start.x),
+        ),
       },
     ];
   }
@@ -55,6 +70,7 @@ function entityLabel(
         text: `Ø ${format(entity.radius * 2)} mm`,
         anchor: entity.center,
         offset: { x: 0, y: -32 },
+        rotation: -Math.PI / 6,
       },
     ];
   }
@@ -68,6 +84,7 @@ function entityLabel(
         text: `R ${format(entity.radius)} mm`,
         anchor: midpoint(entity.center, middle),
         offset: { x: Math.cos(middleAngle) * 26, y: -Math.sin(middleAngle) * 26 },
+        rotation: readableRotation(-middleAngle),
       },
       {
         id: 'sweep',
@@ -77,6 +94,7 @@ function entityLabel(
           y: entity.center.y + Math.sin(middleAngle) * entity.radius * 1.25,
         },
         offset: { x: Math.cos(middleAngle) * 18, y: -Math.sin(middleAngle) * 18 },
+        rotation: readableRotation(-middleAngle - Math.PI / 2),
       },
     ];
   }
@@ -87,12 +105,14 @@ function entityLabel(
         text: `${format(entity.majorRadius * 2)} mm`,
         anchor: entity.center,
         offset: { x: 0, y: -34 },
+        rotation: readableRotation(-entity.rotation),
       },
       {
         id: 'minor',
         text: `${format(entity.minorRadius * 2)} mm`,
         anchor: entity.center,
         offset: { x: 42, y: 0 },
+        rotation: readableRotation(-entity.rotation + Math.PI / 2),
       },
     ];
   }
@@ -103,6 +123,7 @@ function entityLabel(
         text: `${entity.controlPoints.length} control points`,
         anchor: entity.controlPoints[Math.floor(entity.controlPoints.length / 2)],
         offset: { x: 0, y: -26 },
+        rotation: 0,
       },
     ];
   }
@@ -123,29 +144,70 @@ function dimensionAnchor(document: SketchDocument, entityIds: readonly string[])
   };
 }
 
+function dimensionRotation(document: SketchDocument, entityIds: readonly string[]): number {
+  const entity = document.entities.find(({ id }) => id === entityIds[0]);
+  if (!entity) return 0;
+  if (entity.kind === 'line') {
+    return readableRotation(
+      -Math.atan2(entity.end.y - entity.start.y, entity.end.x - entity.start.x),
+    );
+  }
+  if (entity.kind === 'arc') {
+    return readableRotation(
+      -entity.startAngle - positiveArcSweep(entity.startAngle, entity.endAngle) / 2,
+    );
+  }
+  if (entity.kind === 'ellipse') return readableRotation(-entity.rotation);
+  return entity.kind === 'circle' ? -Math.PI / 6 : 0;
+}
+
 function place(
   desired: SketchPoint2D,
   occupied: readonly SketchPoint2D[],
-  viewport?: { readonly width: number; readonly height: number },
+  viewport?: {
+    readonly width: number;
+    readonly height: number;
+    readonly top?: number;
+    readonly right?: number;
+    readonly bottom?: number;
+    readonly left?: number;
+  },
 ): SketchPoint2D {
-  let screen = { ...desired };
-  let attempt = 0;
-  while (
-    occupied.some((point) => Math.abs(point.x - screen.x) < 86 && Math.abs(point.y - screen.y) < 24)
-  ) {
-    attempt += 1;
-    screen = {
-      x: desired.x + (attempt % 2 === 0 ? -1 : 1) * Math.ceil(attempt / 2) * 28,
-      y: desired.y - 18 - attempt * 18,
+  const clampToViewport = (candidate: SketchPoint2D): SketchPoint2D => {
+    if (!viewport) return candidate;
+    const left = viewport.left ?? 0;
+    const right = viewport.right ?? 0;
+    const top = viewport.top ?? 0;
+    const bottom = viewport.bottom ?? 0;
+    return {
+      x: Math.min(
+        Math.max(candidate.x, left + 54),
+        Math.max(left + 54, viewport.width - right - 54),
+      ),
+      y: Math.min(
+        Math.max(candidate.y, top + 22),
+        Math.max(top + 22, viewport.height - bottom - 22),
+      ),
     };
-  }
-  if (viewport) {
-    screen = {
-      x: Math.min(Math.max(screen.x, 54), Math.max(54, viewport.width - 54)),
-      y: Math.min(Math.max(screen.y, 22), Math.max(22, viewport.height - 22)),
-    };
-  }
-  return screen;
+  };
+  const candidates = [
+    desired,
+    { x: desired.x, y: desired.y - 32 },
+    { x: desired.x, y: desired.y + 40 },
+    { x: desired.x - 62, y: desired.y },
+    { x: desired.x + 62, y: desired.y },
+    { x: desired.x - 48, y: desired.y - 34 },
+    { x: desired.x + 48, y: desired.y - 34 },
+  ].map(clampToViewport);
+  return candidates.toSorted((left, right) => {
+    const score = (candidate: SketchPoint2D) =>
+      occupied.filter(
+        (point) => Math.abs(point.x - candidate.x) < 86 && Math.abs(point.y - candidate.y) < 24,
+      ).length *
+        10_000 +
+      Math.hypot(candidate.x - desired.x, candidate.y - desired.y);
+    return score(left) - score(right);
+  })[0];
 }
 
 export function projectDimensionOverlay(
@@ -153,7 +215,14 @@ export function projectDimensionOverlay(
   camera: Pick<Camera2D, 'worldToScreen'>,
   selection: { readonly entityIds: readonly string[]; readonly dimensionIds: readonly string[] },
   occupied: readonly SketchPoint2D[] = [],
-  viewport?: { readonly width: number; readonly height: number },
+  viewport?: {
+    readonly width: number;
+    readonly height: number;
+    readonly top?: number;
+    readonly right?: number;
+    readonly bottom?: number;
+    readonly left?: number;
+  },
 ): readonly DimensionOverlayLabel[] {
   const labels: DimensionOverlayLabel[] = [];
   const used = [...occupied];
@@ -172,6 +241,7 @@ export function projectDimensionOverlay(
       screen,
       entityIds,
       selected: selection.dimensionIds.includes(dimension.id),
+      rotation: dimensionRotation(document, entityIds),
     });
   }
   for (const entityId of selection.entityIds.length === 1 ? selection.entityIds : []) {
@@ -192,6 +262,7 @@ export function projectDimensionOverlay(
         screen,
         entityIds: [entityId],
         selected: false,
+        rotation: measurement.rotation,
       });
     }
   }

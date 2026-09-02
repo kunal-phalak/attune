@@ -11,11 +11,13 @@ import {
   type SelectionSet,
   type SketchDocument,
 } from '@attune/domain/editor';
-import { LayerCard } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Collapsible } from '@cloudflare/kumo/components/collapsible';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Popover } from '@cloudflare/kumo/components/popover';
+import { Sidebar } from '@cloudflare/kumo/components/sidebar';
+import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
+import { ContextMenu } from '@cloudflare/kumo/primitives/context-menu';
 import {
   useHistoryVersions,
   useHistoryVersionYjsData,
@@ -29,14 +31,15 @@ import {
   FloatingThread,
   Thread,
 } from '@liveblocks/react-ui';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
-import type { SketchTemplate } from '../lib/projects/library';
-import { humanizeSketchItemName, recursiveGroupEntityIds } from '../lib/sketch/items-tree';
+import {
+  humanizeSketchItemName,
+  recursiveGroupEntityIds,
+  sketchEntityDisplayName,
+} from '../lib/sketch/items-tree';
 import { sketchDocumentFromYjsVersion } from '../lib/sketch/versions';
 import { AppIcons } from './ui/app-icons';
-import { AppScrollArea } from './ui/app-scroll-area';
-import { AttuneBrandmark } from './ui/attune-brandmark';
 import type { CameraViewState, CanvasCommentPlacement } from './workspace-canvas';
 
 function PanelShell({
@@ -44,36 +47,57 @@ function PanelShell({
   title,
   open,
   onClose,
+  onWidthChange,
   children,
 }: {
   readonly side: 'left' | 'right';
   readonly title: string;
   readonly open: boolean;
   readonly onClose: () => void;
+  readonly onWidthChange?: (width: number) => void;
   readonly children: ReactNode;
 }) {
   return (
-    <LayerCard
-      render={<aside />}
-      className={`workspace-overlay-panel is-${side}`}
-      data-open={open}
-      aria-hidden={!open}
-      aria-label={`${title} panel`}
+    <Sidebar.Provider
+      contained
+      open={open}
+      side={side}
+      collapsible="offcanvas"
+      resizable
+      defaultWidth={288}
+      minWidth={240}
+      maxWidth={420}
+      mobileBreakpoint={0}
+      onWidthChange={onWidthChange}
+      className="workspace-sidebar-provider"
     >
-      <header>
-        <strong>{title}</strong>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          shape="square"
-          icon={<AppIcons.Close size={18} weight="bold" />}
-          onClick={onClose}
-          aria-label={`Close ${title}`}
-        />
-      </header>
-      <div className="workspace-overlay-panel-content">{children}</div>
-    </LayerCard>
+      <Sidebar
+        className={`workspace-overlay-panel is-${side}`}
+        data-open={open}
+        aria-hidden={!open}
+        aria-label={`${title} panel`}
+      >
+        <Sidebar.Header>
+          <strong>{title}</strong>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            shape="square"
+            icon={<AppIcons.Close size={18} weight="bold" />}
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+          />
+        </Sidebar.Header>
+        <Sidebar.Content
+          className="workspace-overlay-panel-content"
+          aria-label={`${title} content`}
+        >
+          {children}
+        </Sidebar.Content>
+        <Sidebar.ResizeHandle />
+      </Sidebar>
+    </Sidebar.Provider>
   );
 }
 
@@ -106,24 +130,69 @@ function entityDetail(entity: GeometryEntity): string {
   return 'Point';
 }
 
+function itemName(name: string) {
+  return (
+    <Tooltip content={name} side="right" render={<strong />}>
+      {name}
+    </Tooltip>
+  );
+}
+
+function ItemContextMenu({
+  trigger,
+  actions,
+  children,
+}: {
+  readonly trigger: ReactElement;
+  readonly children?: ReactNode;
+  readonly actions: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly destructive?: boolean;
+    readonly disabled?: boolean;
+    readonly onSelect: () => void;
+  }[];
+}) {
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger render={trigger}>{children}</ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Positioner className="sketch-item-context-positioner" sideOffset={4}>
+          <ContextMenu.Popup className="sketch-item-context-menu">
+            {actions.map((action) => (
+              <ContextMenu.Item
+                key={action.id}
+                className="sketch-item-context-item"
+                data-destructive={action.destructive || undefined}
+                disabled={action.disabled}
+                onClick={action.onSelect}
+              >
+                {action.label}
+              </ContextMenu.Item>
+            ))}
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  );
+}
+
 export function ItemsPanel({
   open,
-  projectName,
-  template,
   document,
   selection,
   onSelectionChange,
   onCommand,
   onClose,
+  onWidthChange,
 }: {
   readonly open: boolean;
-  readonly projectName: string;
-  readonly template: SketchTemplate;
   readonly document: SketchDocument | null;
   readonly selection: SelectionSet;
   readonly onSelectionChange: (selection: SelectionSet) => void;
   readonly onCommand?: (command: SketchCommand) => Promise<SketchDocument>;
   readonly onClose: () => void;
+  readonly onWidthChange?: (width: number) => void;
 }) {
   const treeRef = useRef<HTMLDivElement>(null);
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
@@ -162,21 +231,56 @@ export function ItemsPanel({
     if (!name || !onCommand || current?.name === name) return;
     void onCommand({ type: 'rename_group', groupId, name });
   };
-  const renderEntity = (entity: GeometryEntity) => (
-    <li
-      key={entity.id}
-      data-entity-id={entity.id}
-      data-selected={selection.entityIds.includes(entity.id)}
-    >
-      <button type="button" onClick={(event) => selectEntity(event, entity.id)}>
-        <ItemIcon kind={entity.kind} />
-        <span>
-          <strong>{entity.name ?? humanizeSketchItemName(entity.id)}</strong>
-          <small>{entityDetail(entity)}</small>
-        </span>
-      </button>
-    </li>
-  );
+  const createGroup = (kind: 'group' | 'section', parentGroupId?: string) => {
+    if (!onCommand) return;
+    const id = `${kind}:${crypto.randomUUID()}`;
+    void onCommand({
+      type: 'create_group',
+      groups: [
+        {
+          id,
+          name: kind === 'section' ? 'New section' : 'New group',
+          kind,
+          ...(parentGroupId ? { parentGroupId } : {}),
+          entityIds: [],
+        },
+      ],
+    }).then(() => startRename(id, kind === 'section' ? 'New section' : 'New group'));
+  };
+  const renderEntity = (entity: GeometryEntity) => {
+    const name = document ? sketchEntityDisplayName(document, entity) : 'Sketch item';
+    const movingIds = selection.entityIds.includes(entity.id) ? selection.entityIds : [entity.id];
+    return (
+      <ItemContextMenu
+        key={entity.id}
+        trigger={
+          <li data-entity-id={entity.id} data-selected={selection.entityIds.includes(entity.id)}>
+            <button type="button" onClick={(event) => selectEntity(event, entity.id)}>
+              <ItemIcon kind={entity.kind} />
+              <span>
+                {itemName(name)}
+                <small>{entityDetail(entity)}</small>
+              </span>
+            </button>
+          </li>
+        }
+        actions={[
+          ...groups.map((group) => ({
+            id: `move:${group.id}`,
+            label: `Move to ${humanizeSketchItemName(group.name)}`,
+            onSelect: () =>
+              void onCommand?.({ type: 'move_to_group', entityIds: movingIds, groupId: group.id }),
+          })),
+          {
+            id: 'delete',
+            label: 'Delete',
+            destructive: true,
+            onSelect: () => void onCommand?.({ type: 'delete_geometry', entityIds: movingIds }),
+          },
+        ]}
+      />
+    );
+  };
   const renderGroup = (group: (typeof groups)[number], depth = 0): ReactNode => {
     const entities = group.entityIds.flatMap((id) => {
       const entity = document?.entities.find(({ id: candidate }) => candidate === id);
@@ -190,9 +294,26 @@ export function ItemsPanel({
     const recursiveEntityIds = document ? recursiveGroupEntityIds(document, group.id) : [];
     return (
       <Collapsible.Root className="sketch-item-branch" key={group.id} defaultOpen={depth < 1}>
-        <div
-          className="sketch-item-branch-row"
-          data-selected={selection.groupIds.includes(group.id)}
+        <ItemContextMenu
+          trigger={
+            <div
+              className="sketch-item-branch-row"
+              data-selected={selection.groupIds.includes(group.id)}
+            />
+          }
+          actions={[
+            { id: 'rename', label: 'Rename', onSelect: () => startRename(group.id, group.name) },
+            {
+              id: 'new-group',
+              label: 'New group',
+              onSelect: () => createGroup('group', group.id),
+            },
+            {
+              id: 'new-section',
+              label: 'New section',
+              onSelect: () => createGroup('section', group.id),
+            },
+          ]}
         >
           <Collapsible.Trigger className="sketch-item-collapse" aria-label={`Toggle ${group.name}`}>
             <AppIcons.CollapseRight size={14} weight="bold" />
@@ -216,16 +337,22 @@ export function ItemsPanel({
               aria-label={`Select ${humanizeSketchItemName(group.name)}`}
               onClick={(event) => selectGroup(event, group.id, recursiveEntityIds)}
               onDoubleClick={() => startRename(group.id, group.name)}
+              onKeyDown={(event) => {
+                if (event.key === 'F2') {
+                  event.preventDefault();
+                  startRename(group.id, group.name);
+                }
+              }}
             >
               <span>
-                <strong>{humanizeSketchItemName(group.name)}</strong>
+                {itemName(humanizeSketchItemName(group.name))}
                 <small>
                   {recursiveEntityIds.length} entit{recursiveEntityIds.length === 1 ? 'y' : 'ies'}
                 </small>
               </span>
             </button>
           )}
-        </div>
+        </ItemContextMenu>
         <Collapsible.Panel>
           <ul>
             {entities.map(renderEntity)}
@@ -236,20 +363,36 @@ export function ItemsPanel({
     );
   };
   return (
-    <PanelShell side="left" title="Items" open={open} onClose={onClose}>
-      <div className="sketch-tree-heading">
-        <AttuneBrandmark size={17} />
-        <span>
-          <strong>{projectName}</strong>
-          <small>
-            {!document || document.entities.length === 0
-              ? 'Empty sketch'
-              : `${template === 'spoke' ? 'Spoke wheel' : 'Sketch'} · ${document.entities.length} entities`}
-          </small>
-        </span>
-      </div>
-      {document && document.entities.length > 0 ? (
-        <AppScrollArea className="min-h-0 flex-1" ariaLabel="Sketch items">
+    <PanelShell
+      side="left"
+      title="Items"
+      open={open}
+      onClose={onClose}
+      onWidthChange={onWidthChange}
+    >
+      <TooltipProvider>
+        <div className="sketch-tree-actions" aria-label="Item organization">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            icon={<AppIcons.New size={15} />}
+            onClick={() => createGroup('group')}
+            disabled={!onCommand}
+          >
+            New group
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => createGroup('section')}
+            disabled={!onCommand}
+          >
+            New section
+          </Button>
+        </div>
+        {document && document.entities.length > 0 ? (
           <div className="sketch-item-tree" ref={treeRef}>
             {roots.map((group) => renderGroup(group))}
             {ungrouped.length > 0 ? (
@@ -265,10 +408,10 @@ export function ItemsPanel({
               </section>
             ) : null}
           </div>
-        </AppScrollArea>
-      ) : (
-        <p className="sketch-panel-note">Draw geometry to add items.</p>
-      )}
+        ) : (
+          <p className="sketch-panel-note">Draw geometry to add items.</p>
+        )}
+      </TooltipProvider>
     </PanelShell>
   );
 }
@@ -470,7 +613,10 @@ export function SketchConstraintsPanel({
           if (!nextOpen) setDimensionDraft(null);
         }}
       >
-        <Popover.Trigger render={<span className="sketch-dimension-popover-anchor" />} />
+        <Popover.Trigger
+          nativeButton={false}
+          render={<span className="sketch-dimension-popover-anchor" />}
+        />
         <Popover.Content side="left" sideOffset={8} className="sketch-dimension-editor">
           <Popover.Title>
             {dimensionDraft
@@ -510,34 +656,40 @@ export function HistoryPanel({
   open,
   events,
   onClose,
+  onWidthChange,
 }: {
   readonly open: boolean;
   readonly events: readonly SketchHistoryEvent[];
   readonly onClose: () => void;
+  readonly onWidthChange?: (width: number) => void;
 }) {
   return (
-    <PanelShell side="right" title="History" open={open} onClose={onClose}>
+    <PanelShell
+      side="right"
+      title="History"
+      open={open}
+      onClose={onClose}
+      onWidthChange={onWidthChange}
+    >
       {events.length === 0 ? (
         <p className="sketch-panel-note">Sketch actions will appear here as they are recorded.</p>
       ) : (
-        <AppScrollArea className="min-h-0 flex-1" ariaLabel="Sketch action history">
-          <ol className="sketch-history-list">
-            {events.map((event) => (
-              <li key={event.id}>
-                <span aria-hidden />
-                <div>
-                  <small>{event.actor}</small>
-                  <strong>{event.label}</strong>
-                  <time dateTime={event.createdAt}>
-                    {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(
-                      new Date(event.createdAt),
-                    )}
-                  </time>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </AppScrollArea>
+        <ol className="sketch-history-list">
+          {events.map((event) => (
+            <li key={event.id}>
+              <span aria-hidden />
+              <div>
+                <small>{event.actor}</small>
+                <strong>{event.label}</strong>
+                <time dateTime={event.createdAt}>
+                  {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(
+                    new Date(event.createdAt),
+                  )}
+                </time>
+              </div>
+            </li>
+          ))}
+        </ol>
       )}
     </PanelShell>
   );
@@ -559,13 +711,21 @@ function VersionData({
   readonly onPreview: (preview: SketchVersionPreview | null) => void;
 }) {
   const result = useHistoryVersionYjsData(id);
+  const [legacyVersion, setLegacyVersion] = useState(false);
   useEffect(() => {
     if (!result.data) return;
     const document = sketchDocumentFromYjsVersion(result.data);
-    if (document) onPreview({ id, createdAt, document });
+    if (document) {
+      setLegacyVersion(false);
+      onPreview({ id, createdAt, document });
+    } else {
+      setLegacyVersion(true);
+    }
   }, [createdAt, id, onPreview, result.data]);
   if (result.isLoading) return <p className="sketch-panel-note">Loading version preview…</p>;
   if (result.error) return <p className="sketch-panel-note">This version could not be loaded.</p>;
+  if (legacyVersion)
+    return <p className="sketch-panel-note">This legacy version has no sketch snapshot.</p>;
   return null;
 }
 
@@ -625,10 +785,14 @@ function VersionIdentityList({
 export function DraftControl({
   collaboration,
   onPreview,
+  onSaveVersion,
 }: {
   readonly collaboration: boolean;
   readonly onPreview: (preview: SketchVersionPreview | null) => void;
+  readonly onSaveVersion?: () => Promise<void>;
 }) {
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   if (!collaboration) {
     return (
       <Button type="button" variant="ghost" size="base" disabled>
@@ -653,6 +817,27 @@ export function DraftControl({
         className="workspace-draft-popover"
       >
         <Popover.Title>Draft versions</Popover.Title>
+        <div className="workspace-version-actions">
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            icon={<AppIcons.Draft size={16} />}
+            disabled={saving || !onSaveVersion}
+            onClick={() => {
+              if (!onSaveVersion) return;
+              setSaving(true);
+              setSaved(false);
+              void onSaveVersion()
+                .then(() => setSaved(true))
+                .catch(() => undefined)
+                .finally(() => setSaving(false));
+            }}
+          >
+            {saving ? 'Saving…' : 'Save version'}
+          </Button>
+          <small>{saved ? 'Version saved.' : 'Capture the current synchronized draft.'}</small>
+        </div>
         <VersionIdentityList onPreview={onPreview} />
       </Popover.Content>
     </Popover>
@@ -680,25 +865,31 @@ export function LiveCommentsRail({
   open,
   workspaceId,
   onClose,
+  onWidthChange,
 }: {
   readonly open: boolean;
   readonly workspaceId: string;
   readonly onClose: () => void;
+  readonly onWidthChange?: (width: number) => void;
 }) {
   const result = useThreads({ query: { metadata: { workspaceId } } });
   const threads = result.threads ?? [];
   return (
-    <PanelShell side="left" title="Comments" open={open} onClose={onClose}>
-      <AppScrollArea className="min-h-0 flex-1" ariaLabel="Canvas comment threads">
-        <div className="workspace-comment-list attune-liveblocks-bridge">
-          {threads.map((thread) => (
-            <Thread key={thread.id} thread={thread} showComposer="collapsed" />
-          ))}
-          {threads.length === 0 && !result.isLoading ? (
-            <p className="sketch-panel-note">No comments yet.</p>
-          ) : null}
-        </div>
-      </AppScrollArea>
+    <PanelShell
+      side="left"
+      title="Comments"
+      open={open}
+      onClose={onClose}
+      onWidthChange={onWidthChange}
+    >
+      <div className="workspace-comment-list attune-liveblocks-bridge">
+        {threads.map((thread) => (
+          <Thread key={thread.id} thread={thread} showComposer="collapsed" />
+        ))}
+        {threads.length === 0 && !result.isLoading ? (
+          <p className="sketch-panel-note">No comments yet.</p>
+        ) : null}
+      </div>
     </PanelShell>
   );
 }

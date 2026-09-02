@@ -32,7 +32,11 @@ export interface SelectionContextRequest {
   readonly screenPoint?: SketchPoint2D;
   readonly camera?: SerializedCamera2D;
   readonly entityIds?: readonly string[];
+  readonly nodeIds?: readonly string[];
+  readonly constraintIds?: readonly string[];
   readonly groupIds?: readonly string[];
+  readonly activeGroupId?: string;
+  readonly activeHumanTool?: string;
   readonly sharedSelection?: readonly string[];
   readonly worldRegion?: SketchBounds;
   readonly tolerance?: number;
@@ -49,7 +53,11 @@ export interface SelectionContext {
   readonly hoveredEntity: RankedSelectionEntity | null;
   readonly nearbyEntities: readonly RankedSelectionEntity[];
   readonly selectedEntityIds: readonly string[];
+  readonly selectedNodeIds: readonly string[];
+  readonly selectedConstraintIds: readonly string[];
   readonly selectedGroupIds: readonly string[];
+  readonly activeGroupId: string | null;
+  readonly activeHumanTool: string | null;
   readonly selectedGroups: readonly {
     readonly groupId: string;
     readonly name: string;
@@ -198,6 +206,12 @@ export function createSelectionContext(
       : undefined);
   const tolerance = request.tolerance ?? (request.camera ? 10 / request.camera.zoom : 8);
   const groupIds = [...new Set(request.groupIds ?? [])].toSorted();
+  const nodeIds = [...new Set(request.nodeIds ?? [])]
+    .filter((id) => document.nodes.some((node) => node.id === id))
+    .toSorted();
+  const constraintIds = [...new Set(request.constraintIds ?? [])]
+    .filter((id) => document.constraints.some((constraint) => constraint.id === id))
+    .toSorted();
   const groupEntityIds = groupIds.flatMap((id) => groupById(document, id)?.entityIds ?? []);
   const selectedEntityIds = [
     ...new Set([
@@ -244,8 +258,10 @@ export function createSelectionContext(
     ...selectedEntityIds,
     ...nearbyEntities.map(({ entityId }) => entityId),
   ]);
-  const activeConstraints = document.constraints.filter((constraint) =>
-    constraint.refs.some(({ entityId }) => relevantIds.has(entityId)),
+  const activeConstraints = document.constraints.filter(
+    (constraint) =>
+      constraintIds.includes(constraint.id) ||
+      constraint.refs.some(({ entityId }) => relevantIds.has(entityId)),
   );
 
   return {
@@ -253,7 +269,14 @@ export function createSelectionContext(
     hoveredEntity: nearbyEntities[0] ?? null,
     nearbyEntities,
     selectedEntityIds,
+    selectedNodeIds: nodeIds,
+    selectedConstraintIds: constraintIds,
     selectedGroupIds: groupIds,
+    activeGroupId:
+      request.activeGroupId && document.groups.some(({ id }) => id === request.activeGroupId)
+        ? request.activeGroupId
+        : null,
+    activeHumanTool: request.activeHumanTool ?? null,
     selectedGroups: groupIds.flatMap((id) => {
       const group = groupById(document, id);
       return group ? [{ groupId: group.id, name: group.name, entityIds: group.entityIds }] : [];

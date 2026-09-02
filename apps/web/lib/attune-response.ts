@@ -18,18 +18,6 @@ export function attuneErrorResponse(error: unknown): NextResponse {
     );
   }
 
-  if (error instanceof Error && error.message === 'ACTIVE_DELEGATION_REQUIRED') {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'ACTIVE_DELEGATION_REQUIRED',
-          message: 'No active server-issued delegation exists for this workspace perspective.',
-        },
-      },
-      { status: 403 },
-    );
-  }
-
   if (isAttuneCommandError(error)) {
     return NextResponse.json(
       {
@@ -39,7 +27,7 @@ export function attuneErrorResponse(error: unknown): NextResponse {
           changedEntities: error.changedEntities,
         },
       },
-      { status: 409 },
+      { status: error.code === 'DELEGATION_REQUIRED' ? 403 : 409 },
     );
   }
 

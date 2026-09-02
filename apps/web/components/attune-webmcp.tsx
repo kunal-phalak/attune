@@ -1,5 +1,7 @@
 'use client';
 
+import { Button } from '@cloudflare/kumo/components/button';
+import { Popover } from '@cloudflare/kumo/components/popover';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -11,6 +13,7 @@ import {
 } from '../lib/attune-view';
 import { createToolRuntime, type RuntimeStatus } from '../lib/webmcp/runtime';
 import { registerAttuneTools, toolNamesForCapabilities } from '../lib/webmcp/tools';
+import { AppIcons } from './ui/app-icons';
 
 export type RegistrationState = 'checking' | 'registered' | 'unsupported' | 'failed';
 export type WebMcpExecutionState = RuntimeStatus['execution'];
@@ -43,6 +46,8 @@ export function AttuneWebMcp({
   });
   const [view, setView] = useState<AttuneApiView | null>(initialView ?? null);
   const viewRef = useRef<AttuneApiView | null>(initialView ?? null);
+  const perspectiveRef = useRef(perspective);
+  perspectiveRef.current = perspective;
   const updateView = useCallback((next: AttuneApiView) => {
     viewRef.current = next;
     setView(next);
@@ -53,11 +58,9 @@ export function AttuneWebMcp({
     );
     updateView(next);
   }, [perspective, updateView, workspaceId]);
-  const capabilityKey =
-    view?.capabilities
-      .map(({ id }) => id)
-      .toSorted()
-      .join('|') ?? '';
+  const capabilityKey = view
+    ? (view.authority?.capabilityIds ?? view.capabilities.map(({ id }) => id)).toSorted().join('|')
+    : '';
   const capabilityIds = useMemo(
     () => new Set(capabilityKey ? capabilityKey.split('|') : []),
     [capabilityKey],
@@ -66,7 +69,7 @@ export function AttuneWebMcp({
   const workspaceReady = view !== null;
 
   useEffect(() => {
-    if (!initialView) void refresh().catch(() => setRegistration('failed'));
+    void refresh().catch(() => setRegistration('failed'));
     const reload = (event: Event) => {
       if (event instanceof CustomEvent && isAttuneApiView(event.detail)) {
         updateView(event.detail);
@@ -76,7 +79,7 @@ export function AttuneWebMcp({
     };
     window.addEventListener('attune:workspace-changed', reload);
     return () => window.removeEventListener('attune:workspace-changed', reload);
-  }, [initialView, refresh, updateView]);
+  }, [refresh, updateView]);
 
   useEffect(() => {
     const context = document.modelContext;
@@ -88,7 +91,7 @@ export function AttuneWebMcp({
     const lifecycle = new AbortController();
     const runtime = createToolRuntime({
       workspaceId,
-      perspective,
+      perspective: () => perspectiveRef.current,
       viewRef,
       updateView,
       report: setExecution,
@@ -99,7 +102,7 @@ export function AttuneWebMcp({
       () => setRegistration('failed'),
     );
     return () => lifecycle.abort();
-  }, [capabilityIds, perspective, updateView, workspaceId, workspaceReady]);
+  }, [capabilityIds, updateView, workspaceId, workspaceReady]);
 
   useEffect(() => {
     onStatus?.({
@@ -113,9 +116,71 @@ export function AttuneWebMcp({
     });
   }, [availableTools, execution, onStatus, registration, view]);
 
+  const delegation = view?.delegation;
+  const enabled = delegation?.status === 'active';
+  const updateAgentAccess = async () => {
+    const response = await fetch(
+      attuneWorkspaceEndpoint('/api/attune/webmcp/delegation', workspaceId, { perspective }),
+      {
+        method: enabled ? 'DELETE' : 'POST',
+        cache: 'no-store',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        ...(enabled ? {} : { body: JSON.stringify({ consent: true }) }),
+      },
+    );
+    if (!response.ok) throw new Error('Agent access could not be updated.');
+    await refresh();
+  };
+
   return (
-    <output className="visually-hidden" aria-live="polite">
-      Contextual WebMCP {registration}. {availableTools.length} tools available.
-    </output>
+    <>
+      <Popover>
+        <Popover.Trigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="base"
+              shape="square"
+              icon={<AppIcons.Agent size={18} />}
+              aria-label={enabled ? 'Agent access enabled' : 'Enable agent access'}
+              data-active={enabled || undefined}
+            />
+          }
+        />
+        <Popover.Content
+          side="bottom"
+          align="end"
+          sideOffset={8}
+          positionMethod="fixed"
+          className="workspace-agent-popover"
+        >
+          <Popover.Title>Agent access</Popover.Title>
+          <p>
+            {delegation?.status === 'revalidation_required'
+              ? 'Workspace authority changed. Revalidate access before the agent mutates the design.'
+              : enabled
+                ? 'Short-lived browser-agent delegation is active for your current workspace authority.'
+                : 'Enable a short-lived browser-agent delegation for capabilities you already possess.'}
+          </p>
+          <Button
+            type="button"
+            variant={enabled ? 'secondary' : 'primary'}
+            size="sm"
+            onClick={() => void updateAgentAccess()}
+          >
+            {enabled
+              ? 'Disable agent'
+              : delegation?.status === 'revalidation_required'
+                ? 'Revalidate agent'
+                : 'Enable agent'}
+          </Button>
+        </Popover.Content>
+      </Popover>
+      <output className="visually-hidden" aria-live="polite">
+        Contextual WebMCP {registration}. {availableTools.length} tools available. Agent delegation{' '}
+        {delegation?.status ?? 'required'}.
+      </output>
+    </>
   );
 }

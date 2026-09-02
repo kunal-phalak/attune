@@ -44,6 +44,11 @@ describe('trusted Attune HTTP command boundary', () => {
     for (const forged of [
       { ...request({ type: 'request_quote' }), actor: 'human' },
       { ...request({ type: 'request_quote' }), role: 'buyer' },
+      { ...request({ type: 'request_quote' }), principal: 'user:attacker' },
+      { ...request({ type: 'request_quote' }), principalId: 'user:attacker' },
+      { ...request({ type: 'request_quote' }), providerAuthority: ['freeze_revision'] },
+      { ...request({ type: 'request_quote' }), originAuthority: 'system' },
+      { ...request({ type: 'request_quote' }), delegationScopes: ['edit_draft'] },
       {
         ...request({ type: 'request_quote' }),
         verification: { adminVerified: true, productId: 'forged' },
@@ -53,6 +58,33 @@ describe('trusted Attune HTTP command boundary', () => {
         /unsupported fields/,
       );
     }
+  });
+
+  it('normalizes caller-supplied footprint authority dependencies to server invariants', () => {
+    const parsed = parseCommandExecutionInput(
+      {
+        ...request({ type: 'move_slot', centerX: 195, centerY: 60 }),
+        footprint: {
+          documentId: 'sketch:document',
+          documentRevision: 4,
+          reads: ['slot:connector'],
+          writes: ['slot:connector'],
+          versions: { 'slot:connector': 4 },
+          entityIds: ['slot:connector'],
+          nodeIds: [],
+          groupIds: [],
+          constraintIds: [],
+          dimensionIds: [],
+          authorityDependencies: ['agent:claimed-superuser'],
+        },
+      },
+      ['move_slot'],
+    );
+
+    expect(parsed.envelope.footprint?.authorityDependencies).toEqual([
+      'sketch:document',
+      'authority:workspace',
+    ]);
   });
 
   it('rejects command-field injection and commands outside the trusted route role', () => {

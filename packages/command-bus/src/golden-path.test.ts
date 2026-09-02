@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AttuneCommandBus,
   AttuneCommandError,
+  type AgentDelegation,
   type CommandEnvelope,
-  type DelegationGrant,
   type TrustedExecutionContext,
 } from './index';
 
@@ -19,18 +19,18 @@ const FIXED_TIME = '2026-08-29T12:00:00.000Z';
 const WORKSPACE_ID = 'workspace:at-1042';
 
 function delegation(
-  role: DelegationGrant['role'],
-  capabilityIds: DelegationGrant['capabilityIds'],
-): DelegationGrant {
+  label: string,
+  capabilityIds: AgentDelegation['capabilityIds'],
+): AgentDelegation {
   return {
-    grantId: `delegation:test:${role}`,
-    delegatingPrincipalId: `${role}:AT-1042`,
-    delegatedPrincipalId: `agent:judge-tab:${role}`,
-    role,
+    id: `delegation:test:${label}`,
     workspaceId: WORKSPACE_ID,
+    principalId: 'user:AT-1042',
     capabilityIds,
+    authorityEpoch: 0,
     issuedAt: '2026-08-29T00:00:00.000Z',
     expiresAt: '2026-09-23T00:00:00.000Z',
+    consentExpiresAt: '2026-09-23T00:00:00.000Z',
     revokedAt: null,
     observationCursor: 0,
   };
@@ -39,13 +39,13 @@ function delegation(
 const buyer: TrustedExecutionContext = {
   path: 'human',
   workspaceId: WORKSPACE_ID,
-  principalId: 'buyer:AT-1042',
+  principalId: 'user:AT-1042',
   role: 'buyer',
 };
 const buyerAgent: TrustedExecutionContext = {
   path: 'webmcp',
   workspaceId: WORKSPACE_ID,
-  principalId: 'agent:judge-tab:buyer',
+  principalId: 'user:AT-1042',
   role: 'buyer',
   delegation: delegation('buyer', [
     'compare_valid_changes',
@@ -59,7 +59,7 @@ const buyerAgent: TrustedExecutionContext = {
 const provider: TrustedExecutionContext = {
   path: 'human',
   workspaceId: WORKSPACE_ID,
-  principalId: 'provider:fabricator',
+  principalId: 'user:AT-1042',
   role: 'provider',
 };
 const shopify: TrustedExecutionContext = {
@@ -195,7 +195,7 @@ describe('shared Attune semantic command bus', () => {
       bus.execute({ type: 'request_quote' }, envelope(bus, 'forged-role'), {
         path: 'webmcp',
         workspaceId: WORKSPACE_ID,
-        principalId: 'agent:missing-delegation',
+        principalId: 'user:missing-delegation',
         role: 'buyer',
       }),
     ).toThrowError(expect.objectContaining({ code: 'DELEGATION_REQUIRED' }));
@@ -215,9 +215,9 @@ describe('shared Attune semantic command bus', () => {
       bus.execute(
         { type: 'move_slot', centerX: 194, centerY: 60 },
         envelope(bus, 'forged-principal'),
-        { ...buyerAgent, principalId: 'buyer:forged-browser-claim' },
+        { ...buyerAgent, principalId: 'user:forged-browser-claim' },
       ),
-    ).toThrowError(expect.objectContaining({ code: 'PRINCIPAL_MISMATCH' }));
+    ).toThrowError(expect.objectContaining({ code: 'DELEGATION_INVALID' }));
     expect(() =>
       bus.execute({ type: 'move_slot', centerX: 194, centerY: 60 }, request, buyerAgent),
     ).toThrowError(expect.objectContaining({ code: 'IDEMPOTENCY_CONFLICT' }));
@@ -225,7 +225,7 @@ describe('shared Attune semantic command bus', () => {
       'STALE_WORKSPACE',
       'DELEGATION_REQUIRED',
       'SPEC_HASH_MISMATCH',
-      'PRINCIPAL_MISMATCH',
+      'DELEGATION_INVALID',
       'IDEMPOTENCY_CONFLICT',
     ]);
   });
@@ -248,7 +248,7 @@ describe('server-issued WebMCP delegation', () => {
     ).toThrowError(expect.objectContaining({ code: 'DELEGATION_CAPABILITY_DENIED' }));
   });
 
-  it('denies expired, revoked, wrong-role, and wrong-workspace grants', () => {
+  it('denies expired, revoked, stale-authority, and wrong-workspace grants', () => {
     const cases = [
       {
         context: {
@@ -267,9 +267,9 @@ describe('server-issued WebMCP delegation', () => {
       {
         context: {
           ...buyerAgent,
-          delegation: { ...buyerAgent.delegation!, role: 'provider' as const },
+          delegation: { ...buyerAgent.delegation!, authorityEpoch: 1 },
         },
-        code: 'DELEGATION_INVALID',
+        code: 'REVALIDATION_REQUIRED',
       },
       {
         context: {

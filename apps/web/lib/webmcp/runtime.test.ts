@@ -10,6 +10,16 @@ function bootstrapView(): AttuneApiView {
     workspace,
     specHash: hashSpecification(workspace),
     capabilities: [{ id: 'edit_draft', available: true }],
+    authority: {
+      perspectives: ['buyer'],
+      capabilityIds: ['edit_draft'],
+      authorityEpoch: workspace.authorityEpoch,
+    },
+    delegation: {
+      status: 'active',
+      authorityEpoch: workspace.authorityEpoch,
+      expiresAt: '2026-09-03T12:00:00.000Z',
+    },
     observation: { interventions: [] },
     semantic: { documentRevision: workspace.sketchDocument.revision },
   };
@@ -36,6 +46,11 @@ function mutationResult() {
       degreesOfFreedomAfter: 41,
     },
     rebase: { fromWorkspaceSequence: null, unseenHumanChanges: [] },
+    delegation: {
+      status: 'active',
+      authorityEpoch: 0,
+      expiresAt: '2026-09-03T12:10:00.000Z',
+    },
     next: {
       revision: 1,
       workspaceSequence: 1,
@@ -102,5 +117,43 @@ describe('one-request WebMCP semantic mutation runtime', () => {
         }),
       }),
     );
+  });
+
+  it('returns a structured delegation error instead of throwing a generic failure', async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        {
+          error: {
+            code: 'DELEGATION_REQUIRED',
+            message: 'Enable agent access for this workspace.',
+            changedEntities: [],
+          },
+        },
+        { status: 403 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const viewRef = { current: bootstrapView() };
+    viewRef.current = {
+      ...viewRef.current,
+      delegation: { status: 'required', authorityEpoch: 0 },
+    };
+    const runtime = createToolRuntime({
+      workspaceId: 'workspace:at-1042',
+      perspective: 'buyer',
+      viewRef,
+      updateView: () => undefined,
+      report: () => undefined,
+    });
+
+    await expect(runtime.execute({ type: 'edit_geometry', entities: [] })).resolves.toEqual({
+      status: 'DELEGATION_REQUIRED',
+      error: {
+        code: 'DELEGATION_REQUIRED',
+        message: 'Enable agent access for this workspace.',
+        semanticRefs: [],
+      },
+      delegation: { status: 'required', authorityEpoch: 0 },
+    });
   });
 });

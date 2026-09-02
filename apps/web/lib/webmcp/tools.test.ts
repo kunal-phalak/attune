@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { parseModifyGeometryToolInput } from './tools';
+import type { ToolRuntime } from './runtime';
+import { parseModifyGeometryToolInput, registerAttuneTools } from './tools';
+
+const unavailable = () => Promise.reject(new Error('Not used by this contract test.'));
 
 describe('compact WebMCP geometry mutation surface', () => {
   it('represents a shared-node movement without exposing renderer or solver objects', () => {
@@ -64,5 +67,86 @@ describe('compact WebMCP geometry mutation surface', () => {
       entityId: 'circle:1',
       pickPoint: { x: 50, y: 60 },
     });
+  });
+});
+
+describe('native model-context registration contract', () => {
+  it('exposes stable tools and executes geometry and constraint schemas with AbortSignal', async () => {
+    const execute = vi.fn(async (command: Readonly<Record<string, unknown>>) => ({
+      status: 'APPLIED',
+      command,
+    }));
+    const runtime: ToolRuntime = {
+      observe: vi.fn(unavailable),
+      observeWorkspace: vi.fn(unavailable),
+      execute,
+      forecast: vi.fn(unavailable),
+      navigateToStorefront: vi.fn(unavailable),
+    };
+    const registered = new Map<string, WebMcpTool>();
+    const registrationSignals: AbortSignal[] = [];
+    const context: WebMcpModelContext & {
+      getTools(): readonly string[];
+      executeTool(name: string, input: unknown, signal: AbortSignal): Promise<unknown>;
+    } = {
+      registerTool(tool, options) {
+        registered.set(tool.name, tool);
+        if (options?.signal) registrationSignals.push(options.signal);
+      },
+      getTools: () => [...registered.keys()].toSorted(),
+      async executeTool(name, input, signal) {
+        const tool = registered.get(name);
+        if (!tool) throw new Error(`Unknown tool ${name}.`);
+        return tool.execute(input, { signal });
+      },
+    };
+    const registration = new AbortController();
+    await registerAttuneTools(context, runtime, new Set(['edit_draft']), registration.signal);
+
+    expect(context.getTools()).toEqual(
+      expect.arrayContaining([
+        'inspect_context',
+        'forecast_change',
+        'check_design',
+        'modify_geometry',
+        'constrain_geometry',
+      ]),
+    );
+    expect(registrationSignals.every((signal) => signal === registration.signal)).toBe(true);
+
+    const execution = new AbortController();
+    await context.executeTool(
+      'modify_geometry',
+      {
+        operation: 'create_geometry',
+        entities: [{ id: 'point:webmcp', kind: 'point', position: { x: 4, y: 8 } }],
+      },
+      execution.signal,
+    );
+    await context.executeTool(
+      'constrain_geometry',
+      {
+        operation: 'apply_constraint',
+        constraints: [
+          {
+            id: 'constraint:webmcp:fixed',
+            type: 'fixed',
+            refs: [{ entityId: 'point:webmcp' }],
+          },
+        ],
+      },
+      execution.signal,
+    );
+
+    expect(execute).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ type: 'create_geometry' }),
+      execution.signal,
+    );
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ type: 'apply_constraint' }),
+      execution.signal,
+    );
   });
 });

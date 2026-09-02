@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   AttuneCommandBus,
   authoritativeSemanticEnvelope,
-  type DelegationGrant,
+  type AgentDelegation,
   type TrustedExecutionContext,
 } from './index';
 
@@ -22,20 +22,20 @@ let solver: ConstraintSolver;
 const human: TrustedExecutionContext = {
   path: 'human',
   workspaceId: WORKSPACE_ID,
-  principalId: 'buyer:semantic-test',
+  principalId: 'user:semantic-test',
   role: 'buyer',
 };
 
-function delegation(capabilityIds: DelegationGrant['capabilityIds']): DelegationGrant {
+function delegation(capabilityIds: AgentDelegation['capabilityIds']): AgentDelegation {
   return {
-    grantId: 'delegation:semantic-test',
-    delegatingPrincipalId: 'buyer:semantic-test',
-    delegatedPrincipalId: 'agent:semantic-test',
-    role: 'buyer',
+    id: 'delegation:semantic-test',
     workspaceId: WORKSPACE_ID,
+    principalId: 'user:semantic-test',
     capabilityIds,
+    authorityEpoch: 0,
     issuedAt: '2026-09-01T00:00:00.000Z',
     expiresAt: '2026-09-23T00:00:00.000Z',
+    consentExpiresAt: '2026-09-23T00:00:00.000Z',
     revokedAt: null,
     observationCursor: 0,
   };
@@ -44,7 +44,7 @@ function delegation(capabilityIds: DelegationGrant['capabilityIds']): Delegation
 const agent: TrustedExecutionContext = {
   path: 'webmcp',
   workspaceId: WORKSPACE_ID,
-  principalId: 'agent:semantic-test',
+  principalId: 'user:semantic-test',
   role: 'buyer',
   delegation: delegation(['edit_draft']),
 };

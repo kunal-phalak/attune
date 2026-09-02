@@ -17,6 +17,11 @@ export interface AgentContextSnapshot {
   readonly revision: number;
   readonly workspaceSequence: number;
   readonly specificationHash: string;
+  readonly delegation: {
+    readonly status: 'active' | 'required' | 'expired' | 'revalidation_required';
+    readonly expiresAt?: string;
+    readonly authorityEpoch: number;
+  };
   readonly selection: {
     readonly entityIds: readonly string[];
     readonly nodeIds: readonly string[];
@@ -83,6 +88,7 @@ export interface AgentMutationResult {
   readonly authorityEpoch: number;
   readonly specificationHash: string;
   readonly changedEntities: readonly string[];
+  readonly delegation: AgentContextSnapshot['delegation'];
   readonly availableCapabilities: readonly CapabilityId[];
   readonly solver: ForecastConsequence['solver'];
   readonly rebase: {
@@ -168,6 +174,7 @@ export function compileAgentContext(input: {
   readonly role: AttuneRole;
   readonly capabilityIds: readonly CapabilityId[];
   readonly observation: InterventionSummary;
+  readonly delegation: AgentContextSnapshot['delegation'];
   readonly focus?: SelectionContextRequest;
 }): AgentContextSnapshot {
   const focus = input.focus ?? {};
@@ -178,6 +185,7 @@ export function compileAgentContext(input: {
     capabilityIds: input.capabilityIds,
     focus,
     observation: input.observation,
+    delegation: input.delegation,
   });
   const cached = contextCache.get(cacheKey);
   if (cached) return structuredClone(cached);
@@ -202,6 +210,7 @@ export function compileAgentContext(input: {
     revision: input.workspace.sketchDocument.revision,
     workspaceSequence: input.workspace.workspaceSeq,
     specificationHash: hashSpecification(input.workspace),
+    delegation: input.delegation,
     selection: {
       entityIds: selection.selectedEntityIds,
       nodeIds: selection.selectedNodeIds,
@@ -261,6 +270,7 @@ export function compileAgentMutationResult(
     authorityEpoch: result.workspace.authorityEpoch,
     specificationHash: result.receipt.specHashAfter,
     changedEntities: result.receipt.affectedEntities,
+    delegation: context.delegation,
     availableCapabilities: capabilityIds,
     solver: result.forecast.solver,
     rebase: {

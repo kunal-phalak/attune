@@ -2,7 +2,8 @@ import { hashSpecification, type AttuneWorkspace } from '@attune/domain';
 import { Liveblocks } from '@liveblocks/node';
 import * as Y from 'yjs';
 
-import type { AttuneCollaborativeDraft } from '../../liveblocks.config';
+import { isAttuneCollaborativeDraft, type AttuneCollaborativeDraft } from '../../liveblocks.config';
+import { effectiveRoomPermissions, roomPermissionsAllow } from './access';
 
 let liveblocks: Liveblocks | undefined;
 
@@ -17,18 +18,18 @@ export function getLiveblocks(): Liveblocks {
   return liveblocks;
 }
 
-function isCollaborativeDraft(value: unknown): value is AttuneCollaborativeDraft {
-  if (typeof value !== 'object' || value === null) return false;
-  const geometry = Reflect.get(value, 'geometry');
-  return (
-    Reflect.get(value, 'commitmentId') === 'AT-1042' &&
-    Reflect.get(value, 'fabricationQuantity') === 4 &&
-    Number.isInteger(Reflect.get(value, 'draftVersion')) &&
-    typeof geometry === 'object' &&
-    geometry !== null &&
-    typeof Reflect.get(value, 'sketchDocument') === 'object' &&
-    Reflect.get(value, 'sketchDocument') !== null
-  );
+export async function liveblocksRoomPermission(
+  roomId: string,
+  userId: string,
+): Promise<{ readonly read: boolean; readonly comment: boolean; readonly write: boolean }> {
+  if (!liveblocksConfigured()) return { read: false, comment: false, write: false };
+  const room = await getLiveblocks().getRoom(roomId);
+  const permissions = effectiveRoomPermissions(room, userId);
+  return {
+    read: roomPermissionsAllow(permissions, 'read'),
+    comment: roomPermissionsAllow(permissions, 'comment'),
+    write: roomPermissionsAllow(permissions, 'write'),
+  };
 }
 
 export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborativeDraft {
@@ -39,11 +40,117 @@ export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborat
     geometry: structuredClone(workspace.geometry),
     sketchDocument: structuredClone(workspace.sketchDocument),
     draftVersion: workspace.draftVersion,
+    workspaceSeq: workspace.workspaceSeq,
+    capabilityEpoch: workspace.capabilityEpoch,
+    authorityEpoch: workspace.authorityEpoch,
+    specHash: hashSpecification(workspace),
     metadata: {
       material: workspace.geometry.material,
       thicknessMm: workspace.geometry.thickness,
     },
   };
+}
+
+export function collaborativeDraftFromUpdate(
+  update: ArrayBuffer | Uint8Array,
+): AttuneCollaborativeDraft | null {
+  const document = new Y.Doc();
+  try {
+    Y.applyUpdate(document, new Uint8Array(update));
+    const value = document.getMap('attune').get('draft');
+    return isAttuneCollaborativeDraft(value) ? structuredClone(value) : null;
+  } finally {
+    document.destroy();
+  }
+}
+
+export function authoritativeDraftUpdate(
+  currentUpdate: ArrayBuffer | Uint8Array | null,
+  workspace: AttuneWorkspace,
+): Uint8Array {
+  const document = new Y.Doc();
+  try {
+    if (currentUpdate) Y.applyUpdate(document, new Uint8Array(currentUpdate));
+    const state = Y.encodeStateVector(document);
+    document.transact(() => {
+      document.getMap('attune').set('draft', collaborativeDraft(workspace));
+    }, 'attune:authoritative-commit');
+    return Y.encodeStateAsUpdate(document, state);
+  } finally {
+    document.destroy();
+  }
+}
+
+const synchronizationQueue = new Map<string, Promise<void>>();
+
+export async function syncAuthoritativeWorkspace(
+  roomId: string,
+  workspace: AttuneWorkspace,
+): Promise<'synchronized' | 'already_current' | 'not_configured'> {
+  if (!liveblocksConfigured()) return 'not_configured';
+  let result: 'synchronized' | 'already_current' = 'synchronized';
+  const previous = synchronizationQueue.get(roomId) ?? Promise.resolve();
+  const operation = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const client = getLiveblocks();
+      const current = await client.getYjsDocumentAsBinaryUpdate(roomId);
+      const existing = collaborativeDraftFromUpdate(current);
+      if (existing && existing.workspaceSeq >= workspace.workspaceSeq) {
+        result = 'already_current';
+        return;
+      }
+      await client.sendYjsBinaryUpdate(roomId, authoritativeDraftUpdate(current, workspace));
+    });
+  synchronizationQueue.set(roomId, operation);
+  try {
+    await operation;
+    return result;
+  } finally {
+    if (synchronizationQueue.get(roomId) === operation) synchronizationQueue.delete(roomId);
+  }
+}
+
+const AGENT_COLLABORATOR = {
+  userId: 'attune-agent',
+  userInfo: { name: 'Attune Agent', color: '#7c5ce7' },
+} as const;
+
+export function agentPresencePayload(
+  activity: string,
+  semanticRefs: {
+    readonly entityIds?: readonly string[];
+    readonly nodeIds?: readonly string[];
+    readonly constraintIds?: readonly string[];
+  } = {},
+  ttl = 30,
+) {
+  return {
+    ...AGENT_COLLABORATOR,
+    data: {
+      cursor: null,
+      selectedEntityIds: [...(semanticRefs.entityIds ?? [])],
+      selectedNodeIds: [...(semanticRefs.nodeIds ?? [])],
+      selectedConstraintIds: [...(semanticRefs.constraintIds ?? [])],
+      activeTool: 'agent',
+      activity,
+    },
+    ttl,
+  };
+}
+
+export async function setAgentPresence(
+  roomId: string,
+  activity: string,
+  semanticRefs: {
+    readonly entityIds?: readonly string[];
+    readonly nodeIds?: readonly string[];
+    readonly constraintIds?: readonly string[];
+  } = {},
+  ttl = 30,
+): Promise<void> {
+  if (!liveblocksConfigured()) return;
+  await getLiveblocks().setPresence(roomId, agentPresencePayload(activity, semanticRefs, ttl));
 }
 
 function versionIdFromSnapshot(snapshot: unknown): string {
@@ -73,7 +180,7 @@ export async function snapshotCollaborativeDraft(
   try {
     Y.applyUpdate(document, new Uint8Array(update));
     const value = document.getMap('attune').get('draft');
-    if (!isCollaborativeDraft(value)) {
+    if (!isAttuneCollaborativeDraft(value)) {
       throw new Error('COLLABORATIVE_DRAFT_MISSING');
     }
     if (hashSpecification(value) !== hashSpecification(authoritativeWorkspace)) {

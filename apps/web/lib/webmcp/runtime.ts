@@ -58,10 +58,18 @@ async function responseJson(response: Response): Promise<unknown> {
     typeof error === 'object' && error !== null
       ? Reflect.get(error, 'message')
       : 'The authoritative request failed.';
+  const rawChangedEntities: readonly unknown[] =
+    typeof error === 'object' &&
+    error !== null &&
+    Array.isArray(Reflect.get(error, 'changedEntities'))
+      ? Reflect.get(error, 'changedEntities')
+      : [];
   throw new AttuneHttpError(
     response.status,
     typeof code === 'string' ? code : 'REQUEST_FAILED',
     typeof message === 'string' ? message : 'The authoritative request failed.',
+    false,
+    rawChangedEntities.filter((candidate): candidate is string => typeof candidate === 'string'),
   );
 }
 
@@ -100,6 +108,19 @@ function patchObservation(view: AttuneApiView, mutation: AgentMutationResult): A
       authorityEpoch: mutation.authorityEpoch,
     },
     semantic: { ...view.semantic, documentRevision: mutation.next.revision },
+    delegation: mutation.delegation,
+  };
+}
+
+function semanticErrorResult(error: AttuneHttpError, view: AttuneApiView) {
+  return {
+    status: error.code,
+    error: {
+      code: error.code,
+      message: error.message,
+      semanticRefs: error.changedEntities,
+    },
+    delegation: view.delegation,
   };
 }
 
@@ -154,14 +175,18 @@ export function compactWorkspaceResult(view: AttuneApiView) {
 
 export function createToolRuntime(input: {
   readonly workspaceId: string;
-  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly perspective:
+    | Extract<CapabilityRole, 'buyer' | 'provider'>
+    | (() => Extract<CapabilityRole, 'buyer' | 'provider'>);
   readonly viewRef: { current: AttuneApiView | null };
   readonly updateView: (view: AttuneApiView) => void;
   readonly report: (status: RuntimeStatus) => void;
 }): ToolRuntime {
+  const perspective = () =>
+    typeof input.perspective === 'function' ? input.perspective() : input.perspective;
   const workspaceEndpoint = (parameters?: Readonly<Record<string, string | number>>) =>
     attuneWorkspaceEndpoint('/api/attune/webmcp', input.workspaceId, {
-      perspective: input.perspective,
+      perspective: perspective(),
       ...parameters,
     });
   const observeWorkspace = async (signal?: AbortSignal) => {
@@ -217,6 +242,7 @@ export function createToolRuntime(input: {
         : result;
     } catch (error) {
       input.report({ execution: 'failed', lastAction: action });
+      if (error instanceof AttuneHttpError) return semanticErrorResult(error, observed);
       throw error;
     }
   };
@@ -225,7 +251,7 @@ export function createToolRuntime(input: {
     try {
       const response = await fetch(
         attuneWorkspaceEndpoint('/api/attune/webmcp/forecast', input.workspaceId, {
-          perspective: input.perspective,
+          perspective: perspective(),
         }),
         {
           method: 'POST',
@@ -240,6 +266,10 @@ export function createToolRuntime(input: {
       return result;
     } catch (error) {
       input.report({ execution: 'failed', lastAction: 'forecast_change' });
+      const observed = input.viewRef.current;
+      if (error instanceof AttuneHttpError && observed) {
+        return semanticErrorResult(error, observed);
+      }
       throw error;
     }
   };

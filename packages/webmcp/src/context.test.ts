@@ -16,6 +16,11 @@ describe('compact AgentContextSnapshot', () => {
       workspace,
       role: 'buyer',
       capabilityIds: ['edit_draft'],
+      delegation: {
+        status: 'active',
+        authorityEpoch: workspace.authorityEpoch,
+        expiresAt: '2026-09-03T12:00:00.000Z',
+      },
       focus: {
         entityIds: [entity.id],
         nodeIds: [entity.startNodeId!],
@@ -70,6 +75,7 @@ describe('compact AgentContextSnapshot', () => {
     expect(context.availableActions).toEqual(
       expect.arrayContaining(['modify_geometry', 'constrain_geometry']),
     );
+    expect(context.delegation.status).toBe('active');
     expect(context).not.toHaveProperty('receipts');
     expect(context).not.toHaveProperty('commerceLinks');
     expect(context).not.toHaveProperty('providerCapabilityProfile');

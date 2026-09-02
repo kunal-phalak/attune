@@ -3,7 +3,7 @@ import type {
   ChangeReceipt,
   CommandRejection,
   CommandResult,
-  DelegationGrant,
+  AgentDelegation,
 } from '@attune/command-bus';
 import type {
   Acceptance,
@@ -154,29 +154,31 @@ export const providerCapabilityProfiles = pgTable(
   ],
 );
 
-export const delegationGrants = pgTable(
-  'delegation_grants',
+export const agentDelegations = pgTable(
+  'agent_delegations',
   {
-    grantId: text('grant_id').primaryKey(),
+    id: text('id').primaryKey(),
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => workspaces.id),
-    delegatingPrincipalId: text('delegating_principal_id').notNull(),
-    delegatedPrincipalId: text('delegated_principal_id').notNull(),
-    role: text('role').$type<AttuneRole>().notNull(),
+    principalId: text('principal_id').notNull(),
     capabilityIds: text('capability_ids')
       .array()
-      .$type<DelegationGrant['capabilityIds']>()
+      .$type<AgentDelegation['capabilityIds']>()
       .notNull(),
+    authorityEpoch: integer('authority_epoch').notNull(),
     observationCursor: integer('observation_cursor').notNull().default(0),
     issuedAt: timestamp('issued_at', { mode: 'string', withTimezone: true }).notNull(),
     expiresAt: timestamp('expires_at', { mode: 'string', withTimezone: true }).notNull(),
+    consentExpiresAt: timestamp('consent_expires_at', {
+      mode: 'string',
+      withTimezone: true,
+    }).notNull(),
     revokedAt: timestamp('revoked_at', { mode: 'string', withTimezone: true }),
     createdAt,
   },
   (table) => [
-    index('delegation_grants_workspace_role_index').on(table.workspaceId, table.role),
-    index('delegation_grants_delegated_principal_index').on(table.delegatedPrincipalId),
+    index('agent_delegations_workspace_principal_index').on(table.workspaceId, table.principalId),
   ],
 );
 

@@ -20,13 +20,16 @@ export interface CapabilityView {
 
 export interface AttuneApiView {
   readonly perspective: CapabilityRole;
-  readonly delegation: {
-    readonly grantId: string;
-    readonly role: CapabilityRole;
+  readonly authority: {
+    readonly perspectives: readonly Extract<CapabilityRole, 'buyer' | 'provider'>[];
     readonly capabilityIds: readonly string[];
-    readonly expiresAt: string;
-    readonly observationCursor: number;
-  } | null;
+    readonly authorityEpoch: number;
+  };
+  readonly delegation: {
+    readonly status: 'active' | 'required' | 'expired' | 'revalidation_required';
+    readonly expiresAt?: string;
+    readonly authorityEpoch: number;
+  };
   readonly product: {
     readonly workspaceId: string;
     readonly projectName: string;

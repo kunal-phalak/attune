@@ -2,19 +2,24 @@ import {
   AttuneCommandBus,
   AttuneCommandError,
   type CommandEnvelope,
-  type DelegationGrant,
+  type AgentDelegation,
   type TrustedExecutionContext,
 } from '@attune/command-bus';
 import {
-  activeDelegationForWorkspace,
+  agentDelegationForWorkspace,
   advanceDelegationObservation,
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
+  issueAgentDelegation,
   JUDGE_WORKSPACE_ID,
+  liveblocksRoomIdForWorkspace,
   readWorkspaceBundle,
+  refreshAgentDelegation,
   reserveExternalMaterialization,
+  revokeAgentDelegation,
   type WorkspaceBundle,
+  type WorkspaceIdentity,
 } from '@attune/database';
 import {
   compareValidChanges,
@@ -30,8 +35,21 @@ import { getPlaneGcsSolver } from '@attune/domain/planegcs';
 import { materializeAt1042Revision } from '@attune/shopify';
 import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp';
 
+import {
+  AGENT_ACCESS_CONSENT_MS,
+  AGENT_DELEGATION_LEASE_MS,
+  authorityRoleForCommand,
+  capabilityIdsForWorkspaceAuthority,
+  delegationLeaseExpired,
+  delegationStatus,
+  type AgentDelegationStatus,
+} from './agent-delegation';
 import { requireWorkspaceIdentity } from './auth/session';
-import { snapshotCollaborativeDraft } from './liveblocks/server';
+import {
+  setAgentPresence,
+  snapshotCollaborativeDraft,
+  syncAuthoritativeWorkspace,
+} from './liveblocks/server';
 import { measureServerPhase, type ServerTimingRecorder } from './server-timing';
 
 export interface CommandExecutionInput {
@@ -44,6 +62,49 @@ export interface CommerceMaterializationInput {
   readonly envelope: CommandEnvelope;
 }
 
+function agentActivity(command: AttuneCommand): string {
+  if (command.type === 'apply_constraint') return 'Applying a constraint';
+  if (command.type === 'remove_constraint') return 'Removing a constraint';
+  if (command.type === 'set_dimension' || command.type === 'remove_dimension') {
+    return 'Checking dimensions';
+  }
+  return 'Checking geometry';
+}
+
+function commandFocus(command: AttuneCommand) {
+  if (!isSketchCommand(command)) return {};
+  switch (command.type) {
+    case 'create_geometry':
+    case 'edit_geometry':
+      return { entityIds: command.entities.map(({ id }) => id) };
+    case 'move_node':
+      return { nodeIds: [command.nodeId] };
+    case 'transform_geometry':
+    case 'delete_geometry':
+    case 'set_construction':
+    case 'move_to_group':
+      return { entityIds: command.entityIds };
+    case 'trim_geometry':
+      return { entityIds: [command.entityId] };
+    case 'apply_constraint':
+      return {
+        entityIds: command.constraints.flatMap(({ refs }) => refs.map(({ entityId }) => entityId)),
+        constraintIds: command.constraints.map(({ id }) => id),
+      };
+    case 'remove_constraint':
+      return { constraintIds: command.constraintIds };
+    case 'set_dimension':
+      return { dimensionIds: command.dimensions.map(({ id }) => id) };
+    case 'remove_dimension':
+      return { dimensionIds: command.dimensionIds };
+    case 'create_group':
+    case 'rename_group':
+    case 'restore_sketch':
+      return {};
+  }
+  return {};
+}
+
 async function trustedHumanContext(
   workspaceId: string,
   role: AttuneRole,
@@ -53,24 +114,92 @@ async function trustedHumanContext(
     path: 'human',
     workspaceId,
     role,
-    principalId: `${role}:${identity.userId}`,
+    perspective: role,
+    authorityRoles: identity.roles,
+    principalId: identity.principalId,
   };
+}
+
+interface AgentAccess {
+  readonly identity: WorkspaceIdentity;
+  readonly bundle: WorkspaceBundle;
+  readonly delegation: AgentDelegation | null;
+  readonly status: AgentDelegationStatus;
+  readonly capabilityIds: AgentDelegation['capabilityIds'];
+}
+
+function leaseTimestamp(now: number): string {
+  return new Date(now + AGENT_DELEGATION_LEASE_MS).toISOString();
+}
+
+async function accessForIdentity(
+  identity: WorkspaceIdentity,
+  bundle: WorkspaceBundle,
+): Promise<AgentAccess> {
+  const capabilityIds = capabilityIdsForWorkspaceAuthority(bundle.workspace, identity.roles);
+  let delegation = await agentDelegationForWorkspace(bundle.workspaceId, identity.principalId);
+  let status = delegationStatus(delegation, bundle.workspace.authorityEpoch);
+  const now = Date.now();
+  if (delegation && status.status === 'active' && delegationLeaseExpired(delegation, now)) {
+    delegation = await refreshAgentDelegation({
+      id: delegation.id,
+      authorityEpoch: bundle.workspace.authorityEpoch,
+      capabilityIds,
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: leaseTimestamp(now),
+    });
+    status = delegationStatus(delegation, bundle.workspace.authorityEpoch, now);
+  }
+  return { identity, bundle, delegation, status, capabilityIds };
+}
+
+async function agentAccess(
+  workspaceId: string,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
+  knownBundle?: WorkspaceBundle,
+): Promise<AgentAccess> {
+  const identity = await requireWorkspaceIdentity(workspaceId, perspective);
+  const bundle = knownBundle ?? (await readWorkspaceBundle(workspaceId));
+  return accessForIdentity(identity, bundle);
+}
+
+function requireActiveDelegation(access: AgentAccess): AgentDelegation {
+  if (access.status.status === 'revalidation_required') {
+    throw new AttuneCommandError(
+      'REVALIDATION_REQUIRED',
+      `Agent access was issued for authority epoch ${access.status.authorityEpoch}; the workspace is now epoch ${access.bundle.workspace.authorityEpoch}.`,
+      ['authority:workspace'],
+    );
+  }
+  if (access.status.status !== 'active' || !access.delegation) {
+    throw new AttuneCommandError(
+      'DELEGATION_REQUIRED',
+      'Enable agent access for this workspace before invoking mutation capabilities.',
+    );
+  }
+  return access.delegation;
 }
 
 async function trustedDelegatedContext(
   workspaceId: string,
-  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
+  commandType: AttuneCommand['type'],
 ): Promise<TrustedExecutionContext> {
-  const identity = await requireWorkspaceIdentity(workspaceId, role);
-  const delegation = await activeDelegationForWorkspace(workspaceId, role);
-  if (!delegation || delegation.delegatingPrincipalId !== `${role}:${identity.userId}`) {
-    throw new Error('ACTIVE_DELEGATION_REQUIRED');
-  }
+  const access = await agentAccess(workspaceId, perspective);
+  const delegation = requireActiveDelegation(access);
+  const role = authorityRoleForCommand(
+    access.bundle.workspace,
+    access.identity.roles,
+    commandType,
+    perspective,
+  );
   return {
     path: 'webmcp',
     workspaceId,
     role,
-    principalId: delegation.delegatedPrincipalId,
+    perspective,
+    authorityRoles: access.identity.roles,
+    principalId: access.identity.principalId,
     delegation,
   };
 }
@@ -128,7 +257,12 @@ function impactMetrics(bundle: WorkspaceBundle) {
 async function viewForBundle(
   bundle: WorkspaceBundle,
   role: AttuneRole,
-  delegation?: DelegationGrant,
+  delegation?: AgentDelegation,
+  authorityRoles: readonly AttuneRole[] = [role],
+  delegationState: AgentDelegationStatus = {
+    status: 'required',
+    authorityEpoch: bundle.workspace.authorityEpoch,
+  },
   timing?: ServerTimingRecorder,
 ) {
   const { solve, solver } = await measureServerPhase(timing, 'plane_gcs_solve', async () => {
@@ -142,19 +276,23 @@ async function viewForBundle(
   const delegatedCapabilities = delegation
     ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
     : inspection.capabilities;
+  const authorityCapabilityIds = capabilityIdsForWorkspaceAuthority(
+    bundle.workspace,
+    authorityRoles,
+  );
   const view = {
     ...inspection,
     capabilities: delegatedCapabilities,
     perspective: role,
-    delegation: delegation
-      ? {
-          grantId: delegation.grantId,
-          role: delegation.role,
-          capabilityIds: delegation.capabilityIds,
-          expiresAt: delegation.expiresAt,
-          observationCursor: delegation.observationCursor,
-        }
-      : null,
+    authority: {
+      perspectives: authorityRoles.filter(
+        (candidate): candidate is Extract<AttuneRole, 'buyer' | 'provider'> =>
+          candidate === 'buyer' || candidate === 'provider',
+      ),
+      capabilityIds: authorityCapabilityIds,
+      authorityEpoch: bundle.workspace.authorityEpoch,
+    },
+    delegation: delegationState,
     observation: bundle.observation,
     product: {
       workspaceId: bundle.workspaceId,
@@ -209,36 +347,59 @@ async function viewForBundle(
 }
 
 /** Builds the editor view after the caller has already established workspace membership. */
-export function viewForTrustedBundle(bundle: WorkspaceBundle, role: AttuneRole) {
-  return viewForBundle(bundle, role);
+export async function viewForTrustedBundle(
+  bundle: WorkspaceBundle,
+  role: AttuneRole,
+  identity?: WorkspaceIdentity,
+) {
+  if (!identity) return viewForBundle(bundle, role);
+  const access = await accessForIdentity(identity, bundle);
+  return viewForBundle(
+    bundle,
+    role,
+    access.status.status === 'active' ? (access.delegation ?? undefined) : undefined,
+    identity.roles,
+    access.status,
+  );
 }
 
 async function inspectHuman(workspaceId: string, role: AttuneRole, timing?: ServerTimingRecorder) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  await measureServerPhase(timing, 'auth', () => trustedHumanContext(workspaceId, role));
+  const identity = await measureServerPhase(timing, 'auth', () =>
+    requireWorkspaceIdentity(workspaceId, role),
+  );
   const bundle = await measureServerPhase(timing, 'neon_workspace_load', () =>
     readWorkspaceBundle(workspaceId, undefined, undefined, timing),
   );
-  return viewForBundle(bundle, role, undefined, timing);
+  const access = await accessForIdentity(identity, bundle);
+  return viewForBundle(
+    bundle,
+    role,
+    access.status.status === 'active' ? (access.delegation ?? undefined) : undefined,
+    identity.roles,
+    access.status,
+    timing,
+  );
 }
 
 export async function inspectForDelegatedAgent(
   workspaceId: string,
-  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const context = await trustedDelegatedContext(workspaceId, role);
-  const bundle = await readWorkspaceBundle(
-    workspaceId,
-    context.delegation?.observationCursor,
-    undefined,
-  );
-  return viewForBundle(bundle, role, context.delegation);
+  const access = await agentAccess(workspaceId, perspective);
+  const activeDelegation =
+    access.status.status === 'active' ? (access.delegation ?? undefined) : undefined;
+  const bundle = activeDelegation
+    ? await readWorkspaceBundle(workspaceId, activeDelegation.observationCursor)
+    : access.bundle;
+  return viewForBundle(bundle, perspective, activeDelegation, access.identity.roles, access.status);
 }
 
 async function agentContextForBundle(
   bundle: WorkspaceBundle,
   context: TrustedExecutionContext,
+  delegationState: AgentDelegationStatus,
   focus?: SelectionContextRequest,
 ) {
   const solver = await getPlaneGcsSolver();
@@ -250,40 +411,92 @@ async function agentContextForBundle(
       lastSolve: solution.document.lastSolve,
     },
   };
-  const inspection = new AttuneCommandBus(workspace, undefined, solver).inspect(context.role);
+  const perspective = context.perspective ?? context.role;
+  const inspection = new AttuneCommandBus(workspace, undefined, solver).inspect(perspective);
   const capabilityIds = inspection.capabilities
     .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
     .map(({ id }) => id);
   return compileAgentContext({
     workspace,
-    role: context.role,
+    role: perspective,
     capabilityIds,
     observation: bundle.observation,
+    delegation: delegationState,
     focus,
   });
 }
 
 export async function inspectAgentContext(
   workspaceId: string,
-  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   focus?: SelectionContextRequest,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const context = await trustedDelegatedContext(workspaceId, role);
-  const bundle = await readWorkspaceBundle(
+  const access = await agentAccess(workspaceId, perspective);
+  const activeDelegation =
+    access.status.status === 'active' ? (access.delegation ?? undefined) : undefined;
+  const context: TrustedExecutionContext = {
+    path: 'webmcp',
     workspaceId,
-    context.delegation?.observationCursor,
-    context.principalId,
-  );
-  const snapshot = await agentContextForBundle(bundle, context, focus);
+    principalId: access.identity.principalId,
+    role: perspective,
+    perspective,
+    authorityRoles: access.identity.roles,
+    delegation: activeDelegation,
+  };
+  const bundle = activeDelegation
+    ? await readWorkspaceBundle(
+        workspaceId,
+        activeDelegation.observationCursor,
+        context.principalId,
+      )
+    : access.bundle;
+  const snapshot = await agentContextForBundle(bundle, context, access.status, focus);
   if (context.delegation) {
     await advanceDelegationObservation(
       workspaceId,
-      context.delegation.grantId,
+      context.delegation.id,
       bundle.workspace.workspaceSeq,
     );
   }
   return snapshot;
+}
+
+export async function enableAgentAccess(
+  workspaceId: string,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const identity = await requireWorkspaceIdentity(workspaceId, perspective);
+  const bundle = await readWorkspaceBundle(workspaceId);
+  const now = Date.now();
+  const delegation = await issueAgentDelegation({
+    workspaceId,
+    principalId: identity.principalId,
+    capabilityIds: capabilityIdsForWorkspaceAuthority(bundle.workspace, identity.roles),
+    authorityEpoch: bundle.workspace.authorityEpoch,
+    observationCursor: bundle.workspace.workspaceSeq,
+    issuedAt: new Date(now).toISOString(),
+    expiresAt: leaseTimestamp(now),
+    consentExpiresAt: new Date(now + AGENT_ACCESS_CONSENT_MS).toISOString(),
+  });
+  return {
+    delegation: delegationStatus(delegation, bundle.workspace.authorityEpoch, now),
+  };
+}
+
+export async function disableAgentAccess(
+  workspaceId: string,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
+) {
+  const identity = await requireWorkspaceIdentity(workspaceId, perspective);
+  await revokeAgentDelegation(workspaceId, identity.principalId);
+  return {
+    delegation: {
+      status: 'required' as const,
+      authorityEpoch: (await readWorkspaceBundle(workspaceId)).workspace.authorityEpoch,
+    },
+  };
 }
 
 export function inspectForHuman(
@@ -314,15 +527,27 @@ async function executeWithContext(
     input.envelope.observationCursor,
     context.path === 'webmcp' ? context.principalId : undefined,
   );
-  return viewForBundle(bundle, context.role, context.delegation);
+  return viewForBundle(
+    bundle,
+    context.perspective ?? context.role,
+    context.delegation,
+    context.authorityRoles,
+    context.delegation
+      ? delegationStatus(context.delegation, bundle.workspace.authorityEpoch)
+      : { status: 'required', authorityEpoch: bundle.workspace.authorityEpoch },
+  );
 }
 
 export async function executeAgentCommand(
   workspaceId: string,
-  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   input: CommandExecutionInput,
 ) {
-  return executeWithContext(workspaceId, input, await trustedDelegatedContext(workspaceId, role));
+  return executeWithContext(
+    workspaceId,
+    input,
+    await trustedDelegatedContext(workspaceId, perspective, input.command.type),
+  );
 }
 
 export async function executeSemanticCommand(
@@ -335,6 +560,12 @@ export async function executeSemanticCommand(
     throw new TypeError('executeSemanticCommand accepts semantic sketch commands only.');
   }
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const roomId = await liveblocksRoomIdForWorkspace(workspaceId);
+  if (context.path === 'webmcp') {
+    await setAgentPresence(roomId, agentActivity(input.command), commandFocus(input.command)).catch(
+      () => undefined,
+    );
+  }
   const result = await executePersistedCommand({
     workspaceId,
     command: input.command,
@@ -342,15 +573,31 @@ export async function executeSemanticCommand(
     context,
     timing,
   });
+  await syncAuthoritativeWorkspace(roomId, result.workspace);
+  if (context.path === 'webmcp') {
+    await setAgentPresence(
+      roomId,
+      'Update applied',
+      { entityIds: result.receipt.affectedEntities },
+      2,
+    ).catch(() => undefined);
+  }
   const contextStartedAt = performance.now();
-  const capabilityIds = result.capabilities
-    .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
+  const perspective = context.perspective ?? context.role;
+  const capabilityIds = new AttuneCommandBus(result.workspace)
+    .inspect(perspective)
+    .capabilities.filter(
+      ({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id),
+    )
     .map(({ id }) => id);
   const nextContext = compileAgentContext({
     workspace: result.workspace,
-    role: context.role,
+    role: perspective,
     capabilityIds,
     observation: result.observation,
+    delegation: context.delegation
+      ? delegationStatus(context.delegation, result.workspace.authorityEpoch)
+      : { status: 'required', authorityEpoch: result.workspace.authorityEpoch },
   });
   timing?.('semantic_context', performance.now() - contextStartedAt);
   return {
@@ -362,13 +609,13 @@ export async function executeSemanticCommand(
 
 export async function executeAgentSemanticCommand(
   workspaceId: string,
-  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   input: CommandExecutionInput,
 ) {
   const execution = await executeSemanticCommand(
     workspaceId,
     input,
-    await trustedDelegatedContext(workspaceId, role),
+    await trustedDelegatedContext(workspaceId, perspective, input.command.type),
   );
   return execution.mutation;
 }
@@ -400,11 +647,17 @@ async function forecastWithContext(
   const solver = await getPlaneGcsSolver();
   const bus = new AttuneCommandBus(bundle.workspace, undefined, solver);
   const forecast = bus.forecast(command, context, `forecast-${crypto.randomUUID()}`);
-  const agentContext = await agentContextForBundle(bundle, context);
+  const agentContext = await agentContextForBundle(
+    bundle,
+    context,
+    context.delegation
+      ? delegationStatus(context.delegation, bundle.workspace.authorityEpoch)
+      : { status: 'required', authorityEpoch: bundle.workspace.authorityEpoch },
+  );
   if (context.path === 'webmcp' && context.delegation) {
     await advanceDelegationObservation(
       workspaceId,
-      context.delegation.grantId,
+      context.delegation.id,
       bundle.workspace.workspaceSeq,
     );
   }
@@ -413,13 +666,13 @@ async function forecastWithContext(
 
 export async function forecastAgentCommand(
   workspaceId: string,
-  role: Extract<AttuneRole, 'buyer' | 'provider'>,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   command: AttuneCommand,
 ) {
   return forecastWithContext(
     workspaceId,
     command,
-    await trustedDelegatedContext(workspaceId, role),
+    await trustedDelegatedContext(workspaceId, perspective, command.type),
   );
 }
 
@@ -456,7 +709,11 @@ export async function executeCommerceMaterialization(
   input: CommerceMaterializationInput,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const delegatedContext = await trustedDelegatedContext(workspaceId, role);
+  const delegatedContext = await trustedDelegatedContext(
+    workspaceId,
+    role,
+    'materialize_for_commerce',
+  );
   const context = trustedSystemContext(workspaceId);
   const reservation = await reserveExternalMaterialization({
     workspaceId,
@@ -465,7 +722,14 @@ export async function executeCommerceMaterialization(
     context: delegatedContext,
   });
   if (reservation.status === 'completed') {
-    return viewForBundle(await readWorkspaceBundle(workspaceId), role, delegatedContext.delegation);
+    const bundle = await readWorkspaceBundle(workspaceId);
+    return viewForBundle(
+      bundle,
+      role,
+      delegatedContext.delegation,
+      delegatedContext.authorityRoles,
+      delegationStatus(delegatedContext.delegation!, bundle.workspace.authorityEpoch),
+    );
   }
   try {
     const verification = await materializeAt1042Revision(reservation.revision);
@@ -476,7 +740,14 @@ export async function executeCommerceMaterialization(
       context,
     });
     await finishExternalMaterialization(workspaceId, input.envelope.commandId, 'completed');
-    return viewForBundle(await readWorkspaceBundle(workspaceId), role, delegatedContext.delegation);
+    const bundle = await readWorkspaceBundle(workspaceId);
+    return viewForBundle(
+      bundle,
+      role,
+      delegatedContext.delegation,
+      delegatedContext.authorityRoles,
+      delegationStatus(delegatedContext.delegation!, bundle.workspace.authorityEpoch),
+    );
   } catch (error) {
     await finishExternalMaterialization(
       workspaceId,

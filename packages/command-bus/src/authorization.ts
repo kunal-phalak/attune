@@ -24,9 +24,8 @@ export function originForPath(path: TrustedExecutionPath): CommandOrigin {
 function principalMatches(context: TrustedExecutionContext): boolean {
   switch (context.path) {
     case 'human':
-      return context.principalId.startsWith(`${context.role}:`);
     case 'webmcp':
-      return context.principalId.startsWith('agent:');
+      return context.principalId.startsWith('user:') || context.principalId.startsWith('judge:');
     case 'system':
       return (
         context.principalId.startsWith('system:') || context.principalId.startsWith('integration:')
@@ -44,6 +43,7 @@ function delegationFailure(
   context: TrustedExecutionContext,
   commandType: AttuneCommand['type'],
   now: string,
+  authorityEpoch: number,
 ): AuthorizationFailure | undefined {
   const grant = context.delegation;
   if (!grant) {
@@ -52,14 +52,10 @@ function delegationFailure(
       message: 'A WebMCP invocation requires an active server-issued delegation grant.',
     };
   }
-  if (
-    grant.workspaceId !== context.workspaceId ||
-    grant.delegatedPrincipalId !== context.principalId ||
-    grant.role !== context.role
-  ) {
+  if (grant.workspaceId !== context.workspaceId || grant.principalId !== context.principalId) {
     return {
       code: 'DELEGATION_INVALID',
-      message: 'The delegation does not match this workspace, principal, and business role.',
+      message: 'The delegation does not match this workspace and authenticated principal.',
     };
   }
   if (grant.revokedAt) {
@@ -68,11 +64,17 @@ function delegationFailure(
   if (Date.parse(grant.expiresAt) <= Date.parse(now)) {
     return { code: 'DELEGATION_EXPIRED', message: 'The active delegation has expired.' };
   }
+  if (grant.authorityEpoch !== authorityEpoch) {
+    return {
+      code: 'REVALIDATION_REQUIRED',
+      message: `Workspace authority changed from epoch ${grant.authorityEpoch} to ${authorityEpoch}.`,
+    };
+  }
   const required = requiredCapability(commandType);
   if (required && !grant.capabilityIds.includes(required)) {
     return {
       code: 'DELEGATION_CAPABILITY_DENIED',
-      message: `The active ${grant.role} delegation does not include ${required}.`,
+      message: `The active delegation does not include ${required}.`,
     };
   }
   return undefined;
@@ -82,6 +84,7 @@ export function authorizationFailure(
   context: TrustedExecutionContext,
   commandType: AttuneCommand['type'],
   now: string,
+  authorityEpoch: number,
 ): AuthorizationFailure | undefined {
   const externalSync = commandType === 'synchronize_shopify_draft_order';
   const externalPath =
@@ -100,7 +103,9 @@ export function authorizationFailure(
       message: `Execution path ${context.path} cannot assert this principal.`,
     };
   }
-  if (context.path === 'webmcp') return delegationFailure(context, commandType, now);
+  if (context.path === 'webmcp') {
+    return delegationFailure(context, commandType, now, authorityEpoch);
+  }
   if (context.delegation) {
     return {
       code: 'DELEGATION_INVALID',

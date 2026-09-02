@@ -22,24 +22,35 @@ export type TrustedExecutionPath =
   | 'shopify_webhook'
   | 'shopify_reconciliation';
 
-export interface DelegationGrant {
-  readonly grantId: string;
-  readonly delegatingPrincipalId: string;
-  readonly delegatedPrincipalId: string;
-  readonly role: AttuneRole;
+export interface AgentDelegation {
+  readonly id: string;
   readonly workspaceId: string;
+  /** Authenticated human/account identity that explicitly enabled agent access. */
+  readonly principalId: string;
   readonly capabilityIds: readonly CapabilityId[];
+  /** Authority revision against which the server derived capabilityIds. */
+  readonly authorityEpoch: number;
   readonly issuedAt: string;
   readonly expiresAt: string;
+  /** Consent is finite but may outlive one short-lived delegation lease. */
+  readonly consentExpiresAt: string;
   readonly revokedAt: string | null;
   readonly observationCursor: number;
 }
+
+/** @deprecated Use AgentDelegation. */
+export type DelegationGrant = AgentDelegation;
 
 export interface TrustedExecutionContext {
   readonly path: TrustedExecutionPath;
   readonly workspaceId: string;
   readonly principalId: string;
+  /** Capability role selected by the server for this command. */
   readonly role: AttuneRole;
+  /** Product lens only; it is never consulted to authorize a command. */
+  readonly perspective?: AttuneRole;
+  /** Roles derived from workspace membership, never browser input. */
+  readonly authorityRoles?: readonly AttuneRole[];
   readonly delegation?: DelegationGrant;
 }
 

@@ -1,6 +1,9 @@
 export { databaseConfigured, getDatabase } from './client';
 export {
-  activeDelegationForWorkspace,
+  agentDelegationForWorkspace,
+  attuneUserForSharing,
+  attuneUsersByIds,
+  bumpWorkspaceAuthorityEpochForRoom,
   advanceDelegationObservation,
   canCreateProjectsForUser,
   createSketchProjectRecord,
@@ -12,15 +15,20 @@ export {
   finishExternalMaterialization,
   identityForLiveblocksRoom,
   identityForWorkspace,
+  issueAgentDelegation,
   JUDGE_AUTH_USER_ID,
   JUDGE_USER_ID,
   JUDGE_WORKSPACE_ID,
   listProjectsForUser,
+  liveblocksRoomIdForWorkspace,
   renameSketchProjectRecord,
   readWorkspaceBundle,
+  refreshAgentDelegation,
   resetJudgeWorkspace,
   reserveExternalMaterialization,
+  revokeAgentDelegation,
   usersForLiveblocksRoom,
+  workspaceMemberUserIds,
   workspaceRoles,
 } from './repository';
 export type {

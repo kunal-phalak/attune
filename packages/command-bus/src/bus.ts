@@ -134,7 +134,12 @@ export class AttuneCommandBus {
 
   forecast(command: AttuneCommand, context: TrustedExecutionContext, commandId = 'forecast') {
     const now = this.#clock();
-    const authorization = authorizationFailure(context, command.type, now);
+    const authorization = authorizationFailure(
+      context,
+      command.type,
+      now,
+      this.#workspace.authorityEpoch,
+    );
     if (authorization) throw new AttuneCommandError(authorization.code, authorization.message);
     this.#ensureCapability(command.type, context.role, commandId, context);
     return immutableCopy(
@@ -262,7 +267,12 @@ export class AttuneCommandBus {
     now: string,
   ): EnvelopeValidation {
     const commandType = typeof command === 'string' ? command : command.type;
-    const authorization = authorizationFailure(context, commandType, now);
+    const authorization = authorizationFailure(
+      context,
+      commandType,
+      now,
+      this.#workspace.authorityEpoch,
+    );
     if (authorization) {
       this.#reject({ ...authorization, commandType, envelope, context });
     }

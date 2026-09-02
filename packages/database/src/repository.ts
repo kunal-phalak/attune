@@ -7,7 +7,7 @@ import {
   type CommandEnvelope,
   type CommandRejection,
   type CommandResult,
-  type DelegationGrant,
+  type AgentDelegation,
   type InterventionSummary,
   type TrustedExecutionContext,
 } from '@attune/command-bus';
@@ -26,7 +26,7 @@ import {
   type SketchDocument,
 } from '@attune/domain';
 import { getPlaneGcsSolver } from '@attune/domain/planegcs';
-import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 
 import { getDatabase } from './client';
 import {
@@ -37,7 +37,7 @@ import {
   commandIdempotencyRecords,
   commandRejections,
   commerceVerificationRecords,
-  delegationGrants,
+  agentDelegations,
   externalCommerceRecords,
   externalActionAttempts,
   frozenRevisions,
@@ -575,40 +575,6 @@ async function initializeJudgeWorkspace(): Promise<void> {
       })
       .onConflictDoNothing();
     await transaction
-      .insert(delegationGrants)
-      .values([
-        {
-          grantId: 'delegation:judge:buyer:v1',
-          workspaceId: JUDGE_WORKSPACE_ID,
-          delegatingPrincipalId: `buyer:${JUDGE_USER_ID}`,
-          delegatedPrincipalId: `agent:judge:buyer`,
-          role: 'buyer',
-          capabilityIds: [
-            'compare_valid_changes',
-            'apply_deterministic_repair',
-            'edit_draft',
-            'request_quote',
-            'accept_revision',
-            'navigate_to_storefront',
-          ],
-          observationCursor: 0,
-          issuedAt: now,
-          expiresAt: '2026-09-23T00:00:00.000Z',
-        },
-        {
-          grantId: 'delegation:judge:provider:v1',
-          workspaceId: JUDGE_WORKSPACE_ID,
-          delegatingPrincipalId: `provider:${JUDGE_USER_ID}`,
-          delegatedPrincipalId: `agent:judge:provider`,
-          role: 'provider',
-          capabilityIds: ['freeze_and_quote_revision', 'materialize_for_commerce'],
-          observationCursor: 0,
-          issuedAt: now,
-          expiresAt: '2026-09-23T00:00:00.000Z',
-        },
-      ])
-      .onConflictDoNothing();
-    await transaction
       .insert(workspaceSnapshots)
       .values({
         id: `${JUDGE_WORKSPACE_ID}:snapshot:0`,
@@ -666,50 +632,116 @@ export function ensureJudgeWorkspace(): Promise<void> {
   return judgeWorkspaceSetupPromise;
 }
 
-export async function activeDelegationForWorkspace(
+function delegationSelection() {
+  return {
+    id: agentDelegations.id,
+    workspaceId: agentDelegations.workspaceId,
+    principalId: agentDelegations.principalId,
+    capabilityIds: agentDelegations.capabilityIds,
+    authorityEpoch: agentDelegations.authorityEpoch,
+    observationCursor: agentDelegations.observationCursor,
+    issuedAt: agentDelegations.issuedAt,
+    expiresAt: agentDelegations.expiresAt,
+    consentExpiresAt: agentDelegations.consentExpiresAt,
+    revokedAt: agentDelegations.revokedAt,
+  };
+}
+
+export async function agentDelegationForWorkspace(
   workspaceId: string,
-  role: AttuneRole,
-): Promise<DelegationGrant | null> {
-  const now = new Date().toISOString();
+  principalId: string,
+): Promise<AgentDelegation | null> {
   const rows = await getDatabase()
-    .select({
-      grantId: delegationGrants.grantId,
-      workspaceId: delegationGrants.workspaceId,
-      delegatingPrincipalId: delegationGrants.delegatingPrincipalId,
-      delegatedPrincipalId: delegationGrants.delegatedPrincipalId,
-      role: delegationGrants.role,
-      capabilityIds: delegationGrants.capabilityIds,
-      observationCursor: delegationGrants.observationCursor,
-      issuedAt: delegationGrants.issuedAt,
-      expiresAt: delegationGrants.expiresAt,
-      revokedAt: delegationGrants.revokedAt,
-    })
-    .from(delegationGrants)
+    .select(delegationSelection())
+    .from(agentDelegations)
     .where(
       and(
-        eq(delegationGrants.workspaceId, workspaceId),
-        eq(delegationGrants.role, role),
-        sql`${delegationGrants.revokedAt} is null`,
-        sql`${delegationGrants.expiresAt} > ${now}::timestamptz`,
+        eq(agentDelegations.workspaceId, workspaceId),
+        eq(agentDelegations.principalId, principalId),
       ),
     )
-    .orderBy(desc(delegationGrants.issuedAt))
+    .orderBy(desc(agentDelegations.issuedAt))
     .limit(1);
   return rows[0] ? immutableCopy(rows[0]) : null;
 }
 
+export async function issueAgentDelegation(input: {
+  readonly workspaceId: string;
+  readonly principalId: string;
+  readonly capabilityIds: AgentDelegation['capabilityIds'];
+  readonly authorityEpoch: number;
+  readonly observationCursor: number;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly consentExpiresAt: string;
+}): Promise<AgentDelegation> {
+  const id = `delegation:${hashCanonical([input.workspaceId, input.principalId]).slice(0, 32)}`;
+  const rows = await getDatabase()
+    .insert(agentDelegations)
+    .values({ id, ...input, revokedAt: null })
+    .onConflictDoUpdate({
+      target: agentDelegations.id,
+      set: { ...input, revokedAt: null },
+    })
+    .returning(delegationSelection());
+  const delegation = rows[0];
+  if (!delegation) throw new Error('AGENT_DELEGATION_NOT_ISSUED');
+  return immutableCopy(delegation);
+}
+
+export async function refreshAgentDelegation(input: {
+  readonly id: string;
+  readonly authorityEpoch: number;
+  readonly capabilityIds: AgentDelegation['capabilityIds'];
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+}): Promise<AgentDelegation | null> {
+  const rows = await getDatabase()
+    .update(agentDelegations)
+    .set({
+      capabilityIds: input.capabilityIds,
+      issuedAt: input.issuedAt,
+      expiresAt: input.expiresAt,
+    })
+    .where(
+      and(
+        eq(agentDelegations.id, input.id),
+        eq(agentDelegations.authorityEpoch, input.authorityEpoch),
+        sql`${agentDelegations.revokedAt} is null`,
+        sql`${agentDelegations.consentExpiresAt} > ${input.issuedAt}::timestamptz`,
+      ),
+    )
+    .returning(delegationSelection());
+  return rows[0] ? immutableCopy(rows[0]) : null;
+}
+
+export async function revokeAgentDelegation(
+  workspaceId: string,
+  principalId: string,
+): Promise<void> {
+  await getDatabase()
+    .update(agentDelegations)
+    .set({ revokedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(agentDelegations.workspaceId, workspaceId),
+        eq(agentDelegations.principalId, principalId),
+      ),
+    );
+}
+
 export async function advanceDelegationObservation(
   workspaceId: string,
-  grantId: string,
+  delegationId: string,
   workspaceSeq: number,
 ): Promise<void> {
   await getDatabase()
-    .update(delegationGrants)
+    .update(agentDelegations)
     .set({
-      observationCursor: sql`greatest(${delegationGrants.observationCursor}, ${workspaceSeq})`,
+      observationCursor: sql`greatest(${agentDelegations.observationCursor}, ${workspaceSeq})`,
     })
     .where(
-      and(eq(delegationGrants.workspaceId, workspaceId), eq(delegationGrants.grantId, grantId)),
+      and(eq(agentDelegations.workspaceId, workspaceId), eq(agentDelegations.id, delegationId)),
     );
 }
 
@@ -805,6 +837,66 @@ export async function usersForLiveblocksRoom(
     .innerJoin(workspaceMemberships, eq(workspaceMemberships.workspaceId, workspaces.id))
     .innerJoin(users, eq(users.id, workspaceMemberships.userId))
     .where(and(eq(workspaces.liveblocksRoomId, roomId), inArray(users.id, [...userIds])));
+}
+
+export async function attuneUsersByIds(
+  userIds: readonly string[],
+): Promise<readonly { readonly id: string; readonly name: string }[]> {
+  if (userIds.length === 0) return [];
+  return getDatabase()
+    .select({ id: users.id, name: users.displayName })
+    .from(users)
+    .where(inArray(users.id, [...userIds]));
+}
+
+export async function attuneUserForSharing(
+  identifier: string,
+): Promise<{ readonly id: string; readonly name: string; readonly email: string | null } | null> {
+  const rows = await getDatabase()
+    .select({ id: users.id, name: users.displayName, email: users.email })
+    .from(users)
+    .where(or(eq(users.id, identifier), eq(users.email, identifier.toLowerCase())))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function liveblocksRoomIdForWorkspace(workspaceId: string): Promise<string> {
+  const rows = await getDatabase()
+    .select({ roomId: workspaces.liveblocksRoomId })
+    .from(workspaces)
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  const roomId = rows[0]?.roomId;
+  if (!roomId) throw new Error(`Attune workspace ${workspaceId} was not found.`);
+  return roomId;
+}
+
+export async function bumpWorkspaceAuthorityEpochForRoom(roomId: string): Promise<AttuneWorkspace> {
+  return getDatabase().transaction(async (transaction) => {
+    const rows = await transaction
+      .select({ workspace: workspaces.currentSpecification })
+      .from(workspaces)
+      .where(eq(workspaces.liveblocksRoomId, roomId))
+      .for('update')
+      .limit(1);
+    const current = rows[0]?.workspace;
+    if (!current) throw new Error(`Attune room ${roomId} was not found.`);
+    const workspace = workspaceWithCurrentContract(current);
+    const next = { ...workspace, authorityEpoch: workspace.authorityEpoch + 1 };
+    await transaction
+      .update(workspaces)
+      .set({ currentSpecification: next, updatedAt: new Date().toISOString() })
+      .where(eq(workspaces.liveblocksRoomId, roomId));
+    return immutableCopy(next);
+  });
+}
+
+export async function workspaceMemberUserIds(workspaceId: string): Promise<readonly string[]> {
+  const rows = await getDatabase()
+    .select({ userId: workspaceMemberships.userId })
+    .from(workspaceMemberships)
+    .where(eq(workspaceMemberships.workspaceId, workspaceId));
+  return rows.map(({ userId }) => userId);
 }
 
 export async function ensureAuthenticatedUser(input: {
@@ -1004,8 +1096,8 @@ export async function deleteSketchProjectRecord(input: {
   await database.transaction(async (transaction) => {
     await Promise.all(target.workspaceIds.map((id) => clearWorkspaceRecords(transaction, id)));
     await transaction
-      .delete(delegationGrants)
-      .where(inArray(delegationGrants.workspaceId, [...target.workspaceIds]));
+      .delete(agentDelegations)
+      .where(inArray(agentDelegations.workspaceId, [...target.workspaceIds]));
     await transaction
       .delete(workspaceMemberships)
       .where(inArray(workspaceMemberships.workspaceId, [...target.workspaceIds]));
@@ -1213,11 +1305,11 @@ export async function executePersistedCommand(
         if (existing[0].fingerprint === fingerprint) {
           if (input.context.path === 'webmcp' && input.context.delegation) {
             await transaction
-              .update(delegationGrants)
+              .update(agentDelegations)
               .set({
-                observationCursor: sql`greatest(${delegationGrants.observationCursor}, ${existing[0].result.workspace.workspaceSeq})`,
+                observationCursor: sql`greatest(${agentDelegations.observationCursor}, ${existing[0].result.workspace.workspaceSeq})`,
               })
-              .where(eq(delegationGrants.grantId, input.context.delegation.grantId));
+              .where(eq(agentDelegations.id, input.context.delegation.id));
           }
           return immutableCopy(existing[0].result);
         }
@@ -1396,9 +1488,9 @@ export async function executePersistedCommand(
             .onConflictDoNothing();
         }
         await transaction
-          .update(delegationGrants)
+          .update(agentDelegations)
           .set({ observationCursor: result.workspace.workspaceSeq })
-          .where(eq(delegationGrants.grantId, input.context.delegation.grantId));
+          .where(eq(agentDelegations.id, input.context.delegation.id));
       }
       input.timing?.('receipt_history_persist', performance.now() - persistenceStartedAt);
       const serializationStartedAt = performance.now();

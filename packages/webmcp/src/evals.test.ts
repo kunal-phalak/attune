@@ -1,8 +1,8 @@
 import { compileCapabilities } from '@attune/capabilities';
 import {
   AttuneCommandBus,
+  type AgentDelegation,
   type CommandEnvelope,
-  type DelegationGrant,
   type TrustedExecutionContext,
 } from '@attune/command-bus';
 import {
@@ -18,18 +18,18 @@ const FIXED_TIME = '2026-08-30T00:00:00.000Z';
 const WORKSPACE_ID = 'workspace:at-1042';
 
 function delegation(
-  role: DelegationGrant['role'],
-  capabilityIds: DelegationGrant['capabilityIds'],
-): DelegationGrant {
+  label: string,
+  capabilityIds: AgentDelegation['capabilityIds'],
+): AgentDelegation {
   return {
-    grantId: `delegation:eval:${role}`,
-    delegatingPrincipalId: `${role}:eval`,
-    delegatedPrincipalId: `agent:eval:${role}`,
-    role,
+    id: `delegation:eval:${label}`,
     workspaceId: WORKSPACE_ID,
+    principalId: 'user:eval',
     capabilityIds,
+    authorityEpoch: 0,
     issuedAt: '2026-08-29T00:00:00.000Z',
     expiresAt: '2026-09-23T00:00:00.000Z',
+    consentExpiresAt: '2026-09-23T00:00:00.000Z',
     revokedAt: null,
     observationCursor: 0,
   };
@@ -38,19 +38,19 @@ function delegation(
 const buyer: TrustedExecutionContext = {
   path: 'human',
   workspaceId: WORKSPACE_ID,
-  principalId: 'buyer:eval',
+  principalId: 'user:eval',
   role: 'buyer',
 };
 const provider: TrustedExecutionContext = {
   path: 'human',
   workspaceId: WORKSPACE_ID,
-  principalId: 'provider:eval',
+  principalId: 'user:eval',
   role: 'provider',
 };
 const buyerAgent: TrustedExecutionContext = {
   path: 'webmcp',
   workspaceId: WORKSPACE_ID,
-  principalId: 'agent:eval:buyer',
+  principalId: 'user:eval',
   role: 'buyer',
   delegation: delegation('buyer', [
     'compare_valid_changes',

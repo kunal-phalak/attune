@@ -54,6 +54,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -163,7 +164,18 @@ export interface CanvasCommentPlacement {
 type TransformKind = 'move' | 'rotate' | 'scale';
 
 type PointerSession =
-  | { readonly mode: 'pan'; readonly id: number; x: number; y: number }
+  | {
+      readonly mode: 'pan';
+      readonly id: number;
+      x: number;
+      y: number;
+      commentPlacement?: {
+        readonly originX: number;
+        readonly originY: number;
+        readonly allowPlacement: boolean;
+        moved: boolean;
+      };
+    }
   | {
       readonly mode: 'marquee';
       readonly id: number;
@@ -1259,6 +1271,7 @@ export const WorkspaceCanvas = forwardRef<
   const creationRef = useRef<CreationSession | null>(null);
   const trimPreviewRef = useRef<GeometryEntity | null>(null);
   const pointerRef = useRef<PointerSession | null>(null);
+  const suppressCommentClickUntilRef = useRef(0);
   const committingRef = useRef(0);
   const commitGenerationRef = useRef(0);
   const redrawRef = useRef<() => void>(() => undefined);
@@ -1917,23 +1930,38 @@ export const WorkspaceCanvas = forwardRef<
     const world = cameraRef.current.screenToWorld(screen);
     const sketch = displayDocumentRef.current;
     if (event.button === 1 || event.metaKey || event.ctrlKey) {
-      pointerRef.current = { mode: 'pan', id: event.pointerId, x: event.clientX, y: event.clientY };
+      pointerRef.current = {
+        mode: 'pan',
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        ...(cursorMode === 'comment' && event.button === 0
+          ? {
+              commentPlacement: {
+                originX: event.clientX,
+                originY: event.clientY,
+                allowPlacement: false,
+                moved: false,
+              },
+            }
+          : {}),
+      };
       setInteractionState('dragging');
       return;
     }
     if (cursorMode === 'comment') {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-      if (!canComment) return;
-      setCommentCursor(null);
-      setCommentAnchor({
-        world,
-        ...((hoverRef.current.entityId ?? selectionRef.current.entityIds[0])
-          ? { entityId: hoverRef.current.entityId ?? selectionRef.current.entityIds[0] }
-          : {}),
-        ...((hoverRef.current.nodeId ?? selectionRef.current.nodeIds[0])
-          ? { nodeId: hoverRef.current.nodeId ?? selectionRef.current.nodeIds[0] }
-          : {}),
-      });
+      pointerRef.current = {
+        mode: 'pan',
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        commentPlacement: {
+          originX: event.clientX,
+          originY: event.clientY,
+          allowPlacement: true,
+          moved: false,
+        },
+      };
       return;
     }
     if (readOnly) {
@@ -2076,6 +2104,28 @@ export const WorkspaceCanvas = forwardRef<
     setInteractionState('dragging');
   };
 
+  const placeComment = (event: ReactMouseEvent<HTMLCanvasElement>) => {
+    if (cursorMode !== 'comment' || !canComment) return;
+    if (performance.now() <= suppressCommentClickUntilRef.current) {
+      suppressCommentClickUntilRef.current = 0;
+      return;
+    }
+    if (commentAnchor) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const screen = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+    const world = cameraRef.current.screenToWorld(screen);
+    setCommentCursor(null);
+    setCommentAnchor({
+      world,
+      ...((hoverRef.current.entityId ?? selectionRef.current.entityIds[0])
+        ? { entityId: hoverRef.current.entityId ?? selectionRef.current.entityIds[0] }
+        : {}),
+      ...((hoverRef.current.nodeId ?? selectionRef.current.nodeIds[0])
+        ? { nodeId: hoverRef.current.nodeId ?? selectionRef.current.nodeIds[0] }
+        : {}),
+    });
+  };
+
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const pointer = pointerRef.current;
     const screen = screenPoint(event);
@@ -2136,6 +2186,16 @@ export const WorkspaceCanvas = forwardRef<
       return;
     }
     if (pointer.mode === 'pan') {
+      if (pointer.commentPlacement && !pointer.commentPlacement.moved) {
+        const distance = Math.hypot(
+          event.clientX - pointer.commentPlacement.originX,
+          event.clientY - pointer.commentPlacement.originY,
+        );
+        if (distance < 4) return;
+        pointer.commentPlacement.moved = true;
+        setCommentCursor(null);
+        setInteractionState('dragging');
+      }
       cameraRef.current.panBy(event.clientX - pointer.x, event.clientY - pointer.y);
       pointer.x = event.clientX;
       pointer.y = event.clientY;
@@ -2212,7 +2272,15 @@ export const WorkspaceCanvas = forwardRef<
       redraw();
       return;
     }
-    if (pointer.mode === 'pan') return;
+    if (pointer.mode === 'pan') {
+      if (
+        pointer.commentPlacement &&
+        (!pointer.commentPlacement.allowPlacement || pointer.commentPlacement.moved)
+      ) {
+        suppressCommentClickUntilRef.current = performance.now() + 100;
+      }
+      return;
+    }
     getBrowserPlaneGcsPreviewRuntime().cancel(pointer.dragSessionId);
     snapLockRef.current = null;
     if (!commit) {
@@ -2388,6 +2456,7 @@ export const WorkspaceCanvas = forwardRef<
         aria-label="CanvasKit precision sketch surface"
         onDoubleClick={fitSketch}
         onPointerDown={onPointerDown}
+        onClick={placeComment}
         onPointerMove={onPointerMove}
         onPointerUp={(event) => finishPointer(event, true)}
         onPointerCancel={(event) => finishPointer(event, false)}

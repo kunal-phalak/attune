@@ -61,15 +61,13 @@ export default async function DashboardPage({
   const collaboration = liveblocksConfigured();
 
   return (
-    <>
-      {collaboration ? <DashboardNotifications /> : null}
-      <DashboardLibrary
-        files={files}
-        collaboration={collaboration}
-        user={{ id: user.userId, name: user.displayName }}
-        filter={filter}
-        canCreate={hasProjectCreatePermission && collaboration}
-      />
-    </>
+    <DashboardLibrary
+      files={files}
+      collaboration={collaboration}
+      user={{ id: user.userId, name: user.displayName }}
+      filter={filter}
+      canCreate={hasProjectCreatePermission && collaboration}
+      headerAction={collaboration ? <DashboardNotifications /> : null}
+    />
   );
 }

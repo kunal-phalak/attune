@@ -6,8 +6,6 @@ import {
 
 import { currentAttuneUser } from '../../../lib/auth/session';
 import {
-  effectiveRoomPermissions,
-  roomPermissionsAllow,
   roomPermissionsForShareRole,
   shareRoleForRoomPermissions,
   type AttuneShareRole,
@@ -16,6 +14,7 @@ import { attuneActivityNotification } from '../../../lib/liveblocks/notification
 import {
   getLiveblocks,
   liveblocksConfigured,
+  liveblocksRoomPermission,
   syncAuthoritativeWorkspace,
 } from '../../../lib/liveblocks/server';
 
@@ -54,9 +53,8 @@ function shareRequest(value: unknown): {
 }
 
 async function editableRoom(roomId: string, userId: string) {
-  const room = await getLiveblocks().getRoom(roomId);
-  const permissions = effectiveRoomPermissions(room, userId);
-  return roomPermissionsAllow(permissions, 'write') ? room : null;
+  const permission = await liveblocksRoomPermission(roomId, userId);
+  return permission.write ? getLiveblocks().getRoom(roomId) : null;
 }
 
 export async function GET(request: Request) {

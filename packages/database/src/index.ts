@@ -28,6 +28,7 @@ export {
   reserveExternalMaterialization,
   revokeAgentDelegation,
   usersForLiveblocksRoom,
+  workspaceMembersForLiveblocksRoom,
   workspaceMemberUserIds,
   workspaceRoles,
 } from './repository';
@@ -37,6 +38,7 @@ export type {
   ExternalMaterializationInput,
   ExternalMaterializationReservation,
   ManagedSketchProjectRecord,
+  LiveblocksWorkspaceMember,
   WorkspaceBundle,
   WorkspaceIdentity,
 } from './repository';

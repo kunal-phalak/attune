@@ -66,6 +66,12 @@ export interface WorkspaceIdentity {
   readonly displayName: string;
 }
 
+export interface LiveblocksWorkspaceMember {
+  readonly userId: string;
+  readonly roles: readonly AttuneRole[];
+  readonly canComment: boolean;
+}
+
 export interface WorkspaceBundle {
   readonly workspaceId: string;
   readonly projectName: string;
@@ -837,6 +843,20 @@ export async function usersForLiveblocksRoom(
     .innerJoin(workspaceMemberships, eq(workspaceMemberships.workspaceId, workspaces.id))
     .innerJoin(users, eq(users.id, workspaceMemberships.userId))
     .where(and(eq(workspaces.liveblocksRoomId, roomId), inArray(users.id, [...userIds])));
+}
+
+export async function workspaceMembersForLiveblocksRoom(
+  roomId: string,
+): Promise<readonly LiveblocksWorkspaceMember[]> {
+  return getDatabase()
+    .select({
+      userId: workspaceMemberships.userId,
+      roles: workspaceMemberships.roles,
+      canComment: workspaceMemberships.canComment,
+    })
+    .from(workspaces)
+    .innerJoin(workspaceMemberships, eq(workspaceMemberships.workspaceId, workspaces.id))
+    .where(eq(workspaces.liveblocksRoomId, roomId));
 }
 
 export async function attuneUsersByIds(

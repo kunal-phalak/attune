@@ -1,7 +1,9 @@
-import { identityForLiveblocksRoom } from '@attune/database';
-
 import { currentAttuneUser } from '../../../lib/auth/session';
-import { getLiveblocks, liveblocksConfigured } from '../../../lib/liveblocks/server';
+import {
+  getLiveblocks,
+  liveblocksConfigured,
+  liveblocksRoomPermission,
+} from '../../../lib/liveblocks/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,8 +34,9 @@ export async function POST(request: Request): Promise<Response> {
   const input = versionRequest(await request.json().catch(() => null));
   const user = await currentAttuneUser();
   if (!input || !user) return noStoreJson({ error: 'Authentication required.' }, 401);
-  const identity = await identityForLiveblocksRoom(input.roomId, user.userId, user.principalId);
-  if (!identity || identity.workspaceId !== input.workspaceId) {
+  const permission = await liveblocksRoomPermission(input.roomId, user.userId);
+  const room = await getLiveblocks().getRoom(input.roomId);
+  if (!permission.write || room.metadata.workspaceId !== input.workspaceId) {
     return noStoreJson({ error: 'Workspace access is required.' }, 403);
   }
   try {

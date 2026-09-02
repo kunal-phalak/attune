@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ATTUNE_ROOM_ACCESS_MODEL,
   effectiveRoomPermissions,
+  legacyWorkspaceAccessMigration,
   roomPermissionsAllow,
   roomPermissionsForShareRole,
+  roomPermissionsForWorkspaceMember,
   shareRoleForRoomPermissions,
 } from './access';
 
@@ -28,5 +31,39 @@ describe('Liveblocks room access roles', () => {
     expect(roomPermissionsAllow(permissions, 'read')).toBe(true);
     expect(roomPermissionsAllow(permissions, 'comment')).toBe(true);
     expect(roomPermissionsAllow(permissions, 'write')).toBe(false);
+  });
+
+  it('maps legacy workspace membership into the initial room ACL without conflating roles', () => {
+    expect(
+      roomPermissionsForWorkspaceMember({ roles: ['buyer', 'provider'], canComment: true }),
+    ).toEqual(['*:write']);
+    expect(roomPermissionsForWorkspaceMember({ roles: ['reviewer'], canComment: true })).toEqual([
+      '*:read',
+      'comments:write',
+    ]);
+    expect(roomPermissionsForWorkspaceMember({ roles: ['reviewer'], canComment: false })).toEqual([
+      '*:read',
+      'comments:none',
+    ]);
+  });
+
+  it('migrates missing legacy members once and preserves explicit room access', () => {
+    const migration = legacyWorkspaceAccessMigration(
+      {
+        metadata: {},
+        usersAccesses: { 'user:viewer': ['*:read', 'comments:none'] },
+      },
+      [
+        { userId: 'user:owner', roles: ['buyer'], canComment: true },
+        { userId: 'user:viewer', roles: ['provider'], canComment: true },
+      ],
+    );
+    expect(migration).toEqual({ usersAccesses: { 'user:owner': ['*:write'] } });
+    expect(
+      legacyWorkspaceAccessMigration(
+        { metadata: { attuneAccessModel: ATTUNE_ROOM_ACCESS_MODEL }, usersAccesses: {} },
+        [{ userId: 'user:owner', roles: ['buyer'], canComment: true }],
+      ),
+    ).toBeNull();
   });
 });

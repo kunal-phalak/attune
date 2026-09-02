@@ -1,11 +1,18 @@
+import { workspaceMembersForLiveblocksRoom } from '@attune/database';
 import { hashSpecification, type AttuneWorkspace } from '@attune/domain';
 import { Liveblocks } from '@liveblocks/node';
 import * as Y from 'yjs';
 
 import { isAttuneCollaborativeDraft, type AttuneCollaborativeDraft } from '../../liveblocks.config';
-import { effectiveRoomPermissions, roomPermissionsAllow } from './access';
+import {
+  ATTUNE_ROOM_ACCESS_MODEL,
+  effectiveRoomPermissions,
+  legacyWorkspaceAccessMigration,
+  roomPermissionsAllow,
+} from './access';
 
 let liveblocks: Liveblocks | undefined;
+const accessMigrationQueue = new Map<string, Promise<void>>();
 
 export function liveblocksConfigured(): boolean {
   return Boolean(process.env.LIVEBLOCKS_SECRET_KEY);
@@ -18,11 +25,35 @@ export function getLiveblocks(): Liveblocks {
   return liveblocks;
 }
 
+async function migrateLegacyWorkspaceAccess(roomId: string): Promise<void> {
+  const previous = accessMigrationQueue.get(roomId);
+  if (previous) return previous;
+  const migration = (async () => {
+    const client = getLiveblocks();
+    const room = await client.getRoom(roomId);
+    if (room.metadata.attuneAccessModel === ATTUNE_ROOM_ACCESS_MODEL) return;
+    const members = await workspaceMembersForLiveblocksRoom(roomId);
+    const update = legacyWorkspaceAccessMigration(room, members);
+    if (!update) return;
+    await client.updateRoom(roomId, {
+      usersAccesses: update.usersAccesses,
+      metadata: { attuneAccessModel: ATTUNE_ROOM_ACCESS_MODEL },
+    });
+  })();
+  accessMigrationQueue.set(roomId, migration);
+  try {
+    await migration;
+  } finally {
+    if (accessMigrationQueue.get(roomId) === migration) accessMigrationQueue.delete(roomId);
+  }
+}
+
 export async function liveblocksRoomPermission(
   roomId: string,
   userId: string,
 ): Promise<{ readonly read: boolean; readonly comment: boolean; readonly write: boolean }> {
   if (!liveblocksConfigured()) return { read: false, comment: false, write: false };
+  await migrateLegacyWorkspaceAccess(roomId);
   const room = await getLiveblocks().getRoom(roomId);
   const permissions = effectiveRoomPermissions(room, userId);
   return {

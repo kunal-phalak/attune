@@ -1,8 +1,6 @@
 .anchor {
-  position: fixed;
-  z-index: 30;
-  inset-block-start: 16px;
-  inset-inline-end: 164px;
+  position: relative;
+  display: inline-flex;
 }
 
 .badge {
@@ -46,10 +44,4 @@
   color: var(--color-kumo-subtle);
   font-size: 14px;
   text-align: center;
-}
-
-@media (max-width: 720px) {
-  .anchor {
-    inset-inline-end: 80px;
-  }
 }

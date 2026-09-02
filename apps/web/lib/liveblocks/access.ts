@@ -1,8 +1,44 @@
 export type AttuneShareRole = 'viewer' | 'commenter' | 'editor';
+export const ATTUNE_ROOM_ACCESS_MODEL = 'liveblocks-room-acl-v1';
+
+type AttuneRoomPermission = '*:read' | '*:write' | 'comments:none' | 'comments:write';
+
+interface WorkspaceRoomMember {
+  readonly userId: string;
+  readonly roles: readonly string[];
+  readonly canComment: boolean;
+}
+
+export function roomPermissionsForWorkspaceMember(member: {
+  readonly roles: readonly string[];
+  readonly canComment: boolean;
+}): readonly AttuneRoomPermission[] {
+  if (member.roles.includes('buyer') || member.roles.includes('provider')) return ['*:write'];
+  return member.canComment ? ['*:read', 'comments:write'] : ['*:read', 'comments:none'];
+}
+
+export function legacyWorkspaceAccessMigration(
+  room: {
+    readonly metadata: Readonly<Record<string, unknown>>;
+    readonly usersAccesses: Readonly<Record<string, readonly string[]>>;
+  },
+  members: readonly WorkspaceRoomMember[],
+): { readonly usersAccesses: Record<string, AttuneRoomPermission[]> } | null {
+  if (room.metadata.attuneAccessModel === ATTUNE_ROOM_ACCESS_MODEL || members.length === 0) {
+    return null;
+  }
+  return {
+    usersAccesses: Object.fromEntries(
+      members
+        .filter((member) => !Object.hasOwn(room.usersAccesses, member.userId))
+        .map((member) => [member.userId, [...roomPermissionsForWorkspaceMember(member)]]),
+    ),
+  };
+}
 
 export function roomPermissionsForShareRole(
   role: AttuneShareRole,
-): readonly ('*:read' | '*:write' | 'comments:none' | 'comments:write')[] {
+): readonly AttuneRoomPermission[] {
   if (role === 'editor') return ['*:write'];
   if (role === 'commenter') return ['*:read', 'comments:write'];
   return ['*:read', 'comments:none'];

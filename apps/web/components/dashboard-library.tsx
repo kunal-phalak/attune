@@ -11,7 +11,15 @@ import { LiveblocksProvider, RoomProvider } from '@liveblocks/react';
 import { AvatarStack } from '@liveblocks/react-ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 
 import { DASHBOARD_CHROME, dashboardChromeCssVariables } from '../lib/dashboard/dashboard-chrome';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
@@ -682,12 +690,14 @@ export function DashboardLibrary({
   user,
   filter,
   canCreate,
+  headerAction,
 }: {
   readonly files: readonly AttuneLibraryFile[];
   readonly collaboration: boolean;
   readonly user: { readonly id: string; readonly name: string };
   readonly filter: LibraryFilter;
   readonly canCreate: boolean;
+  readonly headerAction?: ReactNode;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -739,7 +749,10 @@ export function DashboardLibrary({
             <Sidebar.Trigger className="dashboard-mobile-sidebar-trigger" />
             <h1>{activeLabel}</h1>
           </div>
-          <NewProjectDialog canCreate={canCreate} />
+          <div className="flex items-center gap-2">
+            {headerAction}
+            <NewProjectDialog canCreate={canCreate} />
+          </div>
         </header>
         {visibleFiles.length > 0 ? (
           <div className="dashboard-project-grid">

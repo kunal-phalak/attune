@@ -9,6 +9,7 @@ import {
 import { createAt1042Workspace } from '@attune/domain';
 
 import { currentAttuneUser } from '../../../lib/auth/session';
+import { ATTUNE_ROOM_ACCESS_MODEL } from '../../../lib/liveblocks/access';
 import {
   authoritativeDraftUpdate,
   getLiveblocks,
@@ -65,7 +66,13 @@ export async function POST(request: Request): Promise<Response> {
               defaultAccesses: [],
               groupsAccesses: {},
               usersAccesses: { [user.userId]: ['*:write'] },
-              metadata: { workspaceId, projectId, name, kind: 'precision-sketch' },
+              metadata: {
+                workspaceId,
+                projectId,
+                name,
+                kind: 'precision-sketch',
+                attuneAccessModel: ATTUNE_ROOM_ACCESS_MODEL,
+              },
             },
             { idempotent: true },
           );

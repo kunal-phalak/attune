@@ -78,10 +78,8 @@ describe('native model-context registration contract', () => {
     }));
     const runtime: ToolRuntime = {
       observe: vi.fn(unavailable),
-      observeWorkspace: vi.fn(unavailable),
       execute,
       forecast: vi.fn(unavailable),
-      navigateToStorefront: vi.fn(unavailable),
     };
     const registered = new Map<string, WebMcpTool>();
     const registrationSignals: AbortSignal[] = [];
@@ -101,17 +99,20 @@ describe('native model-context registration contract', () => {
       },
     };
     const registration = new AbortController();
-    await registerAttuneTools(context, runtime, new Set(['edit_draft']), registration.signal);
-
-    expect(context.getTools()).toEqual(
-      expect.arrayContaining([
-        'inspect_context',
-        'forecast_change',
-        'check_design',
-        'modify_geometry',
-        'constrain_geometry',
-      ]),
+    await registerAttuneTools(
+      context,
+      runtime,
+      new Set(['edit_draft', 'compare_valid_changes', 'apply_deterministic_repair']),
+      registration.signal,
     );
+
+    expect(context.getTools()).toEqual([
+      'check_design',
+      'constrain_geometry',
+      'forecast_change',
+      'inspect_context',
+      'modify_geometry',
+    ]);
     expect(registrationSignals.every((signal) => signal === registration.signal)).toBe(true);
 
     const execution = new AbortController();

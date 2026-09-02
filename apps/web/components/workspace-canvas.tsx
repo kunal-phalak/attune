@@ -1197,6 +1197,7 @@ export const WorkspaceCanvas = forwardRef<
       view: CameraViewState,
       placement: CanvasCommentPlacement | null,
       clearPlacement: () => void,
+      cursor: { readonly x: number; readonly y: number } | null,
     ) => ReactNode;
     readonly projectName: string;
     readonly cursorMode: EditorCursorMode;
@@ -1215,6 +1216,7 @@ export const WorkspaceCanvas = forwardRef<
     readonly onSelectionChange: (selection: SelectionSet) => void;
     readonly onToolChange?: (tool: CanvasTool) => void;
     readonly onConstraintToolChange?: (tool: ConstraintTool | null) => void;
+    readonly onCommentPlacementComplete?: () => void;
     readonly onCommand?: (command: SketchCommand) => Promise<SketchDocument>;
   }
 >(function WorkspaceCanvas(
@@ -1235,6 +1237,7 @@ export const WorkspaceCanvas = forwardRef<
     onSelectionChange,
     onToolChange,
     onConstraintToolChange,
+    onCommentPlacementComplete,
     onCommand,
   },
   forwardedRef,
@@ -1278,6 +1281,10 @@ export const WorkspaceCanvas = forwardRef<
   const [commentAnchor, setCommentAnchor] = useState<Omit<CanvasCommentPlacement, 'screen'> | null>(
     null,
   );
+  const [commentCursor, setCommentCursor] = useState<{
+    readonly x: number;
+    readonly y: number;
+  } | null>(null);
   const [surfaceState, setSurfaceState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [, setOverlayRevision] = useState(0);
   const [dimensionEditor, setDimensionEditor] = useState<DimensionEditorState | null>(null);
@@ -1296,7 +1303,10 @@ export const WorkspaceCanvas = forwardRef<
   selectionRef.current = selection;
 
   useEffect(() => {
-    if (cursorMode !== 'comment') setCommentAnchor(null);
+    if (cursorMode !== 'comment') {
+      setCommentAnchor(null);
+      setCommentCursor(null);
+    }
   }, [cursorMode]);
 
   const updateSelection = (next: SelectionSet) => {
@@ -1914,6 +1924,7 @@ export const WorkspaceCanvas = forwardRef<
     if (cursorMode === 'comment') {
       event.currentTarget.releasePointerCapture(event.pointerId);
       if (!canComment) return;
+      setCommentCursor(null);
       setCommentAnchor({
         world,
         ...((hoverRef.current.entityId ?? selectionRef.current.entityIds[0])
@@ -2071,7 +2082,11 @@ export const WorkspaceCanvas = forwardRef<
     const world = cameraRef.current.screenToWorld(screen);
     const sketch = displayDocumentRef.current;
     if (!pointer || pointer.id !== event.pointerId) {
-      if (!sketch || cursorMode === 'comment') return;
+      if (cursorMode === 'comment') {
+        if (canComment && !commentAnchor) setCommentCursor(screen);
+        return;
+      }
+      if (!sketch) return;
       if (tool !== 'select' && tool !== 'trim') {
         const current = creationRef.current ?? {
           tool,
@@ -2377,6 +2392,7 @@ export const WorkspaceCanvas = forwardRef<
         onPointerUp={(event) => finishPointer(event, true)}
         onPointerCancel={(event) => finishPointer(event, false)}
         onPointerLeave={() => {
+          if (cursorMode === 'comment') setCommentCursor(null);
           if (tool === 'trim' && trimPreviewRef.current) {
             trimPreviewRef.current = null;
             hoverRef.current = EMPTY_HOVER;
@@ -2591,7 +2607,15 @@ export const WorkspaceCanvas = forwardRef<
       {interactionMessage ? (
         <output className="sketch-interaction-message">{interactionMessage}</output>
       ) : null}
-      {renderComments?.(viewState, commentPlacement, () => setCommentAnchor(null))}
+      {renderComments?.(
+        viewState,
+        commentPlacement,
+        () => {
+          setCommentAnchor(null);
+          onCommentPlacementComplete?.();
+        },
+        commentAnchor ? null : commentCursor,
+      )}
       <WorkspaceOrientationHud right={insets.right} />
       {surfaceState !== 'ready' ? (
         <span

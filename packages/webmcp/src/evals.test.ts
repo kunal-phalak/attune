@@ -118,7 +118,7 @@ function runToAcceptance(bus: AttuneCommandBus) {
 }
 
 describe('deterministic WebMCP surface evals', () => {
-  it('changes the contextual tool set only when authoritative capabilities change', () => {
+  it('keeps the contextual surface generic as authoritative capabilities change', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
     expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toEqual([
       'inspect_context',
@@ -126,14 +126,13 @@ describe('deterministic WebMCP surface evals', () => {
       'check_design',
       'modify_geometry',
       'constrain_geometry',
-      'compare_valid_changes',
-      'apply_attune_repair',
-      'move_attune_slot',
     ]);
     runToAcceptance(bus);
-    expect(contextualToolNames(bus.inspect('provider').workspace, 'provider')).toContain(
-      'materialize_attune_revision',
-    );
+    expect(contextualToolNames(bus.inspect('provider').workspace, 'provider')).toEqual([
+      'inspect_context',
+      'forecast_change',
+      'check_design',
+    ]);
     bus.execute(
       {
         type: 'materialize_for_commerce',
@@ -143,13 +142,15 @@ describe('deterministic WebMCP surface evals', () => {
       envelope(bus, 'eval-commerce'),
       shopify,
     );
-    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toContain(
-      'open_verified_shopify_product',
-    );
+    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toEqual([
+      'inspect_context',
+      'forecast_change',
+      'check_design',
+      'modify_geometry',
+      'constrain_geometry',
+    ]);
     bus.execute({ type: 'move_slot', centerX: 195, centerY: 60 }, envelope(bus, 'eval-r8'), buyer);
-    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).not.toContain(
-      'open_verified_shopify_product',
-    );
+    expect(contextualToolNames(bus.inspect('buyer').workspace, 'buyer')).toHaveLength(5);
   });
 
   it('detects unseen human intervention before the next agent action', () => {

@@ -1,0 +1,32 @@
+.placementGuide {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-kumo-tint);
+}
+
+.placementGuide[data-active] {
+  background: color-mix(in srgb, var(--color-kumo-brand) 10%, var(--color-kumo-base));
+}
+
+.placementGuide button {
+  justify-self: start;
+}
+
+.placementGuide p {
+  max-width: 100%;
+  margin: 0;
+  color: var(--color-kumo-subtle);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.placementCursor {
+  opacity: 0.82;
+  pointer-events: none !important;
+  filter: drop-shadow(0 3px 7px rgb(23 30 40 / 18%));
+}

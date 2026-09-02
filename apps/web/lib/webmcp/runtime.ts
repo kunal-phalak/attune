@@ -5,7 +5,6 @@ import {
   attuneWorkspaceEndpoint,
   commandRequestBody,
   isAttuneApiView,
-  requestAttuneView,
   type AttuneApiView,
   type CapabilityRole,
 } from '../attune-view';
@@ -35,7 +34,6 @@ export interface ToolRuntime {
     focus?: AgentContextFocus,
     signal?: AbortSignal,
   ) => Promise<AgentContextSnapshot>;
-  readonly observeWorkspace: (signal?: AbortSignal) => Promise<AttuneApiView>;
   readonly execute: (
     command: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
@@ -44,7 +42,6 @@ export interface ToolRuntime {
     command: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
   ) => Promise<unknown>;
-  readonly navigateToStorefront: (signal?: AbortSignal) => Promise<unknown>;
 }
 
 async function responseJson(response: Response): Promise<unknown> {
@@ -161,7 +158,6 @@ export function compactWorkspaceResult(view: AttuneApiView) {
       }),
     ),
     availableCapabilities: view.capabilities.map(({ id }) => id),
-    repairs: view.repairs,
     latestReceipt: view.latestReceipt
       ? {
           id: view.latestReceipt.receiptId,
@@ -189,12 +185,6 @@ export function createToolRuntime(input: {
       perspective: perspective(),
       ...parameters,
     });
-  const observeWorkspace = async (signal?: AbortSignal) => {
-    const view = await requestAttuneView(workspaceEndpoint(), { signal });
-    input.viewRef.current = view;
-    input.updateView(view);
-    return view;
-  };
   const observe = async (focus?: AgentContextFocus, signal?: AbortSignal) => {
     input.report({ execution: 'executing', lastAction: 'inspect_context' });
     try {
@@ -273,26 +263,5 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
-  const navigateToStorefront = async (signal?: AbortSignal) => {
-    const view = await observeWorkspace(signal);
-    const commerce = view.workspace.commerceLinks.find(
-      ({ revisionId, specHash }) =>
-        revisionId === `r${view.workspace.draftVersion}` && specHash === view.specHash,
-    );
-    if (!commerce) {
-      input.report({
-        execution: 'revalidation_required',
-        lastAction: 'open_verified_shopify_product',
-      });
-      return { status: 'REVALIDATION_REQUIRED', ...compactWorkspaceResult(view) };
-    }
-    window.location.assign(commerce.verification.storefrontUrl);
-    return {
-      status: 'NAVIGATING_TOP_LEVEL',
-      destination: commerce.verification.storefrontUrl,
-      revisionId: commerce.revisionId,
-      specificationHash: commerce.specHash,
-    };
-  };
-  return { execute, forecast, navigateToStorefront, observe, observeWorkspace };
+  return { execute, forecast, observe };
 }

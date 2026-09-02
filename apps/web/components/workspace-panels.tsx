@@ -42,6 +42,8 @@ import { sketchDocumentFromYjsVersion } from '../lib/sketch/versions';
 import { AppIcons } from './ui/app-icons';
 import type { CameraViewState, CanvasCommentPlacement } from './workspace-canvas';
 
+import styles from './workspace-comments.module.css';
+
 function PanelShell({
   side,
   title,
@@ -864,11 +866,17 @@ export function PresenceHeader() {
 export function LiveCommentsRail({
   open,
   workspaceId,
+  canComment,
+  placingComment,
+  onPlaceComment,
   onClose,
   onWidthChange,
 }: {
   readonly open: boolean;
   readonly workspaceId: string;
+  readonly canComment: boolean;
+  readonly placingComment: boolean;
+  readonly onPlaceComment: () => void;
   readonly onClose: () => void;
   readonly onWidthChange?: (width: number) => void;
 }) {
@@ -882,6 +890,26 @@ export function LiveCommentsRail({
       onClose={onClose}
       onWidthChange={onWidthChange}
     >
+      <div className={styles.placementGuide} data-active={placingComment || undefined}>
+        <Button
+          type="button"
+          variant={placingComment ? 'primary' : 'secondary'}
+          size="base"
+          icon={<AppIcons.Comments size={17} />}
+          disabled={!canComment}
+          aria-pressed={placingComment}
+          onClick={onPlaceComment}
+        >
+          {placingComment ? 'Click canvas to pin' : 'Pin comment'}
+        </Button>
+        <p role={placingComment ? 'status' : undefined}>
+          {canComment
+            ? placingComment
+              ? 'Move over the canvas to preview the pin, then click where the thread belongs.'
+              : 'Start placement, then choose an exact point on the canvas.'
+            : 'Viewer access can read comments. Commenter or editor access is required to add one.'}
+        </p>
+      </div>
       <div className="workspace-comment-list attune-liveblocks-bridge">
         {threads.map((thread) => (
           <Thread key={thread.id} thread={thread} showComposer="collapsed" />
@@ -956,6 +984,7 @@ export function LiveCommentPins({
   workspaceId,
   camera,
   placement,
+  cursor,
   draftVersion,
   specHash,
   onPlacementClear,
@@ -964,6 +993,7 @@ export function LiveCommentPins({
   readonly workspaceId: string;
   readonly camera: CameraViewState;
   readonly placement: CanvasCommentPlacement | null;
+  readonly cursor: { readonly x: number; readonly y: number } | null;
   readonly draftVersion: number;
   readonly specHash: string;
   readonly onPlacementClear: () => void;
@@ -972,6 +1002,17 @@ export function LiveCommentPins({
   const result = useThreads({ query: { metadata: { workspaceId } } });
   return (
     <div className="workspace-comment-pins attune-liveblocks-bridge" aria-label="Canvas comments">
+      {cursor && !placement ? (
+        <CommentPin
+          className={styles.placementCursor}
+          style={{ left: cursor.x, top: cursor.y }}
+          aria-hidden
+          disabled
+          tabIndex={-1}
+        >
+          <AppIcons.New size={15} weight="bold" />
+        </CommentPin>
+      ) : null}
       {(result.threads ?? []).map((thread) => {
         if (!isWorldAnchor(thread.metadata)) return null;
         const position = worldToScreen(camera, {

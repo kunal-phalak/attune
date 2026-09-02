@@ -456,6 +456,7 @@ function WorkspaceShell({
   const [autoConstrain, setAutoConstrain] = useState(true);
   const [profileFill, setProfileFill] = useState(true);
   const [panelWidths, setPanelWidths] = useState({ left: 288, right: 288 });
+  const [placingComment, setPlacingComment] = useState(false);
   const [versionPreview, setVersionPreview] = useState<SketchVersionPreview | null>(null);
   const [optimisticHistory, setOptimisticHistory] = useState<
     readonly {
@@ -499,11 +500,20 @@ function WorkspaceShell({
   }, [collaborativeDraft]);
 
   const insets = viewportInsetsFor(panels, showToolLabels, panelWidths);
-  const closeLeftPanel = () => setPanels((current) => ({ ...current, leftPanel: null }));
+  const closeLeftPanel = () => {
+    setPanels((current) => ({ ...current, leftPanel: null }));
+    setPlacingComment(false);
+  };
   const closeRightPanel = () => setPanels((current) => ({ ...current, rightPanel: null }));
-  const setPanel = (panel: EditorPanel) =>
-    setPanels((current) => toggleEditorPanel(current, panel));
+  const setPanel = (panel: EditorPanel) => {
+    const next = toggleEditorPanel(panels, panel);
+    setPanels(next);
+    if (panel === 'comments' || panel === 'items') {
+      setPlacingComment(next.leftPanel === 'comments' && canComment);
+    }
+  };
   const setActiveCanvasTool = (tool: CanvasTool) => {
+    setPlacingComment(false);
     setCanvasTool(tool);
     setConstraintTool(null);
     setPanels((current) =>
@@ -511,6 +521,7 @@ function WorkspaceShell({
     );
   };
   const setActiveConstraintTool = (tool: ConstraintTool | null) => {
+    setPlacingComment(false);
     setConstraintTool(tool);
     if (tool) {
       setCanvasTool('select');
@@ -522,14 +533,13 @@ function WorkspaceShell({
   };
   const draftVersion = view?.workspace.draftVersion ?? 1;
   const specHash = view?.specHash ?? `draft:${workspaceId}`;
-  const cursorMode: EditorCursorMode =
-    panels.leftPanel === 'comments'
-      ? 'comment'
-      : canvasTool !== 'select' && canvasTool !== 'trim'
-        ? 'draw'
-        : constraintTool
-          ? 'constraint'
-          : 'select';
+  const cursorMode: EditorCursorMode = placingComment
+    ? 'comment'
+    : canvasTool !== 'select' && canvasTool !== 'trim'
+      ? 'draw'
+      : constraintTool
+        ? 'constraint'
+        : 'select';
 
   const applySketchCommand = useCallback(
     (command: SketchCommand) => {
@@ -610,6 +620,7 @@ function WorkspaceShell({
       profileFill={profileFill}
       readOnly={versionPreview !== null || !canEdit}
       canComment={versionPreview === null && canComment}
+      onCommentPlacementComplete={() => setPlacingComment(false)}
       onSelectionChange={setSelection}
       onToolChange={setActiveCanvasTool}
       onConstraintToolChange={setActiveConstraintTool}
@@ -618,11 +629,12 @@ function WorkspaceShell({
       }
       renderComments={
         collaboration && panels.leftPanel === 'comments'
-          ? (camera, placement, clearPlacement) => (
+          ? (camera, placement, clearPlacement, cursor) => (
               <LiveCommentPins
                 workspaceId={workspaceId}
                 camera={camera}
                 placement={placement}
+                cursor={cursor}
                 draftVersion={draftVersion}
                 specHash={specHash}
                 onPlacementClear={clearPlacement}
@@ -732,6 +744,9 @@ function WorkspaceShell({
           <LiveCommentsRail
             open={panels.leftPanel === 'comments'}
             workspaceId={workspaceId}
+            canComment={canComment}
+            placingComment={placingComment}
+            onPlaceComment={() => setPlacingComment(true)}
             onClose={closeLeftPanel}
             onWidthChange={(left) => setPanelWidths((current) => ({ ...current, left }))}
           />

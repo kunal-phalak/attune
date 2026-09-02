@@ -15,12 +15,10 @@
     "@attune/command-bus": "workspace:*",
     "@attune/domain": "workspace:*",
     "@neondatabase/serverless": "1.1.0",
-    "drizzle-orm": "0.45.2",
-    "ws": "8.21.3"
+    "drizzle-orm": "0.45.2"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "@types/ws": "8.18.1",
     "drizzle-kit": "0.31.10",
     "typescript": "5.9.2"
   }

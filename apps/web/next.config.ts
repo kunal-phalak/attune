@@ -27,13 +27,7 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  serverExternalPackages: [
-    '@neondatabase/serverless',
-    '@salusoft89/planegcs',
-    'bufferutil',
-    'utf-8-validate',
-    'ws',
-  ],
+  serverExternalPackages: ['@neondatabase/serverless', '@salusoft89/planegcs'],
 };
 
 export default nextConfig;

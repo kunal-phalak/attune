@@ -13,6 +13,7 @@ import {
 } from '@attune/command-bus';
 import {
   createAt1042Workspace,
+  createSketchDocument,
   createSpokeSeedDocument,
   createJudgeProviderCapabilityProfile,
   hashCanonical,
@@ -22,6 +23,7 @@ import {
   type AttuneCommand,
   type AttuneRole,
   type AttuneWorkspace,
+  type SketchDocument,
 } from '@attune/domain';
 import { getPlaneGcsSolver } from '@attune/domain/planegcs';
 import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm';
@@ -143,6 +145,32 @@ function immutableCopy<T>(value: T): T {
   return structuredClone(value);
 }
 
+function sketchDocumentWithCurrentContract(workspace: AttuneWorkspace): SketchDocument {
+  const stored = workspace.sketchDocument;
+  const storedNodes = Reflect.get(stored, 'nodes');
+  if (Array.isArray(storedNodes)) return stored;
+
+  // The original, untouched judge seed predates shared topology. Upgrade that known fixture to the
+  // exact current Maker.js source model; edited legacy sketches are topology-normalized in place.
+  if (workspace.workspaceSeq === 0 && stored.id === 'sketch:spoke-wheel') {
+    return createSpokeSeedDocument();
+  }
+
+  return createSketchDocument({
+    id: stored.id,
+    name: stored.name,
+    revision: stored.revision,
+    nodes: [],
+    entities: stored.entities,
+    constraints: stored.constraints ?? [],
+    dimensions: stored.dimensions ?? [],
+    groups: stored.groups ?? [],
+    parameters: stored.parameters ?? [],
+    ...(stored.source ? { source: stored.source } : {}),
+    ...(stored.lastSolve ? { lastSolve: stored.lastSolve } : {}),
+  });
+}
+
 function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspace {
   const storedManufacturingRequests = Reflect.get(workspace, 'manufacturingRequests');
   const storedExternalCommerceRecords = Reflect.get(workspace, 'externalCommerceRecords');
@@ -159,7 +187,9 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       circularCutouts: storedGeometry.circularCutouts ?? [],
       ventSlots: storedGeometry.ventSlots ?? [],
     },
-    sketchDocument: workspace.sketchDocument ?? createSpokeSeedDocument(),
+    sketchDocument: workspace.sketchDocument
+      ? sketchDocumentWithCurrentContract(workspace)
+      : createSpokeSeedDocument(),
   };
   const provider = providerBinding(current);
   return {

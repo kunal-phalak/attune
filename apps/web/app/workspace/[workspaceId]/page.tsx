@@ -2,7 +2,9 @@ import {
   databaseConfigured,
   ensureJudgeWorkspace,
   identityForWorkspace,
+  liveblocksRoomIdForWorkspace,
   readWorkspaceBundle,
+  type WorkspaceIdentity,
 } from '@attune/database';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -10,7 +12,7 @@ import { notFound, redirect } from 'next/navigation';
 import { WorkspaceProduct } from '../../../components/workspace-product';
 import { viewForTrustedBundle } from '../../../lib/attune-runtime';
 import { currentAttuneUser } from '../../../lib/auth/session';
-import { liveblocksConfigured } from '../../../lib/liveblocks/server';
+import { liveblocksConfigured, liveblocksRoomPermission } from '../../../lib/liveblocks/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,13 +47,30 @@ export default async function WorkspacePage({
   if (user.judge) await ensureJudgeWorkspace();
   const { workspaceId: encodedWorkspaceId } = await params;
   const workspaceId = decodeURIComponent(encodedWorkspaceId);
-  const identity = await identityForWorkspace(workspaceId, user.userId, user.principalId);
+  const membership = await identityForWorkspace(workspaceId, user.userId, user.principalId);
+  let identity: WorkspaceIdentity | null = membership;
+  if (liveblocksConfigured()) {
+    const roomId = await liveblocksRoomIdForWorkspace(workspaceId).catch(() => null);
+    if (!roomId) notFound();
+    const permission = await liveblocksRoomPermission(roomId, user.userId);
+    if (!permission.read) notFound();
+    identity = {
+      userId: user.userId,
+      principalId: user.principalId,
+      displayName: membership?.displayName ?? user.displayName,
+      roles: permission.write
+        ? membership?.roles.length
+          ? membership.roles
+          : ['buyer']
+        : ['reviewer'],
+    };
+  }
   if (!identity) notFound();
   const requestedPerspective = (await searchParams).perspective;
   const perspective = requestedPerspective === 'provider' ? 'provider' : 'buyer';
-  if (!identity.roles.includes(perspective)) notFound();
+  if (requestedPerspective === 'provider' && !identity.roles.includes('provider')) notFound();
   const bundle = await readWorkspaceBundle(workspaceId);
-  const initialView = await viewForTrustedBundle(bundle, perspective);
+  const initialView = await viewForTrustedBundle(bundle, perspective, identity);
   return (
     <WorkspaceProduct
       workspaceId={workspaceId}

@@ -1,0 +1,55 @@
+.anchor {
+  position: fixed;
+  z-index: 30;
+  inset-block-start: 16px;
+  inset-inline-end: 164px;
+}
+
+.badge {
+  position: absolute;
+  inset-block-start: -5px;
+  inset-inline-end: -5px;
+  min-inline-size: 17px;
+  block-size: 17px;
+  padding-inline: 4px;
+  border-radius: 999px;
+  background: var(--color-attune-conflict);
+  color: white;
+  font-size: 10px;
+  line-height: 17px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.popover {
+  inline-size: min(390px, calc(100vw - 24px));
+  max-block-size: min(560px, calc(100vh - 80px));
+  overflow: auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 4px 10px;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+}
+
+.empty {
+  margin: 0;
+  padding: 24px 12px;
+  color: var(--color-kumo-subtle);
+  font-size: 14px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .anchor {
+    inset-inline-end: 80px;
+  }
+}

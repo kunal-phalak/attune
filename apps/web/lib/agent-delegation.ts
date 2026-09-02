@@ -41,6 +41,19 @@ export function capabilityIdsForWorkspaceAuthority(
   return [...ids].toSorted();
 }
 
+export function availableCapabilityIdsForWorkspaceAuthority(
+  workspace: AttuneWorkspace,
+  roles: readonly AttuneRole[],
+): readonly CapabilityId[] {
+  const ids = new Set<CapabilityId>();
+  for (const role of roles) {
+    for (const entry of compileCapabilityFrontier(workspace, role)) {
+      if (entry.available) ids.add(entry.id);
+    }
+  }
+  return [...ids].toSorted();
+}
+
 export function authorityRoleForCommand(
   workspace: AttuneWorkspace,
   roles: readonly AttuneRole[],

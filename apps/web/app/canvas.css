@@ -105,6 +105,91 @@
     width: 276px;
   }
 
+  .workspace-agent-popover {
+    display: grid;
+    width: 288px;
+    gap: 8px;
+  }
+
+  .workspace-agent-popover p {
+    color: var(--color-kumo-subtle);
+    font-size: 0.875rem;
+  }
+
+  .workspace-share-dialog {
+    display: grid;
+    width: min(520px, calc(100vw - 24px));
+    gap: var(--editor-vertical-gap);
+  }
+
+  .workspace-share-header,
+  .workspace-share-form,
+  .workspace-share-members li {
+    display: flex;
+    align-items: center;
+    gap: var(--editor-horizontal-gap);
+  }
+
+  .workspace-share-header {
+    justify-content: space-between;
+  }
+
+  .workspace-share-header > div {
+    display: grid;
+    gap: 4px;
+  }
+
+  .workspace-share-form {
+    align-items: stretch;
+  }
+
+  .workspace-share-form > :first-child {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .workspace-share-roles {
+    display: flex;
+    gap: 4px;
+  }
+
+  .workspace-share-error {
+    margin: 0;
+    color: var(--color-attune-conflict);
+    font-size: 0.875rem;
+  }
+
+  .workspace-share-members {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .workspace-share-members li {
+    min-height: var(--editor-control-size);
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: var(--editor-island-radius);
+    box-shadow: inset 0 0 0 1px var(--editor-island-ring);
+  }
+
+  .workspace-share-members span {
+    display: grid;
+    min-width: 0;
+  }
+
+  .workspace-share-members small {
+    color: var(--color-kumo-subtle);
+  }
+
+  @media (max-width: 700px) {
+    .workspace-share-form {
+      display: grid;
+    }
+  }
+
   .workspace-version-actions {
     display: grid;
     gap: 4px;

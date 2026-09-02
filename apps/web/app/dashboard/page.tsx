@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashboard-library';
+import { DashboardNotifications } from '../../components/dashboard-notifications';
 import { currentAttuneUser } from '../../lib/auth/session';
 import { liveblocksConfigured } from '../../lib/liveblocks/server';
 import { parseLibraryFilter } from '../../lib/projects/library';
@@ -60,12 +61,15 @@ export default async function DashboardPage({
   const collaboration = liveblocksConfigured();
 
   return (
-    <DashboardLibrary
-      files={files}
-      collaboration={collaboration}
-      user={{ id: user.userId, name: user.displayName }}
-      filter={filter}
-      canCreate={hasProjectCreatePermission && collaboration}
-    />
+    <>
+      {collaboration ? <DashboardNotifications /> : null}
+      <DashboardLibrary
+        files={files}
+        collaboration={collaboration}
+        user={{ id: user.userId, name: user.displayName }}
+        filter={filter}
+        canCreate={hasProjectCreatePermission && collaboration}
+      />
+    </>
   );
 }

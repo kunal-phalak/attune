@@ -4,11 +4,13 @@ import {
   ensureAuthenticatedUser,
   identityForWorkspace,
   JUDGE_USER_ID,
+  liveblocksRoomIdForWorkspace,
   type WorkspaceIdentity,
 } from '@attune/database';
 import type { AttuneRole } from '@attune/domain';
 import { cookies } from 'next/headers';
 
+import { liveblocksConfigured, liveblocksRoomPermission } from '../liveblocks/server';
 import { judgeAccessCodeConfigured, judgeAccessCodeMatches } from './judge-access';
 import { getNeonAuth, neonAuthConfigured } from './neon';
 
@@ -130,6 +132,24 @@ export async function requireWorkspaceIdentity(
   const user = await currentAttuneUser();
   if (!user) throw new Error('AUTHENTICATION_REQUIRED');
   const identity = await identityForWorkspace(workspaceId, user.userId, user.principalId);
-  if (!identity || !identity.roles.includes(role)) throw new Error('WORKSPACE_ROLE_REQUIRED');
-  return identity;
+  if (!liveblocksConfigured()) {
+    if (!identity || !identity.roles.includes(role)) throw new Error('WORKSPACE_ROLE_REQUIRED');
+    return identity;
+  }
+  const roomId = await liveblocksRoomIdForWorkspace(workspaceId);
+  const permission = await liveblocksRoomPermission(roomId, user.userId);
+  const roles: readonly AttuneRole[] = permission.write
+    ? identity?.roles.length
+      ? identity.roles
+      : ['buyer']
+    : permission.read
+      ? ['reviewer']
+      : [];
+  if (!roles.includes(role)) throw new Error('WORKSPACE_ROLE_REQUIRED');
+  return {
+    userId: user.userId,
+    principalId: user.principalId,
+    displayName: identity?.displayName ?? user.displayName,
+    roles,
+  };
 }

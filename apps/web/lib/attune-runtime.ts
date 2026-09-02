@@ -38,6 +38,7 @@ import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp'
 import {
   AGENT_ACCESS_CONSENT_MS,
   AGENT_DELEGATION_LEASE_MS,
+  availableCapabilityIdsForWorkspaceAuthority,
   authorityRoleForCommand,
   capabilityIdsForWorkspaceAuthority,
   delegationLeaseExpired,
@@ -276,7 +277,7 @@ async function viewForBundle(
   const delegatedCapabilities = delegation
     ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
     : inspection.capabilities;
-  const authorityCapabilityIds = capabilityIdsForWorkspaceAuthority(
+  const authorityCapabilityIds = availableCapabilityIdsForWorkspaceAuthority(
     bundle.workspace,
     authorityRoles,
   );

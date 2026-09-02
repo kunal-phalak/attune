@@ -9,7 +9,14 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { Toasty } from '@cloudflare/kumo/components/toast';
 import { Toolbar } from '@cloudflare/kumo/components/toolbar';
 import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
-import { LiveblocksProvider, RoomProvider, useRoom, useUpdateMyPresence } from '@liveblocks/react';
+import {
+  LiveblocksProvider,
+  RoomProvider,
+  useOthersMapped,
+  useRoom,
+  useSelf,
+  useUpdateMyPresence,
+} from '@liveblocks/react';
 import { Cursors } from '@liveblocks/react-ui';
 import { getYjsProviderForRoom } from '@liveblocks/yjs';
 import {
@@ -48,7 +55,7 @@ import {
 } from '../lib/sketch/panel-state';
 import { sketchSnapshotFromDocument } from '../lib/sketch/versions';
 import { viewportInsetsFor } from '../lib/sketch/viewport-insets';
-import type { AttuneCollaborativeDraft } from '../liveblocks.config';
+import { isAttuneCollaborativeDraft, type AttuneCollaborativeDraft } from '../liveblocks.config';
 import { AttuneWebMcp } from './attune-webmcp';
 import { AppIcons } from './ui/app-icons';
 import { AttuneBrandmark } from './ui/attune-brandmark';
@@ -63,38 +70,53 @@ import {
   PresenceHeader,
   type SketchVersionPreview,
 } from './workspace-panels';
+import { WorkspaceShareDialog } from './workspace-share-dialog';
 
-function draftFrom(view: AttuneApiView): AttuneCollaborativeDraft {
-  return {
-    intent: 'Fabricate a custom control-enclosure faceplate with four protected buyer mounts.',
-    commitmentId: view.workspace.commitmentId,
-    fabricationQuantity: 4,
-    geometry: structuredClone(view.workspace.geometry),
-    sketchDocument: structuredClone(view.workspace.sketchDocument),
-    draftVersion: view.workspace.draftVersion,
-    metadata: {
-      material: view.workspace.geometry.material,
-      thicknessMm: view.workspace.geometry.thickness,
-    },
-  };
-}
-
-function LiveToolPresence({ tool }: { readonly tool: EditorCursorMode }) {
+function LiveToolPresence({
+  tool,
+  selection,
+}: {
+  readonly tool: EditorCursorMode;
+  readonly selection: SelectionSet;
+}) {
   const updateMyPresence = useUpdateMyPresence();
-  useEffect(() => updateMyPresence({ currentTool: tool }), [tool, updateMyPresence]);
+  useEffect(
+    () =>
+      updateMyPresence({
+        activeTool: tool,
+        selectedEntityIds: [...selection.entityIds],
+        selectedNodeIds: [...selection.nodeIds],
+        selectedConstraintIds: [...selection.constraintIds],
+      }),
+    [selection.constraintIds, selection.entityIds, selection.nodeIds, tool, updateMyPresence],
+  );
   return null;
 }
+
+function collaborationColor(value: string): readonly [number, number, number] {
+  const match = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(value);
+  return match
+    ? [Number.parseInt(match[1], 16), Number.parseInt(match[2], 16), Number.parseInt(match[3], 16)]
+    : [124, 92, 231];
+}
+
+const EMPTY_COLLABORATOR_SELECTIONS: readonly {
+  readonly color: readonly [number, number, number];
+  readonly entityIds: readonly string[];
+}[] = [];
 
 function WorkspaceHeader({
   collaboration,
   projectName,
   onVersionPreview,
   onSaveVersion,
+  agentControl,
 }: {
   readonly collaboration: boolean;
   readonly projectName: string;
   readonly onVersionPreview: (preview: SketchVersionPreview | null) => void;
   readonly onSaveVersion?: () => Promise<void>;
+  readonly agentControl: ReactNode;
 }) {
   return (
     <header className="workspace-header">
@@ -117,7 +139,10 @@ function WorkspaceHeader({
         onPreview={onVersionPreview}
         onSaveVersion={onSaveVersion}
       />
-      <div className="workspace-header-right">{collaboration ? <PresenceHeader /> : null}</div>
+      <div className="workspace-header-right">
+        {agentControl}
+        {collaboration ? <PresenceHeader /> : null}
+      </div>
     </header>
   );
 }
@@ -394,21 +419,30 @@ function WorkspaceSettings({
 
 function WorkspaceShell({
   workspaceId,
+  roomId,
   collaboration,
+  canEdit = true,
   perspective,
   actorName,
   projectName,
   initialView,
-  onAuthoritativeView,
+  collaborativeDraft,
+  remoteSelections = EMPTY_COLLABORATOR_SELECTIONS,
   onSaveVersion,
 }: {
   readonly workspaceId: string;
+  readonly roomId?: string;
   readonly collaboration: boolean;
+  readonly canEdit?: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly actorName: string;
   readonly projectName: string;
   readonly initialView: AttuneApiView;
-  readonly onAuthoritativeView?: (view: AttuneApiView) => void;
+  readonly collaborativeDraft?: AttuneCollaborativeDraft | null;
+  readonly remoteSelections?: readonly {
+    readonly color: readonly [number, number, number];
+    readonly entityIds: readonly string[];
+  }[];
   readonly onSaveVersion?: () => Promise<void>;
 }) {
   const [view, setView] = useState<AttuneApiView | null>(initialView);
@@ -436,8 +470,34 @@ function WorkspaceShell({
   viewRef.current = view;
 
   useEffect(() => {
-    onAuthoritativeView?.(initialView);
-  }, [initialView, onAuthoritativeView]);
+    if (!collaborativeDraft) return;
+    setView((current) => {
+      if (!current || collaborativeDraft.workspaceSeq <= current.workspace.workspaceSeq) {
+        return current;
+      }
+      const next: AttuneApiView = {
+        ...current,
+        specHash: collaborativeDraft.specHash,
+        workspace: {
+          ...current.workspace,
+          workspaceSeq: collaborativeDraft.workspaceSeq,
+          draftVersion: collaborativeDraft.draftVersion,
+          capabilityEpoch: collaborativeDraft.capabilityEpoch,
+          authorityEpoch: collaborativeDraft.authorityEpoch,
+          geometry: structuredClone(collaborativeDraft.geometry),
+          sketchDocument: structuredClone(collaborativeDraft.sketchDocument),
+        },
+        semantic: {
+          ...current.semantic,
+          documentRevision: collaborativeDraft.sketchDocument.revision,
+          solve: collaborativeDraft.sketchDocument.lastSolve ?? null,
+        },
+      };
+      viewRef.current = next;
+      window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: next }));
+      return next;
+    });
+  }, [collaborativeDraft]);
 
   const insets = viewportInsetsFor(panels, showToolLabels, panelWidths);
   const closeLeftPanel = () => setPanels((current) => ({ ...current, leftPanel: null }));
@@ -495,7 +555,6 @@ function WorkspaceShell({
         };
         viewRef.current = next;
         setView(next);
-        onAuthoritativeView?.(next);
         setOptimisticHistory((events) => [
           {
             id: `history:${applied.mutation.workspaceSequence}`,
@@ -518,7 +577,7 @@ function WorkspaceShell({
       );
       return pending;
     },
-    [actorName, onAuthoritativeView, workspaceId],
+    [actorName, workspaceId],
   );
 
   const receiptSequences = new Set(view?.records.receipts.map(({ workspaceSeq }) => workspaceSeq));
@@ -547,13 +606,16 @@ function WorkspaceShell({
       constraintTool={constraintTool}
       document={versionPreview?.document ?? view?.workspace.sketchDocument ?? null}
       selection={selection}
+      remoteSelections={remoteSelections}
       autoConstrain={autoConstrain}
       profileFill={profileFill}
-      readOnly={versionPreview !== null}
+      readOnly={versionPreview !== null || !canEdit}
       onSelectionChange={setSelection}
       onToolChange={setActiveCanvasTool}
       onConstraintToolChange={setActiveConstraintTool}
-      onCommand={perspective === 'buyer' && !versionPreview ? applySketchCommand : undefined}
+      onCommand={
+        perspective === 'buyer' && !versionPreview && canEdit ? applySketchCommand : undefined
+      }
       renderComments={
         collaboration && panels.leftPanel === 'comments'
           ? (camera, placement) => (
@@ -585,22 +647,29 @@ function WorkspaceShell({
           } as CSSProperties
         }
       >
-        <AttuneWebMcp
-          workspaceId={workspaceId}
-          perspective={perspective}
-          initialView={initialView}
-        />
         {collaboration ? (
           <Cursors className="workspace-live-cursors attune-liveblocks-bridge">{canvas}</Cursors>
         ) : (
           canvas
         )}
-        {collaboration ? <LiveToolPresence tool={cursorMode} /> : null}
+        {collaboration ? <LiveToolPresence tool={cursorMode} selection={selection} /> : null}
         <WorkspaceHeader
           collaboration={collaboration}
           projectName={projectName}
           onVersionPreview={setVersionPreview}
           onSaveVersion={onSaveVersion}
+          agentControl={
+            canEdit ? (
+              <>
+                {collaboration && roomId ? <WorkspaceShareDialog roomId={roomId} /> : null}
+                <AttuneWebMcp
+                  workspaceId={workspaceId}
+                  perspective={perspective}
+                  initialView={initialView}
+                />
+              </>
+            ) : null
+          }
         />
         {versionPreview ? (
           <output className="workspace-version-preview">
@@ -654,7 +723,7 @@ function WorkspaceShell({
           document={view?.workspace.sketchDocument ?? null}
           selection={selection}
           onSelectionChange={setSelection}
-          onCommand={perspective === 'buyer' ? applySketchCommand : undefined}
+          onCommand={perspective === 'buyer' && canEdit ? applySketchCommand : undefined}
           onClose={closeLeftPanel}
           onWidthChange={(left) => setPanelWidths((current) => ({ ...current, left }))}
         />
@@ -682,10 +751,26 @@ function CollaborativeWorkspaceShell({
   ...props
 }: Omit<
   ComponentProps<typeof WorkspaceShell>,
-  'collaboration' | 'onAuthoritativeView' | 'onSaveVersion'
+  'collaboration' | 'collaborativeDraft' | 'remoteSelections' | 'onSaveVersion'
 > & { readonly roomId: string }) {
   const room = useRoom();
   const provider = useMemo(() => getYjsProviderForRoom(room), [room]);
+  const canEdit = useSelf((self) => self.canWrite) ?? false;
+  const [draft, setDraft] = useState<AttuneCollaborativeDraft | null>(null);
+  const remoteSelections = useOthersMapped((other) => ({
+    color: collaborationColor(other.info.color),
+    entityIds: other.presence.selectedEntityIds ?? [],
+  })).map(([, selection]) => selection);
+  useEffect(() => {
+    const map = provider.getYDoc().getMap('attune');
+    const updateDraft = () => {
+      const candidate = map.get('draft');
+      if (isAttuneCollaborativeDraft(candidate)) setDraft(structuredClone(candidate));
+    };
+    map.observe(updateDraft);
+    updateDraft();
+    return () => map.unobserve(updateDraft);
+  }, [provider]);
   const saveVersion = useCallback(async () => {
     try {
       const response = await fetch('/api/liveblocks-versions', {
@@ -708,28 +793,15 @@ function CollaborativeWorkspaceShell({
       throw error;
     }
   }, [props.workspaceId, roomId]);
-  const mirrorAuthoritativeView = useCallback(
-    (view: AttuneApiView) => {
-      try {
-        const map = provider.getYDoc().getMap('attune');
-        const next = draftFrom(view);
-        if (JSON.stringify(map.get('draft')) !== JSON.stringify(next)) map.set('draft', next);
-      } catch {
-        editorToastManager.add({
-          variant: 'warning',
-          title: 'Sketch saved',
-          description: 'Collaboration sync is delayed. Your saved sketch is intact.',
-        });
-      }
-    },
-    [provider],
-  );
   return (
     <WorkspaceShell
       {...props}
+      roomId={roomId}
       collaboration
-      onAuthoritativeView={mirrorAuthoritativeView}
-      onSaveVersion={saveVersion}
+      canEdit={canEdit}
+      collaborativeDraft={draft}
+      remoteSelections={remoteSelections}
+      onSaveVersion={canEdit ? saveVersion : undefined}
     />
   );
 }
@@ -768,7 +840,13 @@ export function WorkspaceProduct({
     <LiveblocksProvider authEndpoint="/api/liveblocks-auth" resolveUsers={resolver}>
       <RoomProvider
         id={roomId}
-        initialPresence={{ cursor: null, selection: [], currentTool: 'select', activeActor: actor }}
+        initialPresence={{
+          cursor: null,
+          selectedEntityIds: [],
+          selectedNodeIds: [],
+          selectedConstraintIds: [],
+          activeTool: 'select',
+        }}
       >
         <CollaborativeWorkspaceShell
           roomId={roomId}

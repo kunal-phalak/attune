@@ -2,6 +2,7 @@ import { createAt1042Workspace } from '@attune/domain';
 import { describe, expect, it } from 'vitest';
 
 import {
+  availableCapabilityIdsForWorkspaceAuthority,
   authorityRoleForCommand,
   capabilityIdsForWorkspaceAuthority,
   delegationStatus,
@@ -39,6 +40,14 @@ describe('agent delegation authority and perspective', () => {
     expect(() =>
       authorityRoleForCommand(workspace, ['buyer'], 'freeze_and_quote_revision', 'provider'),
     ).toThrow('WORKSPACE_ROLE_REQUIRED');
+  });
+
+  it('keeps registered tools tied to available authority rather than the presented perspective', () => {
+    const workspace = createAt1042Workspace();
+    const available = availableCapabilityIdsForWorkspaceAuthority(workspace, ['buyer']);
+    expect(available).toContain('edit_draft');
+    expect(available).not.toContain('freeze_and_quote_revision');
+    expect(availableCapabilityIdsForWorkspaceAuthority(workspace, ['buyer'])).toEqual(available);
   });
 
   it('uses possessed authority rather than perspective for a dual-role command', () => {

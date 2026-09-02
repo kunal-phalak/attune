@@ -34,3 +34,23 @@ export function workspaceUserResolver(roomId: string) {
     });
   };
 }
+
+export function dashboardUserResolver() {
+  return async ({ userIds }: { readonly userIds: string[] }) => {
+    const response = await fetch('/api/liveblocks-users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userIds }),
+    });
+    if (!response.ok) return userIds.map(() => undefined);
+    const body: unknown = await response.json();
+    const users =
+      typeof body === 'object' && body !== null && Array.isArray(Reflect.get(body, 'users'))
+        ? Reflect.get(body, 'users')
+        : [];
+    return userIds.map((_, index) => {
+      const user = users[index];
+      return isResolvedUser(user) ? user : undefined;
+    });
+  };
+}

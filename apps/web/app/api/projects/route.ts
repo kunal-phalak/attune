@@ -6,11 +6,14 @@ import {
   databaseConfigured,
   ensureJudgeWorkspace,
 } from '@attune/database';
-import { createSpokeSeedDocument, emptySketchDocument } from '@attune/domain';
-import * as Y from 'yjs';
+import { createAt1042Workspace } from '@attune/domain';
 
 import { currentAttuneUser } from '../../../lib/auth/session';
-import { getLiveblocks, liveblocksConfigured } from '../../../lib/liveblocks/server';
+import {
+  authoritativeDraftUpdate,
+  getLiveblocks,
+  liveblocksConfigured,
+} from '../../../lib/liveblocks/server';
 import {
   createSketchProjectPlan,
   provisionSketchProject,
@@ -30,21 +33,8 @@ function requestedTemplate(value: unknown): SketchTemplate | null {
   return template === 'blank' || template === 'spoke' ? template : null;
 }
 
-function sketchDocumentUpdate(template: SketchTemplate, name: string): Uint8Array {
-  const document = new Y.Doc();
-  try {
-    const sketch =
-      template === 'spoke' ? createSpokeSeedDocument() : emptySketchDocument('sketch:blank');
-    document.getMap('attune').set('sketch', {
-      version: sketch.schemaVersion,
-      name,
-      template,
-      document: sketch,
-    });
-    return Y.encodeStateAsUpdate(document);
-  } finally {
-    document.destroy();
-  }
+function sketchDocumentUpdate(template: SketchTemplate): Uint8Array {
+  return authoritativeDraftUpdate(null, createAt1042Workspace({ sketchTemplate: template }));
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -63,7 +53,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const plan = createSketchProjectPlan(template, randomUUID);
   const liveblocks = getLiveblocks();
-  const update = sketchDocumentUpdate(plan.template, plan.name);
+  const update = sketchDocumentUpdate(plan.template);
 
   try {
     await provisionSketchProject(
@@ -73,7 +63,8 @@ export async function POST(request: Request): Promise<Response> {
             roomId,
             {
               defaultAccesses: [],
-              usersAccesses: { [user.userId]: ['room:write'] },
+              groupsAccesses: {},
+              usersAccesses: { [user.userId]: ['*:write'] },
               metadata: { workspaceId, projectId, name, kind: 'precision-sketch' },
             },
             { idempotent: true },

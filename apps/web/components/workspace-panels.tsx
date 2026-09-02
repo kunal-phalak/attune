@@ -934,6 +934,8 @@ function NewCommentComposer({
       onOpenChange={onOpenChange}
       metadata={{
         workspaceId,
+        ...(activePlacement.entityId ? { entityId: activePlacement.entityId } : {}),
+        ...(activePlacement.nodeId ? { nodeId: activePlacement.nodeId } : {}),
         worldX: activePlacement.world.x,
         worldY: activePlacement.world.y,
         revisionId: `draft:r${draftVersion}`,

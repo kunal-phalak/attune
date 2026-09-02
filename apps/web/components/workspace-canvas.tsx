@@ -156,6 +156,8 @@ export interface CameraViewState extends ViewportSize {
 export interface CanvasCommentPlacement {
   readonly screen: { readonly x: number; readonly y: number };
   readonly world: { readonly x: number; readonly y: number };
+  readonly entityId?: string;
+  readonly nodeId?: string;
 }
 
 type TransformKind = 'move' | 'rotate' | 'scale';
@@ -2323,7 +2325,16 @@ export const WorkspaceCanvas = forwardRef<
   const panning = pointerRef.current?.mode === 'pan';
   const cursor = editorCursorFor(panning ? 'pan' : cursorMode);
   const commentPlacement = commentPointer
-    ? { screen: commentPointer, world: cameraRef.current.screenToWorld(commentPointer) }
+    ? {
+        screen: commentPointer,
+        world: cameraRef.current.screenToWorld(commentPointer),
+        ...((hoverRef.current.entityId ?? selection.entityIds[0])
+          ? { entityId: hoverRef.current.entityId ?? selection.entityIds[0] }
+          : {}),
+        ...((hoverRef.current.nodeId ?? selection.nodeIds[0])
+          ? { nodeId: hoverRef.current.nodeId ?? selection.nodeIds[0] }
+          : {}),
+      }
     : null;
 
   return (

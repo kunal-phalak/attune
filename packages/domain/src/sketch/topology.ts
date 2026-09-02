@@ -1,4 +1,4 @@
-import { hashCanonical } from '../hash';
+import { browserHashCanonical } from '../browser-hash';
 import {
   arcPoint,
   ellipseFocusPoint,
@@ -98,7 +98,7 @@ function nodeFromContributors(
   contributors: readonly TopologyCandidate[],
   nodeIdByToken: Map<string, string>,
 ): SketchNode {
-  const id = `sketch:node:${hashCanonical(contributors.map(({ token }) => token)).slice(0, 20)}`;
+  const id = `sketch:node:${browserHashCanonical(contributors.map(({ token }) => token)).slice(0, 20)}`;
   for (const contributor of contributors) nodeIdByToken.set(contributor.token, id);
   const sourceRefs = contributors
     .flatMap(({ sourceRef, anchor }) => {

@@ -1,12 +1,8 @@
 'use client';
 
 import {
-  applySketchCommand,
-  type DefinitionStateAnalysis,
-  type SketchCommand,
-} from '@attune/domain';
-import {
   addToSelection,
+  applySketchCommand,
   arcPoint,
   bsplineCreation,
   circleCreation,
@@ -28,7 +24,9 @@ import {
   trimSegmentAtPoint,
   toggleSelection,
   type GeometryEntity,
+  type DefinitionStateAnalysis,
   type SelectionSet,
+  type SketchCommand,
   type SketchBounds,
   type SketchDocument,
   type SketchPoint2D,

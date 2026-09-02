@@ -2,12 +2,15 @@ import type { SketchConstraint } from '../sketch/constraints';
 import type { SketchDocument } from '../sketch/document';
 import {
   arcPoint,
+  bsplinePoint,
+  ellipsePoint,
   geometryNodeIds,
   type ArcEntity,
   type GeometryEntity,
   type SketchBounds,
   type SketchPoint2D,
 } from '../sketch/geometry';
+import { closestCurveDistance } from './curve-proximity';
 import { SketchSpatialIndex } from './spatial-index';
 
 function geometryById(document: SketchDocument, id: string): GeometryEntity | undefined {
@@ -104,7 +107,11 @@ function angleWithinArc(angle: number, arc: ArcEntity): boolean {
   return end >= start ? current >= start && current <= end : current >= start || current <= end;
 }
 
-export function distanceToGeometry(point: SketchPoint2D, entity: GeometryEntity): number {
+export function distanceToGeometry(
+  point: SketchPoint2D,
+  entity: GeometryEntity,
+  tolerance = 1e-5,
+): number {
   switch (entity.kind) {
     case 'point':
       return pointDistance(point, entity.position);
@@ -122,6 +129,14 @@ export function distanceToGeometry(point: SketchPoint2D, entity: GeometryEntity)
         pointDistance(point, arcPoint(entity, entity.endAngle)),
       );
     }
+    case 'ellipse':
+      return closestCurveDistance(
+        point,
+        (parameter) => ellipsePoint(entity, parameter * Math.PI * 2),
+        tolerance,
+      );
+    case 'bspline':
+      return closestCurveDistance(point, (parameter) => bsplinePoint(entity, parameter), tolerance);
   }
   throw new TypeError('Unsupported geometry entity.');
 }
@@ -217,7 +232,7 @@ export function createSelectionContext(
       (entity): RankedSelectionEntity => ({
         entityId: entity.id,
         kind: entity.kind,
-        distance: worldPoint ? distanceToGeometry(worldPoint, entity) : null,
+        distance: worldPoint ? distanceToGeometry(worldPoint, entity, tolerance) : null,
       }),
     )
     .filter(({ distance }) => distance === null || distance <= tolerance)

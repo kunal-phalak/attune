@@ -69,19 +69,49 @@ export interface ArcEntity extends GeometryEntityBase {
   readonly endNodeId?: string;
 }
 
-export type GeometryEntity = PointEntity | LineEntity | CircleEntity | ArcEntity;
+export interface EllipseEntity extends GeometryEntityBase {
+  readonly kind: 'ellipse';
+  readonly center: SketchPoint2D;
+  readonly majorRadius: number;
+  readonly minorRadius: number;
+  readonly rotation: number;
+  /** Required for canonical documents; optional only for progressive legacy ingestion. */
+  readonly centerNodeId?: string;
+  /** First focus used by PlaneGCS to preserve analytic ellipse semantics. */
+  readonly focusNodeId?: string;
+}
+
+export interface BSplineEntity extends GeometryEntityBase {
+  readonly kind: 'bspline';
+  readonly degree: 3;
+  readonly controlPoints: readonly SketchPoint2D[];
+  /** Required for canonical documents; optional only for progressive legacy ingestion. */
+  readonly controlNodeIds?: readonly string[];
+}
+
+export type GeometryEntity =
+  | PointEntity
+  | LineEntity
+  | CircleEntity
+  | ArcEntity
+  | EllipseEntity
+  | BSplineEntity;
 
 export type GeometryInput =
   | Omit<PointEntity, 'version'>
   | Omit<LineEntity, 'version'>
   | Omit<CircleEntity, 'version'>
-  | Omit<ArcEntity, 'version'>;
+  | Omit<ArcEntity, 'version'>
+  | Omit<EllipseEntity, 'version'>
+  | Omit<BSplineEntity, 'version'>;
 
 export type GeometryPatch =
   | Pick<PointEntity, 'id' | 'kind' | 'position'>
   | Pick<LineEntity, 'id' | 'kind' | 'start' | 'end'>
   | Pick<CircleEntity, 'id' | 'kind' | 'center' | 'radius'>
-  | Pick<ArcEntity, 'id' | 'kind' | 'center' | 'radius' | 'startAngle' | 'endAngle'>;
+  | Pick<ArcEntity, 'id' | 'kind' | 'center' | 'radius' | 'startAngle' | 'endAngle'>
+  | Pick<EllipseEntity, 'id' | 'kind' | 'center' | 'majorRadius' | 'minorRadius' | 'rotation'>
+  | Pick<BSplineEntity, 'id' | 'kind' | 'degree' | 'controlPoints'>;
 
 export type GeometryAnchor = 'self' | 'start' | 'end' | 'center';
 
@@ -102,6 +132,60 @@ export function arcPoint(entity: ArcEntity, angle: number): SketchPoint2D {
     x: entity.center.x + Math.cos(angle) * entity.radius,
     y: entity.center.y + Math.sin(angle) * entity.radius,
   };
+}
+
+export function ellipsePoint(entity: EllipseEntity, angle: number): SketchPoint2D {
+  const cosine = Math.cos(entity.rotation);
+  const sine = Math.sin(entity.rotation);
+  const localX = Math.cos(angle) * entity.majorRadius;
+  const localY = Math.sin(angle) * entity.minorRadius;
+  return {
+    x: entity.center.x + localX * cosine - localY * sine,
+    y: entity.center.y + localX * sine + localY * cosine,
+  };
+}
+
+export function ellipseFocusPoint(entity: EllipseEntity): SketchPoint2D {
+  const focalDistance = Math.sqrt(Math.max(0, entity.majorRadius ** 2 - entity.minorRadius ** 2));
+  return {
+    x: entity.center.x + Math.cos(entity.rotation) * focalDistance,
+    y: entity.center.y + Math.sin(entity.rotation) * focalDistance,
+  };
+}
+
+/** Cubic open-uniform B-spline evaluation used by hit testing and renderer projection. */
+export function bsplinePoint(entity: BSplineEntity, parameter: number): SketchPoint2D {
+  const points = entity.controlPoints;
+  const degree = entity.degree;
+  const segmentCount = points.length - degree;
+  if (segmentCount <= 0) return points[0] ?? { x: 0, y: 0 };
+  const t = Math.min(1, Math.max(0, parameter));
+  const knotCount = points.length + degree + 1;
+  const knots = Array.from({ length: knotCount }, (_, index) => {
+    if (index <= degree) return 0;
+    if (index >= points.length) return 1;
+    return (index - degree) / segmentCount;
+  });
+  const scaled = t === 1 ? 1 - Number.EPSILON : t;
+  let span: number = degree;
+  while (span + 1 < knots.length && knots[span + 1] <= scaled) span += 1;
+  span = Math.min(points.length - 1, span);
+  const working = Array.from({ length: degree + 1 }, (_, index) => {
+    const point = points[span - degree + index] ?? points.at(-1) ?? { x: 0, y: 0 };
+    return { ...point };
+  });
+  for (let level = 1; level <= degree; level += 1) {
+    for (let index = degree; index >= level; index -= 1) {
+      const knotIndex = span - degree + index;
+      const denominator = knots[knotIndex + degree - level + 1] - knots[knotIndex];
+      const amount = denominator === 0 ? 0 : (scaled - knots[knotIndex]) / denominator;
+      working[index] = {
+        x: (1 - amount) * working[index - 1].x + amount * working[index].x,
+        y: (1 - amount) * working[index - 1].y + amount * working[index].y,
+      };
+    }
+  }
+  return t === 1 ? { ...points.at(-1)! } : working[degree];
 }
 
 const TURN = Math.PI * 2;
@@ -177,6 +261,28 @@ export function synchronizeGeometryWithNodes(
           position(entity.startNodeId, arcPoint(entity, entity.startAngle)),
           position(entity.endNodeId, arcPoint(entity, entity.endAngle)),
         );
+      case 'ellipse': {
+        const center = position(entity.centerNodeId, entity.center);
+        const focus = position(entity.focusNodeId, ellipseFocusPoint(entity));
+        const focalDistance = Math.hypot(focus.x - center.x, focus.y - center.y);
+        const majorRadius = Math.hypot(focalDistance, entity.minorRadius);
+        return {
+          ...entity,
+          center,
+          majorRadius,
+          rotation:
+            focalDistance <= 1e-9
+              ? entity.rotation
+              : Math.atan2(focus.y - center.y, focus.x - center.x),
+        };
+      }
+      case 'bspline':
+        return {
+          ...entity,
+          controlPoints: entity.controlPoints.map((point, index) =>
+            position(entity.controlNodeIds?.[index], point),
+          ),
+        };
       default:
         return entity;
     }
@@ -197,6 +303,12 @@ export function geometryNodeIds(entity: GeometryEntity): readonly string[] {
       return [entity.centerNodeId, entity.startNodeId, entity.endNodeId].filter(
         (id): id is string => typeof id === 'string',
       );
+    case 'ellipse':
+      return [entity.centerNodeId, entity.focusNodeId].filter(
+        (id): id is string => typeof id === 'string',
+      );
+    case 'bspline':
+      return [...(entity.controlNodeIds ?? [])];
     default:
       return [];
   }
@@ -220,6 +332,13 @@ export function geometryAnchorNodeId(
       if (anchor === 'start') return entity.startNodeId;
       if (anchor === 'end') return entity.endNodeId;
       return undefined;
+    case 'ellipse':
+      if (anchor === 'self' || anchor === 'center') return entity.centerNodeId;
+      return undefined;
+    case 'bspline':
+      if (anchor === 'start') return entity.controlNodeIds?.[0];
+      if (anchor === 'end') return entity.controlNodeIds?.at(-1);
+      return undefined;
     default:
       return undefined;
   }
@@ -242,6 +361,15 @@ export function geometryAnchorPoint(
       if (anchor === 'self' || anchor === 'center') return entity.center;
       if (anchor === 'start') return arcPoint(entity, entity.startAngle);
       if (anchor === 'end') return arcPoint(entity, entity.endAngle);
+      return undefined;
+    case 'ellipse':
+      if (anchor === 'self' || anchor === 'center') return entity.center;
+      if (anchor === 'start') return ellipsePoint(entity, 0);
+      if (anchor === 'end') return ellipsePoint(entity, Math.PI);
+      return undefined;
+    case 'bspline':
+      if (anchor === 'start') return entity.controlPoints[0];
+      if (anchor === 'end') return entity.controlPoints.at(-1);
       return undefined;
   }
   return undefined;
@@ -270,6 +398,25 @@ export function geometryBounds(entity: GeometryEntity): SketchBounds {
         minY: entity.center.y - entity.radius,
         maxX: entity.center.x + entity.radius,
         maxY: entity.center.y + entity.radius,
+      };
+    case 'ellipse': {
+      const cosine = Math.cos(entity.rotation);
+      const sine = Math.sin(entity.rotation);
+      const extentX = Math.hypot(entity.majorRadius * cosine, entity.minorRadius * sine);
+      const extentY = Math.hypot(entity.majorRadius * sine, entity.minorRadius * cosine);
+      return {
+        minX: entity.center.x - extentX,
+        minY: entity.center.y - extentY,
+        maxX: entity.center.x + extentX,
+        maxY: entity.center.y + extentY,
+      };
+    }
+    case 'bspline':
+      return {
+        minX: Math.min(...entity.controlPoints.map(({ x }) => x)),
+        minY: Math.min(...entity.controlPoints.map(({ y }) => y)),
+        maxX: Math.max(...entity.controlPoints.map(({ x }) => x)),
+        maxY: Math.max(...entity.controlPoints.map(({ y }) => y)),
       };
   }
   throw new TypeError('Unsupported geometry entity.');
@@ -309,5 +456,28 @@ export function validateGeometryEntity(entity: GeometryInput | GeometryEntity): 
       ) {
         throw new TypeError(`${entity.id} has invalid arc geometry.`);
       }
+      return;
+    case 'ellipse':
+      if (
+        !finitePoint(entity.center) ||
+        !Number.isFinite(entity.majorRadius) ||
+        !Number.isFinite(entity.minorRadius) ||
+        !Number.isFinite(entity.rotation) ||
+        entity.majorRadius <= 0 ||
+        entity.minorRadius <= 0 ||
+        entity.minorRadius > entity.majorRadius
+      ) {
+        throw new TypeError(`${entity.id} has invalid ellipse geometry.`);
+      }
+      return;
+    case 'bspline':
+      if (
+        entity.degree !== 3 ||
+        entity.controlPoints.length < 4 ||
+        entity.controlPoints.some((point) => !finitePoint(point))
+      ) {
+        throw new TypeError(`${entity.id} requires at least four finite cubic control points.`);
+      }
+      return;
   }
 }

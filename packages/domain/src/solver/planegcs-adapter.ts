@@ -2,6 +2,7 @@ import type {
   GcsWrapper,
   SketchArc as PlaneArc,
   SketchCircle as PlaneCircle,
+  SketchEllipse as PlaneEllipse,
   SketchParam as PlaneParam,
   SketchPoint as PlanePoint,
   SketchPrimitive as PlanePrimitive,
@@ -25,6 +26,8 @@ import type {
   SolverDiagnostic,
   TemporaryNodeTarget,
 } from './solver';
+
+export { analyzeDefinitionState } from './definition-state';
 
 export interface PlaneGcsProjectionMap {
   readonly nodeToPrimitive: Readonly<Record<string, string>>;
@@ -306,6 +309,40 @@ function geometryPrimitive(entity: GeometryEntity): PlanePrimitive | undefined {
         start_angle: entity.startAngle,
         end_angle: entity.endAngle,
       };
+    case 'ellipse':
+      return entity.centerNodeId && entity.focusNodeId
+        ? {
+            id: entity.id,
+            type: 'ellipse',
+            c_id: entity.centerNodeId,
+            focus1_id: entity.focusNodeId,
+            radmin: entity.minorRadius,
+          }
+        : undefined;
+    case 'bspline': {
+      if (!entity.controlNodeIds || entity.controlNodeIds.length !== entity.controlPoints.length) {
+        return undefined;
+      }
+      const interiorCount = entity.controlPoints.length - entity.degree - 1;
+      return {
+        id: entity.id,
+        type: 'bspline',
+        pole_ids: [...entity.controlNodeIds],
+        weights: entity.controlPoints.map(() => 1),
+        knots: [
+          0,
+          ...Array.from({ length: interiorCount }, (_, index) => (index + 1) / (interiorCount + 1)),
+          1,
+        ],
+        mult: [
+          entity.degree + 1,
+          ...Array.from({ length: interiorCount }, () => 1),
+          entity.degree + 1,
+        ],
+        degree: entity.degree,
+        periodic: false,
+      };
+    }
     default:
       return undefined;
   }
@@ -490,6 +527,12 @@ function planeArc(wrapper: GcsWrapper, id: string): PlaneArc {
   return primitive;
 }
 
+function planeEllipse(wrapper: GcsWrapper, id: string): PlaneEllipse {
+  const primitive = wrapper.sketch_index.get_primitive(id);
+  if (primitive?.type !== 'ellipse') throw new TypeError(`PlaneGCS ellipse ${id} is unavailable.`);
+  return primitive;
+}
+
 function solvedDocument(document: SketchDocument, wrapper: GcsWrapper, status: SketchSolveStatus) {
   const nodes = (document.nodes ?? []).map((node) => {
     const solved = planePoint(wrapper, node.id);
@@ -543,6 +586,29 @@ function solvedDocument(document: SketchDocument, wrapper: GcsWrapper, status: S
         }
         return synchronizeArcFromPoints(entity, center, start, end, arc.radius);
       }
+      case 'ellipse': {
+        const ellipse = planeEllipse(wrapper, entity.id);
+        const center = position(entity.centerNodeId, entity.center);
+        const focus = position(entity.focusNodeId, entity.center);
+        const focalDistance = Math.hypot(focus.x - center.x, focus.y - center.y);
+        return {
+          ...entity,
+          center,
+          minorRadius: ellipse.radmin,
+          majorRadius: Math.hypot(focalDistance, ellipse.radmin),
+          rotation:
+            focalDistance <= SOLVER_BACK_PROJECTION_EPSILON_MM
+              ? entity.rotation
+              : Math.atan2(focus.y - center.y, focus.x - center.x),
+        };
+      }
+      case 'bspline':
+        return {
+          ...entity,
+          controlPoints: entity.controlPoints.map((point, index) =>
+            position(entity.controlNodeIds?.[index], point),
+          ),
+        };
     }
     throw new TypeError('Unsupported geometry entity.');
   });

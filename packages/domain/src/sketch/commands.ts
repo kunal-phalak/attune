@@ -1,8 +1,14 @@
 import { constraintEntityIds, validateConstraintInput, type ConstraintInput } from './constraints';
 import { validateDimensionInput, type DimensionInput } from './dimensions';
-import { moveSketchNode, publicReferenceVersion, type SketchDocument } from './document';
+import {
+  createSketchDocument,
+  moveSketchNode,
+  publicReferenceVersion,
+  type SketchDocument,
+} from './document';
 import {
   arcPoint,
+  ellipseFocusPoint,
   geometryNodeIds,
   synchronizeGeometryWithNodes,
   validateGeometryEntity,
@@ -12,17 +18,35 @@ import {
 } from './geometry';
 import { validateGroupInput, type GroupInput } from './groups';
 import { ensureGeometryTopology, incidentEntityIds } from './topology';
+import { trimGeometryAtPoint } from './trim';
 
 export type SketchCommand =
   | {
       readonly type: 'create_geometry';
       readonly entities: readonly GeometryInput[];
       readonly groupId?: string;
+      readonly group?: GroupInput;
+      readonly constraints?: readonly ConstraintInput[];
     }
   | { readonly type: 'edit_geometry'; readonly entities: readonly GeometryPatch[] }
   | { readonly type: 'move_node'; readonly nodeId: string; readonly position: SketchPoint2D }
+  | {
+      readonly type: 'transform_geometry';
+      readonly entityIds: readonly string[];
+      readonly pivot: SketchPoint2D;
+      readonly translation?: SketchPoint2D;
+      readonly rotation?: number;
+      readonly scale?: number;
+    }
+  | { readonly type: 'trim_geometry'; readonly entityId: string; readonly pickPoint: SketchPoint2D }
   | { readonly type: 'delete_geometry'; readonly entityIds: readonly string[] }
+  | {
+      readonly type: 'set_construction';
+      readonly entityIds: readonly string[];
+      readonly construction: boolean;
+    }
   | { readonly type: 'create_group'; readonly groups: readonly GroupInput[] }
+  | { readonly type: 'rename_group'; readonly groupId: string; readonly name: string }
   | {
       readonly type: 'move_to_group';
       readonly entityIds: readonly string[];
@@ -30,7 +54,33 @@ export type SketchCommand =
     }
   | { readonly type: 'apply_constraint'; readonly constraints: readonly ConstraintInput[] }
   | { readonly type: 'remove_constraint'; readonly constraintIds: readonly string[] }
-  | { readonly type: 'set_dimension'; readonly dimensions: readonly DimensionInput[] };
+  | { readonly type: 'set_dimension'; readonly dimensions: readonly DimensionInput[] }
+  | { readonly type: 'remove_dimension'; readonly dimensionIds: readonly string[] }
+  | { readonly type: 'restore_sketch'; readonly snapshot: SketchSnapshotInput };
+
+export interface SketchSnapshotInput {
+  readonly name: string;
+  readonly entities: readonly GeometryInput[];
+  readonly constraints: readonly ConstraintInput[];
+  readonly dimensions: readonly DimensionInput[];
+  readonly groups: readonly GroupInput[];
+  readonly parameters: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly value: number;
+    readonly unit: 'mm' | 'deg' | 'unitless';
+  }[];
+}
+
+function withIncrementedVersions<T extends { readonly id: string; readonly version: number }>(
+  next: readonly T[],
+  current: readonly T[],
+): readonly T[] {
+  return next.map((entry) => {
+    const previous = current.find(({ id }) => id === entry.id);
+    return Object.assign({}, entry, { version: (previous?.version ?? 0) + 1 });
+  });
+}
 
 export type SketchCommandType = SketchCommand['type'];
 
@@ -60,17 +110,69 @@ export function isSketchCommand(command: { readonly type: string }): command is 
     'create_geometry',
     'edit_geometry',
     'move_node',
+    'transform_geometry',
+    'trim_geometry',
     'delete_geometry',
+    'set_construction',
     'create_group',
+    'rename_group',
     'move_to_group',
     'apply_constraint',
     'remove_constraint',
     'set_dimension',
+    'remove_dimension',
+    'restore_sketch',
   ].includes(command.type);
 }
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].toSorted();
+}
+
+function solverAffectedEntityIds(
+  document: SketchDocument,
+  seedEntityIds: readonly string[],
+): readonly string[] {
+  const affectedEntities = new Set(seedEntityIds);
+  const affectedNodes = new Set(
+    document.entities.filter(({ id }) => affectedEntities.has(id)).flatMap(geometryNodeIds),
+  );
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entity of document.entities) {
+      const entityNodes = geometryNodeIds(entity);
+      if (
+        !affectedEntities.has(entity.id) &&
+        entityNodes.some((nodeId) => affectedNodes.has(nodeId))
+      ) {
+        affectedEntities.add(entity.id);
+        entityNodes.forEach((nodeId) => affectedNodes.add(nodeId));
+        changed = true;
+      }
+    }
+    for (const constraint of document.constraints) {
+      const refs = constraintEntityIds(constraint);
+      if (refs.some((id) => affectedEntities.has(id))) {
+        for (const id of refs) {
+          if (!affectedEntities.has(id)) {
+            affectedEntities.add(id);
+            changed = true;
+          }
+        }
+      }
+    }
+    for (const entity of document.entities) {
+      if (!affectedEntities.has(entity.id)) continue;
+      for (const nodeId of geometryNodeIds(entity)) {
+        if (!affectedNodes.has(nodeId)) {
+          affectedNodes.add(nodeId);
+          changed = true;
+        }
+      }
+    }
+  }
+  return unique([...affectedEntities]);
 }
 
 function assertNever(value: never): never {
@@ -79,21 +181,78 @@ function assertNever(value: never): never {
 
 function footprintReferences(document: SketchDocument, command: SketchCommand) {
   switch (command.type) {
-    case 'create_geometry':
+    case 'create_geometry': {
+      const referencedEntities = command.constraints?.flatMap(constraintEntityIds) ?? [];
+      const existingRefs = referencedEntities.filter((id) =>
+        document.entities.some((entity) => entity.id === id),
+      );
       return {
-        reads: command.groupId ? [command.groupId] : [],
-        writes: [
+        reads: unique([...(command.groupId ? [command.groupId] : []), ...existingRefs]),
+        writes: unique([
           ...command.entities.map(({ id }) => id),
+          ...solverAffectedEntityIds(document, existingRefs),
           ...(command.groupId ? [command.groupId] : []),
-        ],
+          ...(command.group ? [command.group.id] : []),
+          ...(command.group?.parentGroupId ? [command.group.parentGroupId] : []),
+          ...(command.constraints?.map(({ id }) => id) ?? []),
+        ]),
       };
+    }
     case 'edit_geometry':
       return { reads: [], writes: command.entities.map(({ id }) => id) };
-    case 'move_node':
+    case 'move_node': {
+      const incident = incidentEntityIds(document.entities, command.nodeId);
+      const connected = solverAffectedEntityIds(document, incident);
       return {
-        reads: [],
-        writes: [command.nodeId, ...incidentEntityIds(document.entities, command.nodeId)],
+        reads: unique([...incident, ...connected]),
+        writes: unique([
+          command.nodeId,
+          ...connected,
+          ...document.entities.filter(({ id }) => connected.includes(id)).flatMap(geometryNodeIds),
+        ]),
       };
+    }
+    case 'transform_geometry': {
+      const connected = solverAffectedEntityIds(document, command.entityIds);
+      const nodeIds = unique(
+        document.entities.filter(({ id }) => connected.includes(id)).flatMap(geometryNodeIds),
+      );
+      return {
+        reads: connected,
+        writes: unique([
+          ...connected,
+          ...nodeIds,
+          ...nodeIds.flatMap((id) => incidentEntityIds(document.entities, id)),
+        ]),
+      };
+    }
+    case 'trim_geometry': {
+      const target = document.entities.find(({ id }) => id === command.entityId);
+      const replacementIds = target
+        ? trimGeometryAtPoint(document.entities, command.entityId, command.pickPoint).map(
+            ({ id }) => id,
+          )
+        : [];
+      return {
+        reads: document.entities.map(({ id }) => id),
+        writes: unique([
+          command.entityId,
+          ...replacementIds,
+          ...(target ? geometryNodeIds(target) : []),
+          ...document.groups
+            .filter(({ entityIds }) => entityIds.includes(command.entityId))
+            .map(({ id }) => id),
+          ...document.constraints
+            .filter(({ refs }) => refs.some(({ entityId }) => entityId === command.entityId))
+            .map(({ id }) => id),
+          ...document.dimensions
+            .filter(({ refs }) => refs.some(({ entityId }) => entityId === command.entityId))
+            .map(({ id }) => id),
+        ]),
+      };
+    }
+    case 'set_construction':
+      return { reads: [], writes: command.entityIds };
     case 'delete_geometry': {
       const entitySet = new Set(command.entityIds);
       const dependentConstraints = document.constraints.filter((constraint) =>
@@ -117,12 +276,18 @@ function footprintReferences(document: SketchDocument, command: SketchCommand) {
     }
     case 'create_group':
       return {
-        reads: command.groups.flatMap(({ entityIds, childGroupIds }) => [
+        reads: command.groups.flatMap(({ entityIds, childGroupIds, parentGroupId }) => [
           ...entityIds,
           ...(childGroupIds ?? []),
+          ...(parentGroupId ? [parentGroupId] : []),
         ]),
-        writes: command.groups.map(({ id }) => id),
+        writes: unique([
+          ...command.groups.map(({ id }) => id),
+          ...command.groups.flatMap(({ parentGroupId }) => (parentGroupId ? [parentGroupId] : [])),
+        ]),
       };
+    case 'rename_group':
+      return { reads: [command.groupId], writes: [command.groupId] };
     case 'move_to_group':
       return {
         reads: command.entityIds,
@@ -133,17 +298,51 @@ function footprintReferences(document: SketchDocument, command: SketchCommand) {
             .map(({ id }) => id),
         ],
       };
-    case 'apply_constraint':
+    case 'apply_constraint': {
+      const referenced = unique(command.constraints.flatMap(constraintEntityIds));
+      const connected = solverAffectedEntityIds(document, referenced);
       return {
-        reads: command.constraints.flatMap(constraintEntityIds),
-        writes: command.constraints.map(({ id }) => id),
+        reads: connected,
+        writes: unique([...connected, ...command.constraints.map(({ id }) => id)]),
       };
+    }
     case 'remove_constraint':
       return { reads: [], writes: command.constraintIds };
-    case 'set_dimension':
+    case 'set_dimension': {
+      const referenced = unique(
+        command.dimensions.flatMap(({ refs }) => refs.map(({ entityId }) => entityId)),
+      );
+      const connected = solverAffectedEntityIds(document, referenced);
       return {
-        reads: command.dimensions.flatMap(({ refs }) => refs.map(({ entityId }) => entityId)),
-        writes: command.dimensions.map(({ id }) => id),
+        reads: connected,
+        writes: unique([...connected, ...command.dimensions.map(({ id }) => id)]),
+      };
+    }
+    case 'remove_dimension':
+      return { reads: [], writes: command.dimensionIds };
+    case 'restore_sketch':
+      return {
+        reads: unique([
+          ...document.nodes.map(({ id }) => id),
+          ...document.entities.map(({ id }) => id),
+          ...document.constraints.map(({ id }) => id),
+          ...document.dimensions.map(({ id }) => id),
+          ...document.groups.map(({ id }) => id),
+          ...document.parameters.map(({ id }) => id),
+        ]),
+        writes: unique([
+          ...document.nodes.map(({ id }) => id),
+          ...document.entities.map(({ id }) => id),
+          ...document.constraints.map(({ id }) => id),
+          ...document.dimensions.map(({ id }) => id),
+          ...document.groups.map(({ id }) => id),
+          ...document.parameters.map(({ id }) => id),
+          ...command.snapshot.entities.map(({ id }) => id),
+          ...command.snapshot.constraints.map(({ id }) => id),
+          ...command.snapshot.dimensions.map(({ id }) => id),
+          ...command.snapshot.groups.map(({ id }) => id),
+          ...command.snapshot.parameters.map(({ id }) => id),
+        ]),
       };
   }
   return assertNever(command);
@@ -166,12 +365,27 @@ export function commandFootprint(
   const constraintIds = new Set(document.constraints.map(({ id }) => id));
   const dimensionIds = new Set(document.dimensions.map(({ id }) => id));
   if (command.type === 'create_geometry') command.entities.forEach(({ id }) => entityIds.add(id));
+  if (command.type === 'trim_geometry') {
+    trimGeometryAtPoint(document.entities, command.entityId, command.pickPoint).forEach(({ id }) =>
+      entityIds.add(id),
+    );
+  }
   if (command.type === 'create_group') command.groups.forEach(({ id }) => groupIds.add(id));
   if (command.type === 'apply_constraint') {
     command.constraints.forEach(({ id }) => constraintIds.add(id));
   }
   if (command.type === 'set_dimension') {
     command.dimensions.forEach(({ id }) => dimensionIds.add(id));
+  }
+  if (command.type === 'create_geometry') {
+    if (command.group) groupIds.add(command.group.id);
+    command.constraints?.forEach(({ id }) => constraintIds.add(id));
+  }
+  if (command.type === 'restore_sketch') {
+    command.snapshot.entities.forEach(({ id }) => entityIds.add(id));
+    command.snapshot.constraints.forEach(({ id }) => constraintIds.add(id));
+    command.snapshot.dimensions.forEach(({ id }) => dimensionIds.add(id));
+    command.snapshot.groups.forEach(({ id }) => groupIds.add(id));
   }
   return {
     documentId: document.id,
@@ -219,6 +433,111 @@ function samePoint(first: SketchPoint2D, second: SketchPoint2D): boolean {
   return first.x === second.x && first.y === second.y;
 }
 
+function finitePoint(point: SketchPoint2D, label: string): void {
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    throw new TypeError(`${label} requires finite coordinates.`);
+  }
+}
+
+function fixedNodeIds(document: SketchDocument): ReadonlySet<string> {
+  const fixedEntities = new Set(
+    document.constraints.filter(({ type }) => type === 'fixed').flatMap(constraintEntityIds),
+  );
+  return new Set(
+    document.entities.filter(({ id }) => fixedEntities.has(id)).flatMap(geometryNodeIds),
+  );
+}
+
+function transformPoint(
+  point: SketchPoint2D,
+  pivot: SketchPoint2D,
+  translation: SketchPoint2D,
+  rotation: number,
+  scale: number,
+): SketchPoint2D {
+  const dx = (point.x - pivot.x) * scale;
+  const dy = (point.y - pivot.y) * scale;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  return {
+    x: pivot.x + dx * cosine - dy * sine + translation.x,
+    y: pivot.y + dx * sine + dy * cosine + translation.y,
+  };
+}
+
+function transformGeometryWithTopology(
+  document: SketchDocument,
+  command: Extract<SketchCommand, { type: 'transform_geometry' }>,
+): { readonly document: SketchDocument; readonly affected: readonly string[] } {
+  ensureUniqueCommandIds(command.entityIds, 'transform_geometry');
+  ensureReferencedEntities(document, command.entityIds);
+  finitePoint(command.pivot, 'transform_geometry.pivot');
+  const translation = command.translation ?? { x: 0, y: 0 };
+  finitePoint(translation, 'transform_geometry.translation');
+  const rotation = command.rotation ?? 0;
+  const scale = command.scale ?? 1;
+  if (!Number.isFinite(rotation) || !Number.isFinite(scale) || scale <= 0) {
+    throw new TypeError(
+      'transform_geometry requires a finite rotation and positive uniform scale.',
+    );
+  }
+  const selected = new Set(command.entityIds);
+  const nodeIds = new Set(
+    document.entities.filter(({ id }) => selected.has(id)).flatMap(geometryNodeIds),
+  );
+  const locked = fixedNodeIds(document);
+  if ([...nodeIds].some((id) => locked.has(id))) {
+    throw new TypeError(
+      'Fixed geometry cannot be transformed until its Fix constraint is removed.',
+    );
+  }
+  const nodes = document.nodes.map((node) =>
+    nodeIds.has(node.id)
+      ? {
+          ...node,
+          version: node.version + 1,
+          position: transformPoint(node.position, command.pivot, translation, rotation, scale),
+        }
+      : node,
+  );
+  const incident = new Set(
+    [...nodeIds].flatMap((nodeId) => incidentEntityIds(document.entities, nodeId)),
+  );
+  const intrinsic = document.entities.map((entity) => {
+    if (!selected.has(entity.id) || scale === 1) return entity;
+    if (entity.kind === 'circle' || entity.kind === 'arc') {
+      return { ...entity, radius: entity.radius * scale };
+    }
+    if (entity.kind === 'ellipse') {
+      return {
+        ...entity,
+        majorRadius: entity.majorRadius * scale,
+        minorRadius: entity.minorRadius * scale,
+      };
+    }
+    return entity;
+  });
+  const entities = synchronizeGeometryWithNodes(intrinsic, nodes).map((entity) =>
+    incident.has(entity.id) || selected.has(entity.id)
+      ? Object.assign({}, entity, { version: entity.version + 1 })
+      : entity,
+  );
+  const source =
+    document.source && nodeIds.size > 0
+      ? {
+          ...document.source,
+          status: 'modified' as const,
+          modifiedNodeIds: [
+            ...new Set([...(document.source.modifiedNodeIds ?? []), ...nodeIds]),
+          ].toSorted(),
+        }
+      : document.source;
+  return {
+    document: advance(document, { nodes, entities, source }),
+    affected: unique([...command.entityIds, ...nodeIds, ...incident]),
+  };
+}
+
 function editGeometryWithTopology(
   document: SketchDocument,
   patches: ReadonlyMap<string, GeometryPatch>,
@@ -244,6 +563,16 @@ function editGeometryWithTopology(
       if (next.centerNodeId) positions.set(next.centerNodeId, next.center);
       if (next.startNodeId) positions.set(next.startNodeId, arcPoint(next, next.startAngle));
       if (next.endNodeId) positions.set(next.endNodeId, arcPoint(next, next.endAngle));
+    }
+    if (next.kind === 'ellipse') {
+      if (next.centerNodeId) positions.set(next.centerNodeId, next.center);
+      if (next.focusNodeId) positions.set(next.focusNodeId, ellipseFocusPoint(next));
+    }
+    if (next.kind === 'bspline') {
+      next.controlNodeIds?.forEach((id, index) => {
+        const point = next.controlPoints[index];
+        if (point) positions.set(id, point);
+      });
     }
     return next;
   });
@@ -279,8 +608,29 @@ export function applySketchCommand(
       const existing = new Set(document.entities.map(({ id }) => id));
       if (ids.some((id) => existing.has(id))) throw new TypeError('Geometry IDs must be new.');
       command.entities.forEach(validateGeometryEntity);
+      if (command.groupId && command.group) {
+        throw new TypeError('create_geometry accepts either groupId or a new group, not both.');
+      }
       if (command.groupId && !document.groups.some(({ id }) => id === command.groupId)) {
         throw new TypeError(`Unknown target group ${command.groupId}.`);
+      }
+      if (command.group) {
+        validateGroupInput(command.group);
+        if (document.groups.some(({ id }) => id === command.group!.id)) {
+          throw new TypeError('The create_geometry group ID must be new.');
+        }
+        const creatingIds = new Set(ids);
+        if (command.group.entityIds.some((id) => !creatingIds.has(id))) {
+          throw new TypeError(
+            'A create_geometry group may only reference geometry in the same command.',
+          );
+        }
+        if (
+          command.group.parentGroupId &&
+          !document.groups.some(({ id }) => id === command.group!.parentGroupId)
+        ) {
+          throw new TypeError(`Unknown parent group ${command.group.parentGroupId}.`);
+        }
       }
       const combined = [
         ...document.entities,
@@ -288,7 +638,7 @@ export function applySketchCommand(
       ] as typeof document.entities;
       const topology = ensureGeometryTopology(combined, document.nodes ?? []);
       const entities = topology.entities;
-      const groups = command.groupId
+      let groups = command.groupId
         ? document.groups.map((group) =>
             group.id === command.groupId
               ? {
@@ -298,11 +648,46 @@ export function applySketchCommand(
                 }
               : group,
           )
-        : document.groups;
+        : command.group
+          ? [...document.groups, { ...command.group, version: 1 }]
+          : document.groups;
+      if (command.group?.parentGroupId) {
+        groups = groups.map((group) =>
+          group.id === command.group!.parentGroupId
+            ? {
+                ...group,
+                version: group.version + 1,
+                childGroupIds: unique([...(group.childGroupIds ?? []), command.group!.id]),
+              }
+            : group,
+        );
+      }
+      const nextDocument = { ...document, entities, nodes: topology.nodes, groups };
+      const creatingConstraints = command.constraints ?? [];
+      creatingConstraints.forEach(validateConstraintInput);
+      ensureReferencedEntities(nextDocument, creatingConstraints.flatMap(constraintEntityIds));
+      const constraintIds = creatingConstraints.map(({ id }) => id);
+      if (constraintIds.length > 0) {
+        ensureUniqueCommandIds(constraintIds, 'create_geometry.constraints');
+      }
+      if (
+        constraintIds.some((id) => document.constraints.some((constraint) => constraint.id === id))
+      ) {
+        throw new TypeError('Constraint IDs must be new.');
+      }
+      const constraints = [
+        ...document.constraints,
+        ...creatingConstraints.map((constraint) => Object.assign({}, constraint, { version: 1 })),
+      ];
       return {
-        document: advance(document, { entities, nodes: topology.nodes, groups }),
-        affectedEntities: unique([...ids, ...(command.groupId ? [command.groupId] : [])]),
-        addedConstraints: [],
+        document: advance(document, { entities, nodes: topology.nodes, groups, constraints }),
+        affectedEntities: unique([
+          ...ids,
+          ...(command.groupId ? [command.groupId] : []),
+          ...(command.group ? [command.group.id] : []),
+          ...constraintIds,
+        ]),
+        addedConstraints: constraintIds,
         removedConstraints: [],
       };
     }
@@ -320,6 +705,9 @@ export function applySketchCommand(
       };
     }
     case 'move_node': {
+      if (fixedNodeIds(document).has(command.nodeId)) {
+        throw new TypeError('A fixed node cannot move until its Fix constraint is removed.');
+      }
       const moved = moveSketchNode(document, command.nodeId, command.position);
       return {
         document: advance(document, {
@@ -331,6 +719,53 @@ export function applySketchCommand(
           command.nodeId,
           ...incidentEntityIds(document.entities, command.nodeId),
         ]),
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'transform_geometry': {
+      const transformed = transformGeometryWithTopology(document, command);
+      return {
+        document: transformed.document,
+        affectedEntities: transformed.affected,
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'trim_geometry': {
+      finitePoint(command.pickPoint, 'trim_geometry.pickPoint');
+      const target = document.entities.find(({ id }) => id === command.entityId);
+      if (!target) throw new TypeError(`Unknown trim target ${command.entityId}.`);
+      const replacements = trimGeometryAtPoint(
+        document.entities,
+        command.entityId,
+        command.pickPoint,
+      ).map((entity) =>
+        Object.assign({}, entity, {
+          version: entity.id === command.entityId ? target.version + 1 : 1,
+        }),
+      ) as typeof document.entities;
+      const replacementIds = replacements.map(({ id }) => id);
+      const combined = [
+        ...document.entities.filter(({ id }) => id !== command.entityId),
+        ...replacements,
+      ];
+      const topology = ensureGeometryTopology(combined, document.nodes);
+      const referencedNodes = new Set(topology.entities.flatMap(geometryNodeIds));
+      const nodes = topology.nodes.filter(({ id }) => referencedNodes.has(id));
+      const groups = document.groups.map((group) => {
+        if (!group.entityIds.includes(command.entityId)) return group;
+        return {
+          ...group,
+          version: group.version + 1,
+          entityIds: unique(
+            group.entityIds.flatMap((id) => (id === command.entityId ? replacementIds : [id])),
+          ),
+        };
+      });
+      return {
+        document: advance(document, { nodes, entities: topology.entities, groups }),
+        affectedEntities: unique([command.entityId, ...replacementIds]),
         addedConstraints: [],
         removedConstraints: [],
       };
@@ -369,6 +804,23 @@ export function applySketchCommand(
         removedConstraints,
       };
     }
+    case 'set_construction': {
+      ensureUniqueCommandIds(command.entityIds, 'set_construction');
+      ensureReferencedEntities(document, command.entityIds);
+      const selected = new Set(command.entityIds);
+      return {
+        document: advance(document, {
+          entities: document.entities.map((entity) =>
+            selected.has(entity.id) && entity.construction !== command.construction
+              ? { ...entity, construction: command.construction, version: entity.version + 1 }
+              : entity,
+          ),
+        }),
+        affectedEntities: unique(command.entityIds),
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
     case 'create_group': {
       const ids = command.groups.map(({ id }) => id);
       ensureUniqueCommandIds(ids, 'create_group');
@@ -388,14 +840,84 @@ export function applySketchCommand(
       ) {
         throw new TypeError('A child group reference is unknown.');
       }
+      if (
+        command.groups.some(
+          ({ id, parentGroupId }) =>
+            parentGroupId === id ||
+            (parentGroupId !== undefined && !knownGroups.has(parentGroupId)),
+        )
+      ) {
+        throw new TypeError('A parent group reference is unknown or self-referential.');
+      }
+      const parentById = new Map([
+        ...document.groups.map((group) => [group.id, group.parentGroupId] as const),
+        ...command.groups.map((group) => [group.id, group.parentGroupId] as const),
+      ]);
+      for (const id of ids) {
+        const seen = new Set([id]);
+        let parentId = parentById.get(id);
+        while (parentId) {
+          if (seen.has(parentId)) throw new TypeError('Group nesting cannot contain a cycle.');
+          seen.add(parentId);
+          parentId = parentById.get(parentId);
+        }
+      }
+      const requestedParents = new Map<string, string[]>();
+      for (const group of command.groups) {
+        if (!group.parentGroupId) continue;
+        requestedParents.set(group.parentGroupId, [
+          ...(requestedParents.get(group.parentGroupId) ?? []),
+          group.id,
+        ]);
+      }
       return {
         document: advance(document, {
           groups: [
-            ...document.groups,
-            ...command.groups.map((group) => ({ ...group, version: 1 })),
+            ...document.groups.map((group) => {
+              const children = requestedParents.get(group.id);
+              return children
+                ? {
+                    ...group,
+                    version: group.version + 1,
+                    childGroupIds: unique([...(group.childGroupIds ?? []), ...children]),
+                  }
+                : group;
+            }),
+            ...command.groups.map((group) => ({
+              ...group,
+              ...(requestedParents.has(group.id)
+                ? {
+                    childGroupIds: unique([
+                      ...(group.childGroupIds ?? []),
+                      ...(requestedParents.get(group.id) ?? []),
+                    ]),
+                  }
+                : {}),
+              version: 1,
+            })),
           ],
         }),
         affectedEntities: ids,
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'rename_group': {
+      const name = command.name.trim();
+      if (!name) throw new TypeError('A group name is required.');
+      if (name.length > 160) throw new TypeError('A group name cannot exceed 160 characters.');
+      if (!document.groups.some(({ id }) => id === command.groupId)) {
+        throw new TypeError(`Unknown group ${command.groupId}.`);
+      }
+      return {
+        document: advance(document, {
+          groups: document.groups.map((group) =>
+            group.id === command.groupId && group.name !== name
+              ? { ...group, name, version: group.version + 1 }
+              : group,
+          ),
+        }),
+        affectedEntities: [command.groupId],
         addedConstraints: [],
         removedConstraints: [],
       };
@@ -493,6 +1015,94 @@ export function applySketchCommand(
         ]),
         addedConstraints: [],
         removedConstraints: [],
+      };
+    }
+    case 'remove_dimension': {
+      ensureUniqueCommandIds(command.dimensionIds, 'remove_dimension');
+      const existing = new Set(document.dimensions.map(({ id }) => id));
+      if (command.dimensionIds.some((id) => !existing.has(id))) {
+        throw new TypeError('A dimension reference is unknown.');
+      }
+      return {
+        document: advance(document, {
+          dimensions: document.dimensions.filter(({ id }) => !command.dimensionIds.includes(id)),
+        }),
+        affectedEntities: unique(command.dimensionIds),
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'restore_sketch': {
+      const snapshot = command.snapshot;
+      if (!snapshot.name.trim() || snapshot.name.length > 160) {
+        throw new TypeError('A restored sketch requires a valid name.');
+      }
+      snapshot.entities.forEach(validateGeometryEntity);
+      snapshot.constraints.forEach(validateConstraintInput);
+      snapshot.dimensions.forEach(validateDimensionInput);
+      snapshot.groups.forEach(validateGroupInput);
+      if (
+        snapshot.parameters.some(
+          ({ id, name, value, unit }) =>
+            !id ||
+            !name.trim() ||
+            !Number.isFinite(value) ||
+            !['mm', 'deg', 'unitless'].includes(unit),
+        )
+      ) {
+        throw new TypeError('The restored sketch contains an invalid parameter.');
+      }
+      const ids = [
+        ...snapshot.entities.map(({ id }) => id),
+        ...snapshot.constraints.map(({ id }) => id),
+        ...snapshot.dimensions.map(({ id }) => id),
+        ...snapshot.groups.map(({ id }) => id),
+        ...snapshot.parameters.map(({ id }) => id),
+      ];
+      if (new Set(ids).size !== ids.length) {
+        throw new TypeError('The restored sketch contains duplicate semantic references.');
+      }
+      const restored = createSketchDocument({
+        id: document.id,
+        name: snapshot.name.trim(),
+        entities: snapshot.entities,
+        constraints: snapshot.constraints.map((constraint) =>
+          Object.assign({}, constraint, { version: 1 }),
+        ),
+        dimensions: snapshot.dimensions.map((dimension) =>
+          Object.assign({}, dimension, { version: 1 }),
+        ),
+        groups: snapshot.groups.map((group) => Object.assign({}, group, { version: 1 })),
+        parameters: snapshot.parameters.map((parameter) =>
+          Object.assign({}, parameter, { version: 1 }),
+        ),
+        ...(document.source ? { source: document.source } : {}),
+      });
+      const nextDocument: SketchDocument = {
+        ...restored,
+        revision: document.revision + 1,
+        nodes: withIncrementedVersions(restored.nodes, document.nodes),
+        entities: withIncrementedVersions(restored.entities, document.entities),
+        constraints: withIncrementedVersions(restored.constraints, document.constraints),
+        dimensions: withIncrementedVersions(restored.dimensions, document.dimensions),
+        groups: withIncrementedVersions(restored.groups, document.groups),
+        parameters: withIncrementedVersions(restored.parameters, document.parameters),
+      };
+      return {
+        document: nextDocument,
+        affectedEntities: unique([
+          ...ids,
+          ...document.entities.map(({ id }) => id),
+          ...document.constraints.map(({ id }) => id),
+          ...document.dimensions.map(({ id }) => id),
+          ...document.groups.map(({ id }) => id),
+        ]),
+        addedConstraints: nextDocument.constraints
+          .filter(({ id }) => !document.constraints.some((constraint) => constraint.id === id))
+          .map(({ id }) => id),
+        removedConstraints: document.constraints
+          .filter(({ id }) => !nextDocument.constraints.some((constraint) => constraint.id === id))
+          .map(({ id }) => id),
       };
     }
   }

@@ -1,7 +1,11 @@
 import type { ConstraintType } from '../sketch/constraints';
-import { geometryById, type SketchDocument } from '../sketch/document';
-import type { GeometryReference } from '../sketch/geometry';
+import type { SketchDocument } from '../sketch/document';
+import type { GeometryEntity, GeometryReference } from '../sketch/geometry';
 import type { SelectionContext } from './selection-context';
+
+function geometryById(document: SketchDocument, id: string): GeometryEntity | undefined {
+  return document.entities.find((entity) => entity.id === id);
+}
 
 export interface ConstraintCandidate {
   readonly type: ConstraintType;

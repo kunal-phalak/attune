@@ -1,6 +1,7 @@
 import { hashCanonical } from '../hash';
 import {
   arcPoint,
+  ellipseFocusPoint,
   geometryNodeIds,
   synchronizeGeometryWithNodes,
   type GeometryEntity,
@@ -17,7 +18,7 @@ export interface TopologyCandidate {
   readonly token: string;
   readonly position: SketchPoint2D;
   readonly sourceRef?: MakerPathSourceRef;
-  readonly anchor: SketchNodeSourceRef['anchor'];
+  readonly anchor: SketchNodeSourceRef['anchor'] | `control:${number}`;
 }
 
 export interface InternedTopology {
@@ -31,6 +32,24 @@ function finitePoint(point: SketchPoint2D): boolean {
 
 function sourceRefKey(sourceRef: SketchNodeSourceRef): string {
   return `${sourceRef.routeKey}:${sourceRef.anchor}`;
+}
+
+function nodeSourceRef(
+  sourceRef: MakerPathSourceRef,
+  anchor: TopologyCandidate['anchor'],
+): SketchNodeSourceRef | null {
+  if (anchor === 'self' || anchor === 'start' || anchor === 'end' || anchor === 'center') {
+    return { ...sourceRef, anchor };
+  }
+  return null;
+}
+
+function hasCompleteTopology(entity: GeometryEntity): boolean {
+  const count = geometryNodeIds(entity).length;
+  if (entity.kind === 'point' || entity.kind === 'circle') return count === 1;
+  if (entity.kind === 'line' || entity.kind === 'ellipse') return count === 2;
+  if (entity.kind === 'arc') return count === 3;
+  return count === entity.controlPoints.length;
 }
 
 function bucketKey(x: number, y: number): string {
@@ -82,9 +101,10 @@ function nodeFromContributors(
   const id = `sketch:node:${hashCanonical(contributors.map(({ token }) => token)).slice(0, 20)}`;
   for (const contributor of contributors) nodeIdByToken.set(contributor.token, id);
   const sourceRefs = contributors
-    .flatMap(({ sourceRef, anchor }) =>
-      sourceRef ? [Object.assign({}, sourceRef, { anchor })] : [],
-    )
+    .flatMap(({ sourceRef, anchor }) => {
+      const reference = sourceRef ? nodeSourceRef(sourceRef, anchor) : null;
+      return reference ? [reference] : [];
+    })
     .filter(
       (sourceRef, index, refs) =>
         refs.findIndex((candidate) => sourceRefKey(candidate) === sourceRefKey(sourceRef)) ===
@@ -174,6 +194,12 @@ export function topologyCandidatesForGeometry(
           candidate('start', arcPoint(entity, entity.startAngle)),
           candidate('end', arcPoint(entity, entity.endAngle)),
         ];
+      case 'ellipse':
+        return [candidate('center', entity.center), candidate('start', ellipseFocusPoint(entity))];
+      case 'bspline':
+        return entity.controlPoints.map((position, index) =>
+          candidate(`control:${index}`, position),
+        );
       default:
         return unreachable(entity);
     }
@@ -184,10 +210,76 @@ export function ensureGeometryTopology(
   entities: readonly GeometryEntity[],
   existingNodes: readonly SketchNode[] = [],
 ): { readonly entities: readonly GeometryEntity[]; readonly nodes: readonly SketchNode[] } {
-  if (existingNodes.length > 0 && entities.every((entity) => geometryNodeIds(entity).length > 0)) {
+  if (existingNodes.length > 0 && entities.every(hasCompleteTopology)) {
     return {
       entities: synchronizeGeometryWithNodes(entities, existingNodes),
       nodes: existingNodes,
+    };
+  }
+  if (existingNodes.length > 0) {
+    const complete = entities.filter(hasCompleteTopology);
+    const unresolved = entities.filter((entity) => !hasCompleteTopology(entity));
+    const candidates = topologyCandidatesForGeometry(unresolved);
+    const topology = internTopologyCandidates(candidates);
+    const resolvedNodeId = new Map<string, string>();
+    for (const node of topology.nodes) {
+      const existing = existingNodes.find(
+        (candidate) =>
+          Math.hypot(
+            candidate.position.x - node.position.x,
+            candidate.position.y - node.position.y,
+          ) <= TOPOLOGY_EPSILON_MM,
+      );
+      resolvedNodeId.set(node.id, existing?.id ?? node.id);
+    }
+    const nodeId = (entityId: string, anchor: TopologyCandidate['anchor']) => {
+      const generated = topology.nodeIdByToken.get(candidateToken(entityId, anchor));
+      return generated ? (resolvedNodeId.get(generated) ?? generated) : undefined;
+    };
+    const resolved = unresolved.map((entity): GeometryEntity => {
+      switch (entity.kind) {
+        case 'point':
+          return Object.assign({}, entity, { nodeId: nodeId(entity.id, 'self') });
+        case 'line':
+          return Object.assign({}, entity, {
+            startNodeId: nodeId(entity.id, 'start'),
+            endNodeId: nodeId(entity.id, 'end'),
+          });
+        case 'circle':
+          return Object.assign({}, entity, { centerNodeId: nodeId(entity.id, 'center') });
+        case 'arc':
+          return Object.assign({}, entity, {
+            centerNodeId: nodeId(entity.id, 'center'),
+            startNodeId: nodeId(entity.id, 'start'),
+            endNodeId: nodeId(entity.id, 'end'),
+          });
+        case 'ellipse':
+          return Object.assign({}, entity, {
+            centerNodeId: nodeId(entity.id, 'center'),
+            focusNodeId: nodeId(entity.id, 'start'),
+          });
+        case 'bspline':
+          return Object.assign({}, entity, {
+            controlNodeIds: entity.controlPoints.map((_point, index) =>
+              nodeId(entity.id, `control:${index}`)!,
+            ),
+          });
+        default:
+          return unreachable(entity);
+      }
+    });
+    const newNodes = topology.nodes
+      .filter((node) => resolvedNodeId.get(node.id) === node.id)
+      .filter((node) => !existingNodes.some(({ id }) => id === node.id));
+    const byId = new Map([...complete, ...resolved].map((entity) => [entity.id, entity]));
+    return {
+      entities: synchronizeGeometryWithNodes(
+        entities.map((entity) => byId.get(entity.id)!),
+        [...existingNodes, ...newNodes],
+      ),
+      nodes: [...existingNodes, ...newNodes].toSorted((left, right) =>
+        left.id.localeCompare(right.id),
+      ),
     };
   }
   const candidates = topologyCandidatesForGeometry(entities);
@@ -208,6 +300,17 @@ export function ensureGeometryTopology(
           centerNodeId: nodeId('center'),
           startNodeId: nodeId('start'),
           endNodeId: nodeId('end'),
+        };
+      case 'ellipse':
+        return {
+          ...entity,
+          centerNodeId: nodeId('center'),
+          focusNodeId: nodeId('start'),
+        };
+      case 'bspline':
+        return {
+          ...entity,
+          controlNodeIds: entity.controlPoints.map((_point, index) => nodeId(`control:${index}`)!),
         };
       default:
         return unreachable(entity);

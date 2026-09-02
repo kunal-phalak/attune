@@ -155,10 +155,66 @@ export function moveSketchNode(
   }
   const current = nodeById(document, nodeId);
   if (!current) throw new TypeError(`Unknown sketch node ${nodeId}.`);
-  const touched = new Set(incidentEntityIds(document.entities, nodeId));
-  const nodes = document.nodes.map((node) =>
-    node.id === nodeId ? { ...node, position, version: node.version + 1 } : node,
+  const positions = new Map(document.nodes.map((node) => [node.id, node.position] as const));
+  positions.set(nodeId, position);
+
+  // Arc points are one analytic object, not three independently editable coordinates. Moving the
+  // center translates the complete arc. Moving an endpoint keeps both endpoints on one circle by
+  // moving the free center to the nearest point on their perpendicular bisector. PlaneGCS may
+  // refine this local consequence, but every intermediate document remains topologically exact.
+  for (const entity of document.entities) {
+    if (
+      entity.kind !== 'arc' ||
+      !entity.centerNodeId ||
+      !entity.startNodeId ||
+      !entity.endNodeId ||
+      ![entity.centerNodeId, entity.startNodeId, entity.endNodeId].includes(nodeId)
+    ) {
+      continue;
+    }
+    const oldCenter = nodeById(document, entity.centerNodeId)?.position ?? entity.center;
+    if (nodeId === entity.centerNodeId) {
+      const dx = position.x - oldCenter.x;
+      const dy = position.y - oldCenter.y;
+      for (const endpointId of [entity.startNodeId, entity.endNodeId]) {
+        const endpoint = nodeById(document, endpointId)?.position;
+        if (endpoint) positions.set(endpointId, { x: endpoint.x + dx, y: endpoint.y + dy });
+      }
+      continue;
+    }
+    const start = positions.get(entity.startNodeId);
+    const end = positions.get(entity.endNodeId);
+    if (!start || !end) continue;
+    const chordX = end.x - start.x;
+    const chordY = end.y - start.y;
+    const chordLength = Math.hypot(chordX, chordY);
+    if (chordLength <= 1e-9) continue;
+    const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    const normal = { x: -chordY / chordLength, y: chordX / chordLength };
+    const offset = (oldCenter.x - midpoint.x) * normal.x + (oldCenter.y - midpoint.y) * normal.y;
+    positions.set(entity.centerNodeId, {
+      x: midpoint.x + normal.x * offset,
+      y: midpoint.y + normal.y * offset,
+    });
+  }
+
+  const changedNodeIds = new Set(
+    document.nodes
+      .filter((node) => {
+        const next = positions.get(node.id) ?? node.position;
+        return Math.hypot(next.x - node.position.x, next.y - node.position.y) > 1e-12;
+      })
+      .map(({ id }) => id),
   );
+  const touched = new Set(
+    [...changedNodeIds].flatMap((id) => incidentEntityIds(document.entities, id)),
+  );
+  const nodes = document.nodes.map((node) => {
+    const next = positions.get(node.id) ?? node.position;
+    return changedNodeIds.has(node.id)
+      ? { ...node, position: next, version: node.version + 1 }
+      : node;
+  });
   const entities = synchronizeGeometryWithNodes(document.entities, nodes).map((entity) =>
     touched.has(entity.id) ? Object.assign({}, entity, { version: entity.version + 1 }) : entity,
   );
@@ -167,7 +223,7 @@ export function moveSketchNode(
         ...document.source,
         status: 'modified' as const,
         modifiedNodeIds: [
-          ...new Set([...(document.source.modifiedNodeIds ?? []), nodeId]),
+          ...new Set([...(document.source.modifiedNodeIds ?? []), ...changedNodeIds]),
         ].toSorted(),
       }
     : undefined;

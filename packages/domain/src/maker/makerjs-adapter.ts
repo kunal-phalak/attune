@@ -398,6 +398,11 @@ export function toMakerJsModel(document: SketchDocument): MakerJs.IModel {
           ),
         );
         break;
+      case 'ellipse':
+      case 'bspline':
+        // Maker.js is only a source/export compatibility adapter. Canonical conics and splines
+        // remain Attune entities and are projected directly to PlaneGCS and CanvasKit.
+        break;
     }
   }
   return { paths, units: makerjs.unitType.Millimeter };

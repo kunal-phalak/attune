@@ -17,7 +17,16 @@ export interface ConstraintSolveResult {
   readonly solvedCoordinates: Readonly<Record<string, SketchPoint2D>>;
 }
 
+export interface TemporaryNodeTarget {
+  readonly kind: 'node_target';
+  readonly nodeId: string;
+  readonly position: SketchPoint2D;
+}
+
 export interface ConstraintSolver {
-  solve(document: SketchDocument): ConstraintSolveResult;
+  solve(
+    document: SketchDocument,
+    temporaryConstraints?: readonly TemporaryNodeTarget[],
+  ): ConstraintSolveResult;
   dispose(): void;
 }

@@ -6,11 +6,17 @@ import { compileAgentContext } from './context';
 describe('compact AgentContextSnapshot', () => {
   it('returns focused semantic references and unseen human changes without workspace records', () => {
     const workspace = createAt1042Workspace();
+    const entity = workspace.sketchDocument.entities.find(
+      (candidate) => candidate.kind === 'line',
+    )!;
+    const group = workspace.sketchDocument.groups.find((candidate) =>
+      candidate.entityIds.includes(entity.id),
+    )!;
     const context = compileAgentContext({
       workspace,
       role: 'buyer',
       capabilityIds: ['edit_draft'],
-      focus: { entityIds: ['sketch:hub:bore'] },
+      focus: { entityIds: [entity.id] },
       observation: {
         previousWorkspaceSeq: 0,
         currentWorkspaceSeq: 1,
@@ -19,7 +25,7 @@ describe('compact AgentContextSnapshot', () => {
             receiptSeq: 1,
             origin: 'human_ui',
             command: 'edit_geometry',
-            affectedEntities: ['sketch:hub:bore'],
+            affectedEntities: [entity.id],
             beforeHash: 'before',
             afterHash: 'after',
           },
@@ -27,14 +33,19 @@ describe('compact AgentContextSnapshot', () => {
       },
     });
 
-    expect(context.geometry.map(({ id }) => id)).toEqual(['sketch:hub:bore']);
-    expect(context.groups.map(({ id }) => id)).toEqual(['group:hub']);
+    expect(context.geometry.map(({ id }) => id)).toEqual([entity.id]);
+    expect(context.nodes.map(({ id }) => id).toSorted()).toEqual(
+      [entity.startNodeId, entity.endNodeId].toSorted((left, right) =>
+        (left ?? '').localeCompare(right ?? ''),
+      ),
+    );
+    expect(context.groups.map(({ id }) => id)).toEqual([group.id]);
     expect(context.unseenChanges).toEqual([
       {
         sequence: 1,
         origin: 'human_ui',
         command: 'edit_geometry',
-        semanticRefs: ['sketch:hub:bore'],
+        semanticRefs: [entity.id],
       },
     ]);
     expect(context.availableActions).toEqual(

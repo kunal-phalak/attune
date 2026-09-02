@@ -8,7 +8,7 @@ import {
   snapSketchPoint,
   type ConstraintSolver,
 } from './index';
-import { createPlaneGcsSolver } from './solver/planegcs-adapter';
+import { createPlaneGcsSolver } from './solver/planegcs-runtime';
 
 let solver: ConstraintSolver;
 
@@ -19,30 +19,31 @@ beforeAll(async () => {
 afterAll(() => solver.dispose());
 
 describe('semantic spoke seed', () => {
-  it('contains stable unique Attune entity IDs and semantic groups', () => {
+  it('contains stable unique imported entity IDs, canonical nodes, and Maker groups', () => {
     const first = createSpokeSeedDocument();
     const second = createSpokeSeedDocument();
     const ids = first.entities.map(({ id }) => id);
 
     expect(ids).toEqual(second.entities.map(({ id }) => id));
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual(
-      expect.arrayContaining([
-        'sketch:rim:outer',
-        'sketch:rim:inner',
-        'sketch:hub:outer',
-        'sketch:hub:bore',
-        'sketch:spoke:1:left',
-        'sketch:spoke:6:right',
-      ]),
+    expect(first.entities).toHaveLength(50);
+    expect(first.nodes.length).toBeGreaterThan(0);
+    expect(first.nodes).toEqual(second.nodes);
+    expect(first.entities.every((entity) => entity.sourceRef?.kind === 'maker-path')).toBe(true);
+    expect(first.groups[0]).toEqual(
+      expect.objectContaining({ id: 'maker:group:root', name: 'Maker.js source' }),
     );
-    expect(first.entities).toHaveLength(16);
-    expect(first.groups.map(({ id, name }) => ({ id, name }))).toEqual([
-      { id: 'group:rim', name: 'Rim' },
-      { id: 'group:hub', name: 'Hub' },
-      { id: 'group:spokes', name: 'Spokes' },
-    ]);
-    expect(first.groups.find(({ id }) => id === 'group:spokes')?.entityIds).toHaveLength(12);
+    expect(first.groups.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['wedge0', 'wedge5', 'ring2']),
+    );
+    expect(first.source).toEqual(
+      expect.objectContaining({
+        kind: 'maker-generator',
+        package: 'makerjs-spokes-straight',
+        generator: 'StraightSpokes',
+        status: 'pristine',
+      }),
+    );
   });
 });
 

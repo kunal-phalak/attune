@@ -48,10 +48,18 @@ const agent: TrustedExecutionContext = {
   delegation: delegation(['edit_draft']),
 };
 
-function editCircle(entityId: string, radius: number): AttuneCommand {
+function editCircle(
+  workspace: ReturnType<AttuneCommandBus['inspect']>['workspace'],
+  circleIndex: number,
+  radius: number,
+): Extract<AttuneCommand, { type: 'edit_geometry' }> {
+  const entity = workspace.sketchDocument.entities.filter(({ kind }) => kind === 'circle')[
+    circleIndex
+  ];
+  if (!entity || entity.kind !== 'circle') throw new TypeError('Missing circle test fixture.');
   return {
     type: 'edit_geometry',
-    entities: [{ id: entityId, kind: 'circle', center: { x: 0, y: 0 }, radius }],
+    entities: [{ id: entity.id, kind: 'circle', center: entity.center, radius }],
   };
 }
 
@@ -74,9 +82,9 @@ describe('semantic forecast and shared human/WebMCP execution', () => {
   it('produces identical semantic after-hashes for equivalent human and WebMCP commands', () => {
     const humanBus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
     const agentBus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
-    const command = editCircle('sketch:rim:outer', 154);
     const humanObserved = humanBus.inspect('buyer').workspace;
     const agentObserved = agentBus.inspect('buyer').workspace;
+    const command = editCircle(humanObserved, 0, 112);
 
     const humanResult = humanBus.execute(
       command,
@@ -97,8 +105,8 @@ describe('semantic forecast and shared human/WebMCP execution', () => {
 
   it('keeps forecast pure and commits the exact forecast consequence', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
-    const command = editCircle('sketch:hub:bore', 18);
     const observed = bus.inspect('buyer').workspace;
+    const command = editCircle(observed, 1, 24);
     const authoritativeBefore = hashCanonical(bus.inspect('buyer').workspace);
     const forecast = bus.forecast(command, human, 'semantic-forecast');
 
@@ -111,15 +119,52 @@ describe('semantic forecast and shared human/WebMCP execution', () => {
     expect(committed.receipt.afterHash).toBe(forecast.afterHash);
     expect(committed.receipt.consequence).toEqual(forecast);
   });
+
+  it('produces the same authoritative node movement for human and WebMCP execution', () => {
+    const humanBus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
+    const agentBus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
+    const observed = humanBus.inspect('buyer').workspace;
+    const node = observed.sketchDocument.nodes.find(
+      (candidate) => (candidate.sourceRefs?.length ?? 0) > 1,
+    )!;
+    const command: AttuneCommand = {
+      type: 'move_node',
+      nodeId: node.id,
+      position: { x: node.position.x + 1, y: node.position.y - 0.5 },
+    };
+
+    const humanResult = humanBus.execute(
+      command,
+      semanticEnvelope(humanBus, observed, command, 'human-node-move'),
+      human,
+    );
+    const agentObserved = agentBus.inspect('buyer').workspace;
+    const agentResult = agentBus.execute(
+      command,
+      semanticEnvelope(agentBus, agentObserved, command, 'agent-node-move'),
+      agent,
+    );
+
+    expect(humanResult.receipt.afterHash).toBe(agentResult.receipt.afterHash);
+    expect(humanResult.receipt.specHashAfter).toBe(agentResult.receipt.specHashAfter);
+    expect(humanResult.receipt.command).toBe('move_node');
+    expect(humanBus.receipts()).toHaveLength(1);
+    expect(humanResult.workspace.sketchDocument.source).toEqual(
+      expect.objectContaining({ status: 'modified', modifiedNodeIds: [node.id] }),
+    );
+    expect(
+      humanResult.workspace.sketchDocument.nodes.find(({ id }) => id === node.id)?.sourceRefs,
+    ).toEqual(node.sourceRefs);
+  });
 });
 
 describe('footprint-aware semantic concurrency', () => {
   it('safely rebases disjoint human and agent edits after workspace sequence advances', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
     const observed = bus.inspect('buyer').workspace;
-    const agentCommand = editCircle('sketch:rim:inner', 128);
+    const agentCommand = editCircle(observed, 0, 106);
     const staleAgentEnvelope = semanticEnvelope(bus, observed, agentCommand, 'agent-disjoint');
-    const humanCommand = editCircle('sketch:hub:outer', 42);
+    const humanCommand = editCircle(observed, 1, 23);
     bus.execute(
       humanCommand,
       semanticEnvelope(bus, observed, humanCommand, 'human-disjoint'),
@@ -131,16 +176,20 @@ describe('footprint-aware semantic concurrency', () => {
       result.workspace.sketchDocument.entities.map((entity) => [entity.id, entity]),
     );
     expect(result.receipt.rebasedFromWorkspaceSeq).toBe(0);
-    expect(entities.get('sketch:rim:inner')).toEqual(expect.objectContaining({ radius: 128 }));
-    expect(entities.get('sketch:hub:outer')).toEqual(expect.objectContaining({ radius: 42 }));
+    expect(entities.get(agentCommand.entities[0].id)).toEqual(
+      expect.objectContaining({ radius: 106 }),
+    );
+    expect(entities.get(humanCommand.entities[0].id)).toEqual(
+      expect.objectContaining({ radius: 23 }),
+    );
   });
 
   it('rejects an overlapping entity edit with the exact changed semantic reference', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
     const observed = bus.inspect('buyer').workspace;
-    const agentCommand = editCircle('sketch:rim:outer', 152);
+    const agentCommand = editCircle(observed, 0, 111);
     const staleAgentEnvelope = semanticEnvelope(bus, observed, agentCommand, 'agent-overlap');
-    const humanCommand = editCircle('sketch:rim:outer', 151);
+    const humanCommand = editCircle(observed, 0, 110);
     bus.execute(
       humanCommand,
       semanticEnvelope(bus, observed, humanCommand, 'human-overlap'),
@@ -150,7 +199,7 @@ describe('footprint-aware semantic concurrency', () => {
     expect(() => bus.execute(agentCommand, staleAgentEnvelope, agent)).toThrowError(
       expect.objectContaining({
         code: 'REVALIDATION_REQUIRED',
-        changedEntities: ['sketch:rim:outer'],
+        changedEntities: [agentCommand.entities[0].id],
       }),
     );
   });
@@ -158,14 +207,14 @@ describe('footprint-aware semantic concurrency', () => {
   it('surfaces the human intervention on the next agent observation', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
     const observed = bus.inspect('buyer').workspace;
-    const command = editCircle('sketch:hub:bore', 17);
+    const command = editCircle(observed, 1, 22);
     bus.execute(command, semanticEnvelope(bus, observed, command, 'human-observed'), human);
 
     expect(bus.inspect('buyer', 0).observation.interventions).toEqual([
       expect.objectContaining({
         origin: 'human_ui',
         command: 'edit_geometry',
-        affectedEntities: expect.arrayContaining(['sketch:hub:bore']),
+        affectedEntities: expect.arrayContaining([command.entities[0].id]),
       }),
     ]);
   });
@@ -174,8 +223,8 @@ describe('footprint-aware semantic concurrency', () => {
 describe('semantic delegation authorization', () => {
   it('denies a delegation that does not include edit authority', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME, solver);
-    const command = editCircle('sketch:hub:bore', 17);
     const observed = bus.inspect('buyer').workspace;
+    const command = editCircle(observed, 1, 22);
     const restricted: TrustedExecutionContext = {
       ...agent,
       delegation: delegation(['compare_valid_changes']),

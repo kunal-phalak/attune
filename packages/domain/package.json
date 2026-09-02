@@ -5,12 +5,15 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./editor": "./src/editor.ts",
     "./sketch": "./src/sketch/index.ts",
-    "./planegcs": "./src/solver/planegcs-adapter.ts"
+    "./planegcs": "./src/solver/planegcs-runtime.ts",
+    "./planegcs-core": "./src/solver/planegcs-adapter.ts"
   },
   "dependencies": {
     "@salusoft89/planegcs": "1.2.0",
-    "makerjs": "0.19.2"
+    "makerjs": "0.19.2",
+    "makerjs-spokes-straight": "1.1.2"
   },
   "devDependencies": {
     "@types/node": "24.10.1",

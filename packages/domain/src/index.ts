@@ -15,5 +15,6 @@ export * from './sketch/dimensions';
 export * from './sketch/document';
 export * from './sketch/geometry';
 export * from './sketch/groups';
+export * from './sketch/topology';
 export * from './solver/solver';
 export * from './workspace';

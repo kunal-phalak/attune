@@ -1,8 +1,17 @@
 import { constraintEntityIds, validateConstraintInput, type ConstraintInput } from './constraints';
 import { validateDimensionInput, type DimensionInput } from './dimensions';
-import { publicReferenceVersion, type SketchDocument } from './document';
-import { validateGeometryEntity, type GeometryInput, type GeometryPatch } from './geometry';
+import { moveSketchNode, publicReferenceVersion, type SketchDocument } from './document';
+import {
+  arcPoint,
+  geometryNodeIds,
+  synchronizeGeometryWithNodes,
+  validateGeometryEntity,
+  type GeometryInput,
+  type GeometryPatch,
+  type SketchPoint2D,
+} from './geometry';
 import { validateGroupInput, type GroupInput } from './groups';
+import { ensureGeometryTopology, incidentEntityIds } from './topology';
 
 export type SketchCommand =
   | {
@@ -11,6 +20,7 @@ export type SketchCommand =
       readonly groupId?: string;
     }
   | { readonly type: 'edit_geometry'; readonly entities: readonly GeometryPatch[] }
+  | { readonly type: 'move_node'; readonly nodeId: string; readonly position: SketchPoint2D }
   | { readonly type: 'delete_geometry'; readonly entityIds: readonly string[] }
   | { readonly type: 'create_group'; readonly groups: readonly GroupInput[] }
   | {
@@ -31,6 +41,7 @@ export interface CommandFootprint {
   readonly writes: readonly string[];
   readonly versions: Readonly<Record<string, number>>;
   readonly entityIds: readonly string[];
+  readonly nodeIds: readonly string[];
   readonly groupIds: readonly string[];
   readonly constraintIds: readonly string[];
   readonly dimensionIds: readonly string[];
@@ -48,6 +59,7 @@ export function isSketchCommand(command: { readonly type: string }): command is 
   return [
     'create_geometry',
     'edit_geometry',
+    'move_node',
     'delete_geometry',
     'create_group',
     'move_to_group',
@@ -77,6 +89,11 @@ function footprintReferences(document: SketchDocument, command: SketchCommand) {
       };
     case 'edit_geometry':
       return { reads: [], writes: command.entities.map(({ id }) => id) };
+    case 'move_node':
+      return {
+        reads: [],
+        writes: [command.nodeId, ...incidentEntityIds(document.entities, command.nodeId)],
+      };
     case 'delete_geometry': {
       const entitySet = new Set(command.entityIds);
       const dependentConstraints = document.constraints.filter((constraint) =>
@@ -144,6 +161,7 @@ export function commandFootprint(
   );
   const allReferences = unique([...reads, ...writes]);
   const entityIds = new Set(document.entities.map(({ id }) => id));
+  const nodeIds = new Set((document.nodes ?? []).map(({ id }) => id));
   const groupIds = new Set(document.groups.map(({ id }) => id));
   const constraintIds = new Set(document.constraints.map(({ id }) => id));
   const dimensionIds = new Set(document.dimensions.map(({ id }) => id));
@@ -162,6 +180,7 @@ export function commandFootprint(
     writes,
     versions,
     entityIds: allReferences.filter((id) => entityIds.has(id)),
+    nodeIds: allReferences.filter((id) => nodeIds.has(id)),
     groupIds: allReferences.filter((id) => groupIds.has(id)),
     constraintIds: allReferences.filter((id) => constraintIds.has(id)),
     dimensionIds: allReferences.filter((id) => dimensionIds.has(id)),
@@ -196,6 +215,58 @@ function advance(document: SketchDocument, changes: Partial<SketchDocument>): Sk
   return { ...document, ...changes, revision: document.revision + 1, lastSolve: undefined };
 }
 
+function samePoint(first: SketchPoint2D, second: SketchPoint2D): boolean {
+  return first.x === second.x && first.y === second.y;
+}
+
+function editGeometryWithTopology(
+  document: SketchDocument,
+  patches: ReadonlyMap<string, GeometryPatch>,
+): {
+  readonly entities: SketchDocument['entities'];
+  readonly nodes: SketchDocument['nodes'];
+  readonly source: SketchDocument['source'];
+} {
+  const positions = new Map<string, SketchPoint2D>();
+  const patched = document.entities.map((entity) => {
+    const patch = patches.get(entity.id);
+    if (!patch) return entity;
+    if (patch.kind !== entity.kind) throw new TypeError(`${entity.id} cannot change kind.`);
+    const next = { ...entity, ...patch, version: entity.version + 1 } as typeof entity;
+    validateGeometryEntity(next);
+    if (next.kind === 'point' && next.nodeId) positions.set(next.nodeId, next.position);
+    if (next.kind === 'line') {
+      if (next.startNodeId) positions.set(next.startNodeId, next.start);
+      if (next.endNodeId) positions.set(next.endNodeId, next.end);
+    }
+    if (next.kind === 'circle' && next.centerNodeId) positions.set(next.centerNodeId, next.center);
+    if (next.kind === 'arc') {
+      if (next.centerNodeId) positions.set(next.centerNodeId, next.center);
+      if (next.startNodeId) positions.set(next.startNodeId, arcPoint(next, next.startAngle));
+      if (next.endNodeId) positions.set(next.endNodeId, arcPoint(next, next.endAngle));
+    }
+    return next;
+  });
+  const modifiedNodeIds: string[] = [];
+  const nodes = (document.nodes ?? []).map((node) => {
+    const position = positions.get(node.id);
+    if (!position || samePoint(position, node.position)) return node;
+    modifiedNodeIds.push(node.id);
+    return Object.assign({}, node, { position, version: node.version + 1 });
+  });
+  const source =
+    document.source && modifiedNodeIds.length > 0
+      ? {
+          ...document.source,
+          status: 'modified' as const,
+          modifiedNodeIds: [
+            ...new Set([...(document.source.modifiedNodeIds ?? []), ...modifiedNodeIds]),
+          ].toSorted(),
+        }
+      : document.source;
+  return { entities: synchronizeGeometryWithNodes(patched, nodes), nodes, source };
+}
+
 export function applySketchCommand(
   source: SketchDocument,
   command: SketchCommand,
@@ -211,10 +282,12 @@ export function applySketchCommand(
       if (command.groupId && !document.groups.some(({ id }) => id === command.groupId)) {
         throw new TypeError(`Unknown target group ${command.groupId}.`);
       }
-      const entities = [
+      const combined = [
         ...document.entities,
         ...command.entities.map((entity) => ({ ...entity, version: 1 })),
-      ];
+      ] as typeof document.entities;
+      const topology = ensureGeometryTopology(combined, document.nodes ?? []);
+      const entities = topology.entities;
       const groups = command.groupId
         ? document.groups.map((group) =>
             group.id === command.groupId
@@ -227,7 +300,7 @@ export function applySketchCommand(
           )
         : document.groups;
       return {
-        document: advance(document, { entities, groups }),
+        document: advance(document, { entities, nodes: topology.nodes, groups }),
         affectedEntities: unique([...ids, ...(command.groupId ? [command.groupId] : [])]),
         addedConstraints: [],
         removedConstraints: [],
@@ -238,17 +311,26 @@ export function applySketchCommand(
       ensureUniqueCommandIds(ids, 'edit_geometry');
       ensureReferencedEntities(document, ids);
       const patches = new Map(command.entities.map((patch) => [patch.id, patch]));
-      const entities = document.entities.map((entity) => {
-        const patch = patches.get(entity.id);
-        if (!patch) return entity;
-        if (patch.kind !== entity.kind) throw new TypeError(`${entity.id} cannot change kind.`);
-        const next = { ...entity, ...patch, version: entity.version + 1 } as typeof entity;
-        validateGeometryEntity(next);
-        return next;
-      });
+      const edited = editGeometryWithTopology(document, patches);
       return {
-        document: advance(document, { entities }),
+        document: advance(document, edited),
         affectedEntities: unique(ids),
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'move_node': {
+      const moved = moveSketchNode(document, command.nodeId, command.position);
+      return {
+        document: advance(document, {
+          nodes: moved.nodes,
+          entities: moved.entities,
+          source: moved.source,
+        }),
+        affectedEntities: unique([
+          command.nodeId,
+          ...incidentEntityIds(document.entities, command.nodeId),
+        ]),
         addedConstraints: [],
         removedConstraints: [],
       };
@@ -272,9 +354,12 @@ export function applySketchCommand(
           ? group
           : { ...group, entityIds, version: group.version + 1 };
       });
+      const remainingEntities = document.entities.filter(({ id }) => !removing.has(id));
+      const referencedNodes = new Set(remainingEntities.flatMap(geometryNodeIds));
       return {
         document: advance(document, {
-          entities: document.entities.filter(({ id }) => !removing.has(id)),
+          nodes: (document.nodes ?? []).filter(({ id }) => referencedNodes.has(id)),
+          entities: remainingEntities,
           constraints,
           dimensions,
           groups,

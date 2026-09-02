@@ -34,8 +34,17 @@ function entityShape(entity: GeometryEntity): unknown {
 
 function normalizeSolvedVersions(before: SketchDocument, solved: SketchDocument): SketchDocument {
   const previous = new Map(before.entities.map((entity) => [entity.id, entity]));
+  const previousNodes = new Map((before.nodes ?? []).map((node) => [node.id, node]));
   return {
     ...solved,
+    nodes: (solved.nodes ?? []).map((node) => {
+      const prior = previousNodes.get(node.id);
+      if (!prior) return Object.assign({}, node, { version: 1 });
+      const changed = hashCanonical(prior.position) !== hashCanonical(node.position);
+      return Object.assign({}, node, {
+        version: changed ? Math.max(node.version, prior.version + 1) : node.version,
+      });
+    }),
     entities: solved.entities.map((entity) => {
       const prior = previous.get(entity.id);
       if (!prior) return { ...entity, version: 1 };

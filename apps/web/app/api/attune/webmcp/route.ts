@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       'move_slot',
       'create_geometry',
       'edit_geometry',
+      'move_node',
       'delete_geometry',
       'create_group',
       'move_to_group',

@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const command = parseForecastCommandInput(await request.json(), [
       'create_geometry',
       'edit_geometry',
+      'move_node',
       'delete_geometry',
       'create_group',
       'move_to_group',

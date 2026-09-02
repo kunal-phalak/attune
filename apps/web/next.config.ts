@@ -12,6 +12,21 @@ if (existsSync(workspaceEnvironment)) {
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  webpack(config, { isServer, webpack }) {
+    if (!isServer) {
+      config.plugins.push(
+        new webpack.IgnorePlugin({
+          resourceRegExp: /^(?:fs|module|path|url)$/,
+          contextRegExp: /@salusoft89[/\\]planegcs[/\\]dist[/\\]planegcs_dist/,
+        }),
+      );
+      config.module.rules.push({
+        test: /planegcs_dist[/\\]planegcs\.js$/,
+        parser: { url: false },
+      });
+    }
+    return config;
+  },
   serverExternalPackages: [
     '@neondatabase/serverless',
     '@salusoft89/planegcs',

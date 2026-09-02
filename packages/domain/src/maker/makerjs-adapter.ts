@@ -1,79 +1,119 @@
 import makerjs from 'makerjs';
+// @ts-expect-error The published CommonJS generator does not include TypeScript declarations.
+import StraightSpokesModule from 'makerjs-spokes-straight';
+import straightSpokesMetadata from 'makerjs-spokes-straight/package.json';
+import makerjsMetadata from 'makerjs/package.json';
 
-import { createSketchDocument, type SketchDocument } from '../sketch/document';
-import type { GeometryEntity, GeometryInput, SketchBounds } from '../sketch/geometry';
+import { hashCanonical } from '../hash';
+import {
+  createSketchDocument,
+  type MakerGeneratorSource,
+  type MakerModelSource,
+  type SketchDocument,
+  type SketchParameter,
+  type SketchSource,
+} from '../sketch/document';
+import {
+  arcPoint,
+  normalizedAngle,
+  positiveArcSweep,
+  synchronizeGeometryWithNodes,
+  type GeometryEntity,
+  type GeometryInput,
+  type MakerPathSourceRef,
+  type SketchBounds,
+  type SketchPoint2D,
+} from '../sketch/geometry';
+import type { SketchGroup } from '../sketch/groups';
+import { TOPOLOGY_EPSILON_MM } from '../sketch/topology';
 
-export interface SpokeSeedParameters {
-  readonly outerRadius: number;
-  readonly innerRimRadius: number;
-  readonly hubRadius: number;
-  readonly boreRadius: number;
-  readonly spokeCount: 6;
-  readonly spokeWidth: number;
+interface StraightSpokesConstructor {
+  new (
+    outerRadius: number,
+    innerRadius: number,
+    count: number,
+    spokeWidth: number,
+    offsetPercent: number,
+    innerFillet: number,
+    outerFillet: number,
+    addRing: boolean,
+  ): MakerJs.IModel;
 }
 
-export const DEFAULT_SPOKE_PARAMETERS: SpokeSeedParameters = {
-  outerRadius: 150,
-  innerRimRadius: 132,
-  hubRadius: 38,
-  boreRadius: 16,
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- narrow boundary for an untyped package.
+const StraightSpokes = StraightSpokesModule as StraightSpokesConstructor;
+
+export interface StraightSpokesParameters {
+  readonly outerRadius: number;
+  readonly innerRadius: number;
+  readonly spokeCount: number;
+  readonly spokeWidth: number;
+  readonly offsetPercent: number;
+  readonly innerFillet: number;
+  readonly outerFillet: number;
+  readonly addRing: boolean;
+}
+
+/** One exact, source-visible fixture for the editor seed and parity tests. */
+export const STRAIGHT_SPOKES_FIXTURE: StraightSpokesParameters = {
+  outerRadius: 100,
+  innerRadius: 34,
   spokeCount: 6,
-  spokeWidth: 12,
+  spokeWidth: 9,
+  offsetPercent: 62,
+  innerFillet: 3,
+  outerFillet: 3,
+  addRing: true,
 };
 
-function createMakerSpokeModel(parameters: SpokeSeedParameters): MakerJs.IModel {
-  const halfWidth = parameters.spokeWidth / 2;
-  const baseSpoke: MakerJs.IModel = {
-    layer: 'Spokes',
-    paths: {
-      left: new makerjs.paths.Line(
-        [parameters.hubRadius, -halfWidth],
-        [parameters.innerRimRadius, -halfWidth],
-      ),
-      right: new makerjs.paths.Line(
-        [parameters.hubRadius, halfWidth],
-        [parameters.innerRimRadius, halfWidth],
-      ),
-    },
-  };
-  return {
-    paths: {
-      outer: new makerjs.paths.Circle([0, 0], parameters.outerRadius),
-      innerRim: new makerjs.paths.Circle([0, 0], parameters.innerRimRadius),
-      hub: new makerjs.paths.Circle([0, 0], parameters.hubRadius),
-      bore: new makerjs.paths.Circle([0, 0], parameters.boreRadius),
-    },
-    models: {
-      spokes: makerjs.layout.cloneToRadial(
-        baseSpoke,
-        parameters.spokeCount,
-        360 / parameters.spokeCount,
-      ),
-    },
-  };
+/** Compatibility alias retained for callers of the previous seed helper. */
+export const DEFAULT_SPOKE_PARAMETERS = STRAIGHT_SPOKES_FIXTURE;
+
+export interface MakerJsImportOptions {
+  readonly documentId?: string;
+  readonly name?: string;
+  readonly sourceUnits?: string;
+  readonly topologyEpsilon?: number;
+  readonly source?:
+    | Omit<MakerGeneratorSource, 'units' | 'status'>
+    | Omit<MakerModelSource, 'units' | 'status'>;
+  readonly parameters?: readonly SketchParameter[];
 }
 
-function point(value: MakerJs.IPoint, offset: MakerJs.IPoint) {
-  return { x: value[0] + offset[0], y: value[1] + offset[1] };
+interface WalkedPath {
+  readonly path: MakerJs.IPath;
+  readonly sourceRef: MakerPathSourceRef;
+  readonly offset: MakerJs.IPoint;
 }
 
-function stableEntityId(route: readonly string[]): string {
-  const pathId = route.at(-1);
-  if (route[0] === 'paths') {
-    const named: Readonly<Record<string, string>> = {
-      outer: 'sketch:rim:outer',
-      innerRim: 'sketch:rim:inner',
-      hub: 'sketch:hub:outer',
-      bore: 'sketch:hub:bore',
-    };
-    return named[pathId ?? ''] ?? `sketch:path:${pathId}`;
-  }
-  const radialModelIndex = route.find((part) => /^\d+$/.test(part));
-  if (radialModelIndex === undefined || !pathId) {
-    throw new TypeError(`Maker.js produced an unexpected spoke route: ${route.join('/')}.`);
-  }
-  const spokeIndex = Number(radialModelIndex) + 1;
-  return `sketch:spoke:${spokeIndex}:${pathId}`;
+interface WalkedModel {
+  readonly route: readonly string[];
+  readonly routeKey: string;
+  readonly layer?: string;
+}
+
+function safeSlug(value: string): string {
+  return (
+    value
+      .normalize('NFKD')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 36) || 'path'
+  );
+}
+
+function stableEntityId(sourceRef: MakerPathSourceRef): string {
+  return `maker:path:${safeSlug(sourceRef.pathId ?? 'path')}:${hashCanonical(sourceRef.routeKey).slice(0, 16)}`;
+}
+
+function routeToken(route: readonly string[]): string {
+  return route.join('\u001f');
+}
+
+function stableGroupId(model: WalkedModel): string {
+  if (model.route.length === 0) return 'maker:group:root';
+  const name = model.route.at(-1) ?? 'model';
+  return `maker:group:${safeSlug(name)}:${hashCanonical(model.routeKey).slice(0, 12)}`;
 }
 
 function isMakerLine(path: MakerJs.IPath): path is MakerJs.IPathLine {
@@ -88,117 +128,250 @@ function isMakerArc(path: MakerJs.IPath): path is MakerJs.IPathArc {
   return makerjs.isPathArc(path);
 }
 
-function attuneGeometryFromMaker(model: MakerJs.IModel): readonly GeometryInput[] {
-  const entities: GeometryInput[] = [];
+function worldPoint(value: MakerJs.IPoint, offset: MakerJs.IPoint, scale: number): SketchPoint2D {
+  return { x: (value[0] + offset[0]) * scale, y: (value[1] + offset[1]) * scale };
+}
+
+function walkMakerModel(model: MakerJs.IModel): {
+  readonly paths: readonly WalkedPath[];
+  readonly models: readonly WalkedModel[];
+} {
+  const paths: WalkedPath[] = [];
+  const models: WalkedModel[] = [{ route: [], routeKey: '$' }];
   makerjs.model.walk(model, {
+    beforeChildWalk(context) {
+      models.push({
+        route: [...context.route],
+        routeKey: context.routeKey,
+        ...(context.layer ? { layer: context.layer } : {}),
+      });
+      return true;
+    },
     onPath(context) {
-      const id = stableEntityId(context.route);
-      const path = context.pathContext;
-      if (isMakerLine(path)) {
-        entities.push({
-          id,
-          kind: 'line',
-          name: id.split(':').slice(-2).join(' '),
-          start: point(path.origin, context.offset),
-          end: point(path.end, context.offset),
-        });
-      } else if (isMakerCircle(path)) {
-        entities.push({
-          id,
-          kind: 'circle',
-          name: id.split(':').slice(-2).join(' '),
-          center: point(path.origin, context.offset),
-          radius: path.radius,
-        });
-      } else if (isMakerArc(path)) {
-        entities.push({
-          id,
-          kind: 'arc',
-          name: id.split(':').slice(-2).join(' '),
-          center: point(path.origin, context.offset),
-          radius: path.radius,
-          startAngle: makerjs.angle.toRadians(path.startAngle),
-          endAngle: makerjs.angle.toRadians(path.endAngle),
-        });
-      }
+      paths.push({
+        path: context.pathContext,
+        sourceRef: {
+          kind: 'maker-path',
+          routeKey: context.routeKey,
+          route: [...context.route],
+          ...(context.layer ? { layer: context.layer } : {}),
+          ...(context.pathId ? { pathId: context.pathId } : {}),
+        },
+        offset: [context.offset[0], context.offset[1]],
+      });
     },
   });
-  return entities;
+  return {
+    paths: paths.toSorted((left, right) =>
+      left.sourceRef.routeKey.localeCompare(right.sourceRef.routeKey),
+    ),
+    models: models
+      .filter(
+        (modelContext, index, all) =>
+          all.findIndex(({ route }) => routeToken(route) === routeToken(modelContext.route)) ===
+          index,
+      )
+      .toSorted(
+        (left, right) =>
+          left.route.length - right.route.length || left.routeKey.localeCompare(right.routeKey),
+      ),
+  };
+}
+
+function geometryFromWalkedPath(walked: WalkedPath, scale: number): GeometryInput {
+  const id = stableEntityId(walked.sourceRef);
+  const name = walked.sourceRef.pathId ?? id;
+  const base = { id, name, sourceRef: walked.sourceRef };
+  if (isMakerLine(walked.path)) {
+    return {
+      ...base,
+      kind: 'line',
+      start: worldPoint(walked.path.origin, walked.offset, scale),
+      end: worldPoint(walked.path.end, walked.offset, scale),
+    };
+  }
+  if (isMakerCircle(walked.path)) {
+    return {
+      ...base,
+      kind: 'circle',
+      center: worldPoint(walked.path.origin, walked.offset, scale),
+      radius: walked.path.radius * scale,
+    };
+  }
+  if (isMakerArc(walked.path)) {
+    const startAngle = normalizedAngle(makerjs.angle.toRadians(walked.path.startAngle));
+    const sweep = makerjs.angle.toRadians(makerjs.angle.ofArcSpan(walked.path));
+    return {
+      ...base,
+      kind: 'arc',
+      center: worldPoint(walked.path.origin, walked.offset, scale),
+      radius: walked.path.radius * scale,
+      startAngle,
+      endAngle: startAngle + sweep,
+    };
+  }
+  throw new TypeError(`Unsupported Maker.js path at ${walked.sourceRef.routeKey}.`);
+}
+
+function groupsFromWalk(
+  walked: ReturnType<typeof walkMakerModel>,
+  entities: readonly GeometryEntity[],
+): readonly SketchGroup[] {
+  const models = walked.models;
+  const groupIdByRoute = new Map(
+    models.map((model) => [routeToken(model.route), stableGroupId(model)]),
+  );
+  const entityIdByRouteKey = new Map(
+    entities.flatMap((entity) =>
+      entity.sourceRef ? [[entity.sourceRef.routeKey, entity.id] as const] : [],
+    ),
+  );
+  return models.map((model): SketchGroup => {
+    const childModels = models.filter(
+      ({ route }) =>
+        route.length === model.route.length + 2 &&
+        routeToken(route.slice(0, -2)) === routeToken(model.route),
+    );
+    const entityIds = walked.paths
+      .filter(
+        ({ sourceRef }) => routeToken(sourceRef.route.slice(0, -2)) === routeToken(model.route),
+      )
+      .flatMap(({ sourceRef }) => {
+        const id = entityIdByRouteKey.get(sourceRef.routeKey);
+        return id ? [id] : [];
+      })
+      .toSorted();
+    const childGroupIds = childModels
+      .flatMap((child) => {
+        const id = groupIdByRoute.get(routeToken(child.route));
+        return id ? [id] : [];
+      })
+      .toSorted();
+    const group: SketchGroup = {
+      id: stableGroupId(model),
+      version: 1,
+      name: model.route.length === 0 ? 'Maker.js source' : (model.route.at(-1) ?? 'Model'),
+      entityIds,
+      sourceRef: {
+        kind: 'maker-model',
+        routeKey: model.routeKey,
+        route: model.route,
+        ...(model.layer ? { layer: model.layer } : {}),
+      },
+    };
+    return childGroupIds.length > 0 ? Object.assign({}, group, { childGroupIds }) : group;
+  });
+}
+
+function importUnits(model: MakerJs.IModel, options: MakerJsImportOptions) {
+  const source = model.units ?? options.sourceUnits ?? makerjs.unitType.Millimeter;
+  const assumed = model.units === undefined;
+  const scale = makerjs.units.conversionScale(source, makerjs.unitType.Millimeter);
+  if (!Number.isFinite(scale) || scale <= 0) {
+    throw new TypeError(`Unsupported Maker.js units: ${source}.`);
+  }
+  return { source, internal: 'mm' as const, scale, assumed };
+}
+
+export function importMakerJsModel(
+  model: MakerJs.IModel,
+  options: MakerJsImportOptions = {},
+): SketchDocument {
+  if ((options.topologyEpsilon ?? TOPOLOGY_EPSILON_MM) !== TOPOLOGY_EPSILON_MM) {
+    throw new TypeError('Attune documents use one canonical topology epsilon.');
+  }
+  const walked = walkMakerModel(model);
+  const units = importUnits(model, options);
+  const source: SketchSource = options.source
+    ? { ...options.source, units, status: 'pristine' }
+    : {
+        kind: 'maker-model',
+        package: 'makerjs',
+        packageVersion: makerjsMetadata.version,
+        units,
+        status: 'pristine',
+      };
+  const versioned = walked.paths.map((path) => ({
+    ...geometryFromWalkedPath(path, units.scale),
+    version: 1,
+  })) as GeometryEntity[];
+  const document = createSketchDocument({
+    id:
+      options.documentId ??
+      `sketch:maker:${hashCanonical(walked.paths.map(({ sourceRef }) => sourceRef.routeKey)).slice(0, 16)}`,
+    name: options.name ?? 'Imported Maker.js model',
+    entities: versioned,
+    constraints: [],
+    dimensions: [],
+    groups: [],
+    parameters: options.parameters ?? [],
+    source,
+  });
+  return { ...document, groups: groupsFromWalk(walked, document.entities) };
+}
+
+export function createStraightSpokesModel(
+  parameters: StraightSpokesParameters = STRAIGHT_SPOKES_FIXTURE,
+): MakerJs.IModel {
+  return new StraightSpokes(
+    parameters.outerRadius,
+    parameters.innerRadius,
+    parameters.spokeCount,
+    parameters.spokeWidth,
+    parameters.offsetPercent,
+    parameters.innerFillet,
+    parameters.outerFillet,
+    parameters.addRing,
+  );
+}
+
+function seedParameters(parameters: StraightSpokesParameters): readonly SketchParameter[] {
+  const values: readonly (readonly [
+    id: string,
+    name: string,
+    value: number,
+    unit: SketchParameter['unit'],
+  ])[] = [
+    ['outer-radius', 'Outer radius', parameters.outerRadius, 'mm'],
+    ['inner-radius', 'Inner radius', parameters.innerRadius, 'mm'],
+    ['spoke-count', 'Spoke count', parameters.spokeCount, 'unitless'],
+    ['spoke-width', 'Spoke width', parameters.spokeWidth, 'mm'],
+    ['offset-percent', 'Spoke offset percent', parameters.offsetPercent, 'unitless'],
+    ['inner-fillet', 'Inner fillet', parameters.innerFillet, 'mm'],
+    ['outer-fillet', 'Outer fillet', parameters.outerFillet, 'mm'],
+    ['add-ring', 'Add ring', parameters.addRing ? 1 : 0, 'unitless'],
+  ];
+  return values.map(([id, name, value, unit]) => ({
+    id: `parameter:${id}`,
+    version: 1,
+    name,
+    value,
+    unit,
+  }));
 }
 
 export function createSpokeSeedDocument(
-  parameters: SpokeSeedParameters = DEFAULT_SPOKE_PARAMETERS,
+  parameters: StraightSpokesParameters = STRAIGHT_SPOKES_FIXTURE,
 ): SketchDocument {
-  const entities = attuneGeometryFromMaker(createMakerSpokeModel(parameters)).map((entity) =>
-    Object.assign({}, entity, { version: 1 }),
-  ) as GeometryEntity[];
-  const rimIds = ['sketch:rim:outer', 'sketch:rim:inner'];
-  const hubIds = ['sketch:hub:outer', 'sketch:hub:bore'];
-  const spokeIds = entities.filter(({ id }) => id.startsWith('sketch:spoke:')).map(({ id }) => id);
-  const concentricIds = ['sketch:rim:inner', 'sketch:hub:outer', 'sketch:hub:bore'];
-
-  return createSketchDocument({
-    id: 'sketch:spoke-wheel',
-    name: 'Parametric six-spoke wheel',
-    entities,
-    constraints: concentricIds.map((entityId, index) => ({
-      id: `constraint:spoke-seed:concentric:${index + 1}`,
-      version: 1,
-      type: 'concentric' as const,
-      refs: [
-        { entityId: 'sketch:rim:outer', anchor: 'center' },
-        { entityId, anchor: 'center' },
-      ],
-    })),
-    dimensions: [],
-    groups: [
-      { id: 'group:rim', version: 1, name: 'Rim', entityIds: rimIds },
-      { id: 'group:hub', version: 1, name: 'Hub', entityIds: hubIds },
-      { id: 'group:spokes', version: 1, name: 'Spokes', entityIds: spokeIds },
-    ],
-    parameters: [
-      {
-        id: 'parameter:outer-radius',
-        version: 1,
-        name: 'Outer radius',
-        value: parameters.outerRadius,
-        unit: 'mm',
-      },
-      {
-        id: 'parameter:inner-rim-radius',
-        version: 1,
-        name: 'Inner rim radius',
-        value: parameters.innerRimRadius,
-        unit: 'mm',
-      },
-      {
-        id: 'parameter:hub-radius',
-        version: 1,
-        name: 'Hub radius',
-        value: parameters.hubRadius,
-        unit: 'mm',
-      },
-      {
-        id: 'parameter:bore-radius',
-        version: 1,
-        name: 'Bore radius',
-        value: parameters.boreRadius,
-        unit: 'mm',
-      },
-      {
-        id: 'parameter:spoke-width',
-        version: 1,
-        name: 'Spoke width',
-        value: parameters.spokeWidth,
-        unit: 'mm',
-      },
-    ],
+  return importMakerJsModel(createStraightSpokesModel(parameters), {
+    documentId: 'sketch:spoke-wheel',
+    name: 'Exact Maker.js straight-spokes wheel',
+    sourceUnits: makerjs.unitType.Millimeter,
+    source: {
+      kind: 'maker-generator',
+      package: straightSpokesMetadata.name,
+      packageVersion: straightSpokesMetadata.version,
+      generator: 'StraightSpokes',
+      parameters: { ...parameters },
+    },
+    parameters: seedParameters(parameters),
   });
 }
 
 export function toMakerJsModel(document: SketchDocument): MakerJs.IModel {
   const paths: MakerJs.IPathMap = {};
-  for (const entity of document.entities) {
+  const entities = synchronizeGeometryWithNodes(document.entities, document.nodes ?? []);
+  for (const entity of entities) {
     switch (entity.kind) {
       case 'point':
         break;
@@ -218,13 +391,16 @@ export function toMakerJsModel(document: SketchDocument): MakerJs.IModel {
         paths[entity.id] = new makerjs.paths.Arc(
           [entity.center.x, entity.center.y],
           entity.radius,
-          makerjs.angle.toDegrees(entity.startAngle),
-          makerjs.angle.toDegrees(entity.endAngle),
+          makerjs.angle.toDegrees(normalizedAngle(entity.startAngle)),
+          makerjs.angle.toDegrees(
+            normalizedAngle(entity.startAngle) +
+              positiveArcSweep(entity.startAngle, entity.endAngle),
+          ),
         );
         break;
     }
   }
-  return { paths };
+  return { paths, units: makerjs.unitType.Millimeter };
 }
 
 export function measureSketch(document: SketchDocument): SketchBounds | null {
@@ -240,6 +416,13 @@ export function measureSketch(document: SketchDocument): SketchBounds | null {
 
 export function sketchToSvg(document: SketchDocument): string {
   return makerjs.exporter.toSVG(toMakerJsModel(document));
+}
+
+export function importedArcEndpoints(entity: Extract<GeometryEntity, { kind: 'arc' }>) {
+  return {
+    start: arcPoint(entity, entity.startAngle),
+    end: arcPoint(entity, entity.endAngle),
+  };
 }
 
 /** Future preview/export seam; current Attune editing remains strictly semantic 2D. */

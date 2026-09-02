@@ -218,6 +218,7 @@ export function isSketchCommandType(type: string): type is SketchCommandType {
   return [
     'create_geometry',
     'edit_geometry',
+    'move_node',
     'delete_geometry',
     'create_group',
     'move_to_group',
@@ -241,6 +242,13 @@ export function parseSketchCommand(value: Record<string, unknown>): AttuneComman
       return {
         type: value.type,
         entities: array(value.entities, 'entities', (candidate) => geometry(candidate, true)),
+      };
+    case 'move_node':
+      exact(value, ['type', 'nodeId', 'position'], 'move_node command');
+      return {
+        type: value.type,
+        nodeId: id(value.nodeId, 'nodeId'),
+        position: point(value.position, 'position'),
       };
     case 'delete_geometry':
       exact(value, ['type', 'entityIds'], 'delete_geometry command');

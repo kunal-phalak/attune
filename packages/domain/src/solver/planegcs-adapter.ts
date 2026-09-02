@@ -1,49 +1,62 @@
-import {
+import type {
   GcsWrapper,
-  SolveStatus,
-  make_gcs_wrapper,
-  type SketchArc as PlaneArc,
-  type SketchCircle as PlaneCircle,
-  type SketchParam as PlaneParam,
-  type SketchPoint as PlanePoint,
-  type SketchPrimitive as PlanePrimitive,
+  SketchArc as PlaneArc,
+  SketchCircle as PlaneCircle,
+  SketchParam as PlaneParam,
+  SketchPoint as PlanePoint,
+  SketchPrimitive as PlanePrimitive,
 } from '@salusoft89/planegcs';
 
-import { hashCanonical } from '../hash';
 import type { ConstraintValue, SketchConstraint } from '../sketch/constraints';
 import type { SketchDimension } from '../sketch/dimensions';
+import type { SketchDocument, SketchSolveStatus } from '../sketch/document';
 import {
-  geometryById,
-  sketchSpecification,
-  type SketchDocument,
-  type SketchSolveStatus,
-} from '../sketch/document';
-import { arcPoint, type GeometryEntity, type GeometryReference } from '../sketch/geometry';
-import type { ConstraintSolveResult, ConstraintSolver, SolverDiagnostic } from './solver';
+  arcPoint,
+  geometryAnchorNodeId,
+  geometryNodeIds,
+  synchronizeArcFromPoints,
+  synchronizeGeometryWithNodes,
+  type GeometryEntity,
+  type GeometryReference,
+} from '../sketch/geometry';
+import type {
+  ConstraintSolveResult,
+  ConstraintSolver,
+  SolverDiagnostic,
+  TemporaryNodeTarget,
+} from './solver';
 
-interface Projection {
+export interface PlaneGcsProjectionMap {
+  readonly nodeToPrimitive: Readonly<Record<string, string>>;
+  readonly entityToPrimitive: Readonly<Record<string, string>>;
+  readonly constraintToPrimitive: Readonly<Record<string, string>>;
+}
+
+export interface PlaneGcsProjection {
   readonly primitives: (PlanePrimitive | PlaneParam)[];
   readonly diagnostics: SolverDiagnostic[];
   readonly internalConstraintOwners: ReadonlyMap<string, string>;
+  readonly map: PlaneGcsProjectionMap;
+}
+
+/** Suppresses sub-micron numerical noise when mapping an otherwise unchanged solve back to Attune. */
+export const SOLVER_BACK_PROJECTION_EPSILON_MM = 1e-7;
+
+function geometryById(document: SketchDocument, id: string): GeometryEntity | undefined {
+  return document.entities.find((candidate) => candidate.id === id);
+}
+
+function nodeById(document: SketchDocument, id: string) {
+  return document.nodes.find((candidate) => candidate.id === id);
+}
+
+function sketchSpecification(document: SketchDocument): Omit<SketchDocument, 'lastSolve'> {
+  const { lastSolve: _lastSolve, ...specification } = document;
+  return specification;
 }
 
 function internalPointId(reference: GeometryReference, entity: GeometryEntity): string | undefined {
-  const anchor = reference.anchor ?? 'self';
-  switch (entity.kind) {
-    case 'point':
-      return anchor === 'self' || anchor === 'center' ? entity.id : undefined;
-    case 'line':
-      if (anchor === 'start') return `${entity.id}:start`;
-      if (anchor === 'end') return `${entity.id}:end`;
-      return undefined;
-    case 'circle':
-    case 'arc':
-      if (anchor === 'self' || anchor === 'center') return `${entity.id}:center`;
-      if (entity.kind === 'arc' && anchor === 'start') return `${entity.id}:start`;
-      if (entity.kind === 'arc' && anchor === 'end') return `${entity.id}:end`;
-      return undefined;
-  }
-  return undefined;
+  return geometryAnchorNodeId(entity, reference.anchor ?? 'self');
 }
 
 function constraintValue(value: ConstraintValue | undefined): number | string | undefined {
@@ -270,53 +283,32 @@ function projectRelation(
   return undefined;
 }
 
-function geometryPrimitives(
-  entity: GeometryEntity,
-  fixedPoints: ReadonlySet<string>,
-): PlanePrimitive[] {
-  const fixedPoint = (id: string, x: number, y: number): PlanePoint => ({
-    id,
-    type: 'point',
-    x,
-    y,
-    fixed: fixedPoints.has(id),
-  });
+function geometryPrimitive(entity: GeometryEntity): PlanePrimitive | undefined {
   switch (entity.kind) {
     case 'point':
-      return [fixedPoint(entity.id, entity.position.x, entity.position.y)];
+      return undefined;
     case 'line':
-      return [
-        fixedPoint(`${entity.id}:start`, entity.start.x, entity.start.y),
-        fixedPoint(`${entity.id}:end`, entity.end.x, entity.end.y),
-        { id: entity.id, type: 'line', p1_id: `${entity.id}:start`, p2_id: `${entity.id}:end` },
-      ];
+      if (!entity.startNodeId || !entity.endNodeId) return undefined;
+      return { id: entity.id, type: 'line', p1_id: entity.startNodeId, p2_id: entity.endNodeId };
     case 'circle':
-      return [
-        fixedPoint(`${entity.id}:center`, entity.center.x, entity.center.y),
-        { id: entity.id, type: 'circle', c_id: `${entity.id}:center`, radius: entity.radius },
-      ];
-    case 'arc': {
-      const start = arcPoint(entity, entity.startAngle);
-      const end = arcPoint(entity, entity.endAngle);
-      return [
-        fixedPoint(`${entity.id}:center`, entity.center.x, entity.center.y),
-        fixedPoint(`${entity.id}:start`, start.x, start.y),
-        fixedPoint(`${entity.id}:end`, end.x, end.y),
-        {
-          id: entity.id,
-          type: 'arc',
-          c_id: `${entity.id}:center`,
-          start_id: `${entity.id}:start`,
-          end_id: `${entity.id}:end`,
-          radius: entity.radius,
-          start_angle: entity.startAngle,
-          end_angle: entity.endAngle,
-        },
-        { id: `${entity.id}:arc-rules`, type: 'arc_rules', a_id: entity.id },
-      ];
-    }
+      return entity.centerNodeId
+        ? { id: entity.id, type: 'circle', c_id: entity.centerNodeId, radius: entity.radius }
+        : undefined;
+    case 'arc':
+      if (!entity.centerNodeId || !entity.startNodeId || !entity.endNodeId) return undefined;
+      return {
+        id: entity.id,
+        type: 'arc',
+        c_id: entity.centerNodeId,
+        start_id: entity.startNodeId,
+        end_id: entity.endNodeId,
+        radius: entity.radius,
+        start_angle: entity.startAngle,
+        end_angle: entity.endAngle,
+      };
+    default:
+      return undefined;
   }
-  return [];
 }
 
 function fixedPointIds(document: SketchDocument): ReadonlySet<string> {
@@ -325,21 +317,19 @@ function fixedPointIds(document: SketchDocument): ReadonlySet<string> {
     const reference = constraint.refs[0];
     const entity = reference && geometryById(document, reference.entityId);
     if (!reference || !entity) continue;
-    if (entity.kind === 'point') ids.add(entity.id);
-    if (entity.kind === 'line') {
-      ids.add(`${entity.id}:start`);
-      ids.add(`${entity.id}:end`);
-    }
-    if (entity.kind === 'circle' || entity.kind === 'arc') ids.add(`${entity.id}:center`);
-    if (entity.kind === 'arc') {
-      ids.add(`${entity.id}:start`);
-      ids.add(`${entity.id}:end`);
-    }
+    geometryNodeIds(entity).forEach((id) => ids.add(id));
   }
   return ids;
 }
 
-function projectDocument(document: SketchDocument): Projection {
+export function toPlaneGcs(
+  source: SketchDocument,
+  temporaryConstraints: readonly TemporaryNodeTarget[] = [],
+): PlaneGcsProjection {
+  const document: SketchDocument = {
+    ...source,
+    entities: synchronizeGeometryWithNodes(source.entities, source.nodes),
+  };
   const diagnostics: SolverDiagnostic[] = [];
   const owners = new Map<string, string>();
   const primitives: (PlanePrimitive | PlaneParam)[] = document.parameters.map((parameter) => ({
@@ -348,8 +338,38 @@ function projectDocument(document: SketchDocument): Projection {
     value: parameter.value,
   }));
   const fixedPoints = fixedPointIds(document);
-  for (const entity of document.entities)
-    primitives.push(...geometryPrimitives(entity, fixedPoints));
+  const nodeToPrimitive: Record<string, string> = {};
+  const entityToPrimitive: Record<string, string> = {};
+  const constraintToPrimitive: Record<string, string> = {};
+  for (const node of document.nodes) {
+    nodeToPrimitive[node.id] = node.id;
+    primitives.push({
+      id: node.id,
+      type: 'point',
+      x: node.position.x,
+      y: node.position.y,
+      fixed: fixedPoints.has(node.id),
+    });
+  }
+  for (const entity of document.entities) {
+    const primitive = geometryPrimitive(entity);
+    if (primitive) {
+      primitives.push(primitive);
+      entityToPrimitive[entity.id] = primitive.id;
+      if (entity.kind === 'arc') {
+        const arcRulesId = `${entity.id}:arc-rules`;
+        primitives.push({ id: arcRulesId, type: 'arc_rules', a_id: entity.id });
+        owners.set(arcRulesId, entity.id);
+      }
+    } else if (entity.kind === 'point' && entity.nodeId) {
+      entityToPrimitive[entity.id] = entity.nodeId;
+    } else {
+      diagnostics.push({
+        code: 'INVALID_REFERENCE',
+        message: `${entity.id} is missing canonical topology node references.`,
+      });
+    }
+  }
 
   for (const constraint of document.constraints) {
     if (constraint.type === 'fixed') {
@@ -362,6 +382,7 @@ function projectDocument(document: SketchDocument): Projection {
             : { id, type: 'arc_radius', a_id: entity.id, radius: entity.radius };
         primitives.push(projected);
         owners.set(id, constraint.id);
+        constraintToPrimitive[constraint.id] = id;
       }
       continue;
     }
@@ -382,6 +403,7 @@ function projectDocument(document: SketchDocument): Projection {
     }
     primitives.push(primitive);
     owners.set(primitive.id, constraint.id);
+    constraintToPrimitive[constraint.id] = primitive.id;
   }
 
   for (const dimension of document.dimensions.filter(({ driving }) => driving)) {
@@ -402,14 +424,47 @@ function projectDocument(document: SketchDocument): Projection {
     }
     primitives.push(primitive);
     owners.set(primitive.id, dimension.id);
+    constraintToPrimitive[dimension.id] = primitive.id;
   }
-  return { primitives, diagnostics, internalConstraintOwners: owners };
+  for (const target of [...temporaryConstraints].toSorted((left, right) =>
+    left.nodeId.localeCompare(right.nodeId),
+  )) {
+    if (!nodeById(document, target.nodeId)) {
+      diagnostics.push({
+        code: 'INVALID_REFERENCE',
+        message: `Temporary driver references unknown node ${target.nodeId}.`,
+      });
+      continue;
+    }
+    primitives.push(
+      {
+        id: `temporary:${target.nodeId}:x`,
+        type: 'coordinate_x',
+        p_id: target.nodeId,
+        x: target.position.x,
+        temporary: true,
+      },
+      {
+        id: `temporary:${target.nodeId}:y`,
+        type: 'coordinate_y',
+        p_id: target.nodeId,
+        y: target.position.y,
+        temporary: true,
+      },
+    );
+  }
+  return {
+    primitives,
+    diagnostics,
+    internalConstraintOwners: owners,
+    map: { nodeToPrimitive, entityToPrimitive, constraintToPrimitive },
+  };
 }
 
 function solveStatus(status: number): SketchSolveStatus {
-  if (status === SolveStatus.Success) return 'success';
-  if (status === SolveStatus.Converged) return 'converged';
-  if (status === SolveStatus.SuccessfulSolutionInvalid) return 'invalid_solution';
+  if (status === 0) return 'success';
+  if (status === 1) return 'converged';
+  if (status === 3) return 'invalid_solution';
   return 'failed';
 }
 
@@ -436,38 +491,64 @@ function planeArc(wrapper: GcsWrapper, id: string): PlaneArc {
 }
 
 function solvedDocument(document: SketchDocument, wrapper: GcsWrapper, status: SketchSolveStatus) {
+  const nodes = (document.nodes ?? []).map((node) => {
+    const solved = planePoint(wrapper, node.id);
+    const movement = Math.hypot(solved.x - node.position.x, solved.y - node.position.y);
+    return movement <= SOLVER_BACK_PROJECTION_EPSILON_MM
+      ? node
+      : Object.assign({}, node, { position: { x: solved.x, y: solved.y } });
+  });
+  const nodePositions = new Map(nodes.map((node) => [node.id, node.position]));
+  const position = (id: string | undefined, fallback: { readonly x: number; readonly y: number }) =>
+    (id ? nodePositions.get(id) : undefined) ?? fallback;
   const entities = document.entities.map((entity): GeometryEntity => {
     switch (entity.kind) {
-      case 'point': {
-        const point = planePoint(wrapper, entity.id);
-        return { ...entity, position: { x: point.x, y: point.y } };
-      }
-      case 'line': {
-        const start = planePoint(wrapper, `${entity.id}:start`);
-        const end = planePoint(wrapper, `${entity.id}:end`);
-        return { ...entity, start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y } };
-      }
-      case 'circle': {
-        const center = planePoint(wrapper, `${entity.id}:center`);
-        const circle = planeCircle(wrapper, entity.id);
-        return { ...entity, center: { x: center.x, y: center.y }, radius: circle.radius };
-      }
-      case 'arc': {
-        const center = planePoint(wrapper, `${entity.id}:center`);
-        const arc = planeArc(wrapper, entity.id);
+      case 'point':
+        return { ...entity, position: position(entity.nodeId, entity.position) };
+      case 'line':
         return {
           ...entity,
-          center: { x: center.x, y: center.y },
-          radius: arc.radius,
-          startAngle: arc.start_angle,
-          endAngle: arc.end_angle,
+          start: position(entity.startNodeId, entity.start),
+          end: position(entity.endNodeId, entity.end),
         };
+      case 'circle': {
+        const circle = planeCircle(wrapper, entity.id);
+        return {
+          ...entity,
+          center: position(entity.centerNodeId, entity.center),
+          radius:
+            Math.abs(circle.radius - entity.radius) <= SOLVER_BACK_PROJECTION_EPSILON_MM
+              ? entity.radius
+              : circle.radius,
+        };
+      }
+      case 'arc': {
+        const arc = planeArc(wrapper, entity.id);
+        const center = position(entity.centerNodeId, entity.center);
+        const start = position(entity.startNodeId, arcPoint(entity, entity.startAngle));
+        const end = position(entity.endNodeId, arcPoint(entity, entity.endAngle));
+        if (
+          center === entity.center &&
+          Math.hypot(
+            start.x - arcPoint(entity, entity.startAngle).x,
+            start.y - arcPoint(entity, entity.startAngle).y,
+          ) <= SOLVER_BACK_PROJECTION_EPSILON_MM &&
+          Math.hypot(
+            end.x - arcPoint(entity, entity.endAngle).x,
+            end.y - arcPoint(entity, entity.endAngle).y,
+          ) <= SOLVER_BACK_PROJECTION_EPSILON_MM &&
+          Math.abs(arc.radius - entity.radius) <= SOLVER_BACK_PROJECTION_EPSILON_MM
+        ) {
+          return entity;
+        }
+        return synchronizeArcFromPoints(entity, center, start, end, arc.radius);
       }
     }
     throw new TypeError('Unsupported geometry entity.');
   });
   return {
     ...document,
+    nodes,
     entities,
     lastSolve: { status, degreesOfFreedom: null, conflicts: [], redundant: [], diagnostics: [] },
   };
@@ -478,22 +559,36 @@ export class PlaneGcsConstraintSolver implements ConstraintSolver {
 
   private constructor(private readonly wrapper: GcsWrapper) {}
 
-  static async create(): Promise<PlaneGcsConstraintSolver> {
-    return new PlaneGcsConstraintSolver(await make_gcs_wrapper());
+  static fromWrapper(wrapper: GcsWrapper): PlaneGcsConstraintSolver {
+    return new PlaneGcsConstraintSolver(wrapper);
   }
 
-  solve(document: SketchDocument): ConstraintSolveResult {
-    const cacheKey = hashCanonical(sketchSpecification(document));
+  solve(
+    document: SketchDocument,
+    temporaryConstraints: readonly TemporaryNodeTarget[] = [],
+  ): ConstraintSolveResult {
+    if (temporaryConstraints.length > 0) {
+      return this.#solveUncached(document, temporaryConstraints);
+    }
+    // Runtime-local memoization only. Authoritative SHA hashing remains a server boundary.
+    const cacheKey = JSON.stringify(sketchSpecification(document));
     const cached = this.#cache.get(cacheKey);
     if (cached) return structuredClone(cached);
-    const result = this.#solveUncached(document);
+    const result = this.#solveUncached(document, []);
     if (this.#cache.size >= 128) this.#cache.delete(this.#cache.keys().next().value ?? '');
     this.#cache.set(cacheKey, structuredClone(result));
     return result;
   }
 
-  #solveUncached(document: SketchDocument): ConstraintSolveResult {
-    const projection = projectDocument(document);
+  #solveUncached(
+    source: SketchDocument,
+    temporaryConstraints: readonly TemporaryNodeTarget[],
+  ): ConstraintSolveResult {
+    const document: SketchDocument = {
+      ...source,
+      entities: synchronizeGeometryWithNodes(source.entities, source.nodes),
+    };
+    const projection = toPlaneGcs(document, temporaryConstraints);
     if (projection.diagnostics.length > 0) {
       return {
         status: 'unsupported',
@@ -546,16 +641,7 @@ export class PlaneGcsConstraintSolver implements ConstraintSolver {
         },
       };
       const solvedCoordinates = Object.fromEntries(
-        resultDocument.entities.flatMap((entity) => {
-          if (entity.kind === 'point') return [[entity.id, entity.position] as const];
-          if (entity.kind === 'line') {
-            return [
-              [`${entity.id}:start`, entity.start] as const,
-              [`${entity.id}:end`, entity.end] as const,
-            ];
-          }
-          return [[`${entity.id}:center`, entity.center] as const];
-        }),
+        resultDocument.nodes.map((node) => [node.id, node.position] as const),
       );
       return {
         status,
@@ -596,15 +682,4 @@ export class PlaneGcsConstraintSolver implements ConstraintSolver {
     this.#cache.clear();
     this.wrapper.destroy_gcs_module();
   }
-}
-
-export function createPlaneGcsSolver(): Promise<PlaneGcsConstraintSolver> {
-  return PlaneGcsConstraintSolver.create();
-}
-
-let sharedPlaneGcsSolver: Promise<PlaneGcsConstraintSolver> | undefined;
-
-export function getPlaneGcsSolver(): Promise<PlaneGcsConstraintSolver> {
-  sharedPlaneGcsSolver ??= createPlaneGcsSolver();
-  return sharedPlaneGcsSolver;
 }

@@ -71,7 +71,7 @@ function focus(input: unknown): AgentContextFocus {
   };
 }
 
-function modifyCommand(input: unknown): Readonly<Record<string, unknown>> {
+export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<string, unknown>> {
   const value = object(input, 'modify_geometry input');
   const operation = value.operation;
   if (operation === 'create_geometry') {
@@ -85,6 +85,13 @@ function modifyCommand(input: unknown): Readonly<Record<string, unknown>> {
   if (operation === 'edit_geometry') {
     exact(value, ['operation', 'entities'], 'edit_geometry input');
     return { type: operation, entities: collection(value.entities, 'entities') };
+  }
+  if (operation === 'move_node') {
+    exact(value, ['operation', 'node_id', 'position'], 'move_node input');
+    if (typeof value.node_id !== 'string' || value.node_id.length === 0) {
+      throw new TypeError('node_id is required.');
+    }
+    return { type: operation, nodeId: value.node_id, position: object(value.position, 'position') };
   }
   if (operation === 'delete_geometry') {
     exact(value, ['operation', 'entity_ids'], 'delete_geometry input');
@@ -221,7 +228,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'modify_geometry',
       title: 'Batch modify semantic geometry',
       description:
-        'Create, edit, or delete batches of Point, Line, Circle, and Arc entities, or create/move groups. One server request forecasts, solves, safely rebases disjoint edits, and commits through the command bus.',
+        'Create, edit, or delete semantic geometry, move a shared topology node, or create/move groups. One server request forecasts, solves, safely rebases disjoint edits, and commits through the command bus.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -230,6 +237,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
             enum: [
               'create_geometry',
               'edit_geometry',
+              'move_node',
               'delete_geometry',
               'create_group',
               'move_to_group',
@@ -239,13 +247,20 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
           entity_ids: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'string' } },
           groups: { type: 'array', minItems: 1, maxItems: 200, items: GROUP_SCHEMA },
           group_id: { type: 'string' },
+          node_id: { type: 'string' },
+          position: {
+            type: 'object',
+            properties: { x: { type: 'number' }, y: { type: 'number' } },
+            required: ['x', 'y'],
+            additionalProperties: false,
+          },
         },
         required: ['operation'],
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
       execute(input, execution) {
-        return runtime.execute(modifyCommand(input), execution?.signal);
+        return runtime.execute(parseModifyGeometryToolInput(input), execution?.signal);
       },
     },
     {

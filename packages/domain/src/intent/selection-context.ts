@@ -1,13 +1,22 @@
 import type { SketchConstraint } from '../sketch/constraints';
-import { geometryById, groupById, type SketchDocument } from '../sketch/document';
+import type { SketchDocument } from '../sketch/document';
 import {
   arcPoint,
+  geometryNodeIds,
   type ArcEntity,
   type GeometryEntity,
   type SketchBounds,
   type SketchPoint2D,
 } from '../sketch/geometry';
 import { SketchSpatialIndex } from './spatial-index';
+
+function geometryById(document: SketchDocument, id: string): GeometryEntity | undefined {
+  return document.entities.find((candidate) => candidate.id === id);
+}
+
+function groupById(document: SketchDocument, id: string) {
+  return document.groups.find((candidate) => candidate.id === id);
+}
 
 export interface SerializedCamera2D {
   readonly x: number;
@@ -45,6 +54,20 @@ export interface SelectionContext {
   }[];
   readonly activeConstraints: readonly SketchConstraint[];
   readonly relevantDegreesOfFreedom: number | null;
+}
+
+export interface SketchHitResult {
+  readonly kind: 'node' | 'entity';
+  readonly id: string;
+  readonly distance: number;
+  readonly worldPoint: SketchPoint2D;
+}
+
+export interface SketchHitTestRequest {
+  readonly screenPoint: SketchPoint2D;
+  readonly camera: SerializedCamera2D;
+  readonly screenTolerance?: number;
+  readonly selectedEntityId?: string | null;
 }
 
 function screenToWorld(point: SketchPoint2D, camera: SerializedCamera2D): SketchPoint2D {
@@ -101,6 +124,52 @@ export function distanceToGeometry(point: SketchPoint2D, entity: GeometryEntity)
     }
   }
   throw new TypeError('Unsupported geometry entity.');
+}
+
+/** Analytic picking with a constant screen-space target; CanvasKit pixels never participate. */
+export function hitTestSketch(
+  document: SketchDocument,
+  request: SketchHitTestRequest,
+): SketchHitResult | null {
+  const worldPoint = screenToWorld(request.screenPoint, request.camera);
+  const tolerance = (request.screenTolerance ?? 9) / request.camera.zoom;
+  const selected = request.selectedEntityId
+    ? geometryById(document, request.selectedEntityId)
+    : undefined;
+  if (selected) {
+    const visibleNodeIds = new Set(geometryNodeIds(selected));
+    const nodeHit = (document.nodes ?? [])
+      .filter(({ id }) => visibleNodeIds.has(id))
+      .map((node) => ({
+        kind: 'node' as const,
+        id: node.id,
+        distance: pointDistance(worldPoint, node.position),
+        worldPoint,
+      }))
+      .filter(({ distance }) => distance <= tolerance)
+      .toSorted(
+        (left, right) => left.distance - right.distance || left.id.localeCompare(right.id),
+      )[0];
+    if (nodeHit) return nodeHit;
+  }
+  const context = createSelectionContext(document, {
+    worldPoint,
+    tolerance,
+    ...(request.selectedEntityId ? { entityIds: [request.selectedEntityId] } : {}),
+  });
+  const entity =
+    context.nearbyEntities.find(({ entityId }) => entityId === request.selectedEntityId) ??
+    context.hoveredEntity;
+  return entity?.distance === null
+    ? null
+    : entity
+      ? {
+          kind: 'entity',
+          id: entity.entityId,
+          distance: entity.distance,
+          worldPoint,
+        }
+      : null;
 }
 
 export function createSelectionContext(

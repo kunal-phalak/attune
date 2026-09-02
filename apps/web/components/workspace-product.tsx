@@ -1,6 +1,6 @@
 'use client';
 
-import type { GeometryPatch } from '@attune/domain';
+import type { SketchPoint2D } from '@attune/domain';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import { Surface } from '@cloudflare/kumo/components/surface';
@@ -337,10 +337,10 @@ function WorkspaceShell({
           ? 'constraint'
           : 'select';
 
-  const editGeometry = useCallback(
-    async (entities: readonly GeometryPatch[]) => {
+  const moveNode = useCallback(
+    async (nodeId: string, position: SketchPoint2D) => {
       if (!view) throw new Error('The authoritative sketch is not loaded.');
-      const command = { type: 'edit_geometry' as const, entities };
+      const command = { type: 'move_node' as const, nodeId, position };
       const applied = await requestHumanSemanticMutation(
         attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
         view,
@@ -357,8 +357,9 @@ function WorkspaceShell({
         },
       });
       window.dispatchEvent(new Event('attune:workspace-changed'));
+      void refresh();
     },
-    [view, workspaceId],
+    [refresh, view, workspaceId],
   );
 
   const canvas = (
@@ -367,7 +368,7 @@ function WorkspaceShell({
       projectName={projectName}
       cursorMode={cursorMode}
       document={view?.workspace.sketchDocument ?? null}
-      onEditGeometry={perspective === 'buyer' ? editGeometry : undefined}
+      onMoveNode={perspective === 'buyer' ? moveNode : undefined}
       renderComments={
         collaboration && panels.leftPanel === 'comments'
           ? (camera, placement) => (
@@ -428,7 +429,15 @@ function WorkspaceShell({
         open={panels.rightPanel === 'constraints'}
         onClose={closeRightPanel}
       />
-      <HistoryPanel open={panels.rightPanel === 'history'} events={[]} onClose={closeRightPanel} />
+      <HistoryPanel
+        open={panels.rightPanel === 'history'}
+        events={(view?.records.receipts ?? []).map((receipt) => ({
+          id: receipt.receiptId,
+          label: receipt.command === 'move_node' ? 'Moved node' : receipt.command.replaceAll('_', ' '),
+          createdAt: receipt.createdAt,
+        }))}
+        onClose={closeRightPanel}
+      />
     </main>
   );
 }

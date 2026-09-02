@@ -1,14 +1,13 @@
 'use client';
 
 import {
-  createSelectionContext,
+  geometryNodeIds,
   geometryBounds,
-  snapSketchPoint,
-  type CircleEntity,
-  type GeometryPatch,
+  hitTestSketch,
   type SketchBounds,
   type SketchDocument,
-} from '@attune/domain/sketch';
+  type SketchPoint2D,
+} from '@attune/domain/editor';
 import type { Canvas as SkCanvas, CanvasKit, Paint, Surface } from 'canvaskit-wasm';
 import {
   forwardRef,
@@ -20,7 +19,9 @@ import {
   type ReactNode,
 } from 'react';
 
+import { getBrowserPlaneGcsSolver } from '../lib/sketch/browser-planegcs';
 import { Camera2D, type FitPadding, type ViewportSize } from '../lib/sketch/camera-2d';
+import { projectSketchForCanvas } from '../lib/sketch/canvaskit-projection';
 import { editorCursorFor, type EditorCursorMode } from '../lib/sketch/editor-cursors';
 import { adaptiveGridStep } from '../lib/sketch/grid';
 import type { ViewportInsets } from '../lib/sketch/viewport-insets';
@@ -74,6 +75,13 @@ export interface WorkspaceCanvasHandle {
 
 interface CanvasMetrics extends ViewportSize {
   readonly pixelRatio: number;
+}
+
+interface EditorSelection {
+  readonly selectedEntityId: string | null;
+  readonly selectedNodeId: string | null;
+  readonly hoveredEntityId: string | null;
+  readonly hoveredNodeId: string | null;
 }
 
 export interface CameraViewState extends ViewportSize {
@@ -175,45 +183,91 @@ function drawSketch(
   canvas: SkCanvas,
   camera: Camera2D,
   document: SketchDocument | null,
+  selection: EditorSelection,
 ): void {
   if (!document) return;
   const geometryPaint = paint(canvasKit, canvasKit.Color(38, 48, 63, 0.95), 1.65 / camera.zoom);
+  const hoverPaint = paint(canvasKit, canvasKit.Color(38, 126, 179, 0.95), 2.1 / camera.zoom);
+  const selectedPaint = paint(canvasKit, canvasKit.Color(23, 92, 211, 1), 2.6 / camera.zoom);
+  const handlePaint = new canvasKit.Paint();
+  handlePaint.setAntiAlias(true);
+  handlePaint.setStyle(canvasKit.PaintStyle.Fill);
   try {
-    for (const entity of document.entities) {
-      switch (entity.kind) {
+    for (const primitive of projectSketchForCanvas(document)) {
+      const entityPaint =
+        primitive.id === selection.selectedEntityId
+          ? selectedPaint
+          : primitive.id === selection.hoveredEntityId
+            ? hoverPaint
+            : geometryPaint;
+      switch (primitive.kind) {
         case 'point':
-          canvas.drawCircle(entity.position.x, entity.position.y, 2.5 / camera.zoom, geometryPaint);
+          canvas.drawCircle(
+            primitive.position.x,
+            primitive.position.y,
+            2.5 / camera.zoom,
+            entityPaint,
+          );
           break;
         case 'line':
           canvas.drawLine(
-            entity.start.x,
-            entity.start.y,
-            entity.end.x,
-            entity.end.y,
-            geometryPaint,
+            primitive.start.x,
+            primitive.start.y,
+            primitive.end.x,
+            primitive.end.y,
+            entityPaint,
           );
           break;
         case 'circle':
-          canvas.drawCircle(entity.center.x, entity.center.y, entity.radius, geometryPaint);
+          canvas.drawCircle(primitive.center.x, primitive.center.y, primitive.radius, entityPaint);
           break;
         case 'arc':
           canvas.drawArc(
             [
-              entity.center.x - entity.radius,
-              entity.center.y - entity.radius,
-              entity.center.x + entity.radius,
-              entity.center.y + entity.radius,
+              primitive.center.x - primitive.radius,
+              primitive.center.y - primitive.radius,
+              primitive.center.x + primitive.radius,
+              primitive.center.y + primitive.radius,
             ],
-            (-entity.endAngle * 180) / Math.PI,
-            ((entity.endAngle - entity.startAngle) * 180) / Math.PI,
+            (primitive.startAngle * 180) / Math.PI,
+            (primitive.sweepAngle * 180) / Math.PI,
             false,
-            geometryPaint,
+            entityPaint,
           );
           break;
       }
     }
+    const selected = document.entities.find(({ id }) => id === selection.selectedEntityId);
+    const visibleNodes = new Set(selected ? geometryNodeIds(selected) : []);
+    for (const node of document.nodes ?? []) {
+      if (!visibleNodes.has(node.id)) continue;
+      const active = node.id === selection.selectedNodeId;
+      const hovered = node.id === selection.hoveredNodeId;
+      handlePaint.setColor(
+        active
+          ? canvasKit.Color(23, 92, 211, 1)
+          : hovered
+            ? canvasKit.Color(38, 126, 179, 1)
+            : canvasKit.Color(247, 248, 249, 1),
+      );
+      canvas.drawCircle(
+        node.position.x,
+        node.position.y,
+        (active ? 5 : 4) / camera.zoom,
+        handlePaint,
+      );
+      canvas.drawCircle(
+        node.position.x,
+        node.position.y,
+        (active ? 5 : 4) / camera.zoom,
+        selectedPaint,
+      );
+    }
   } finally {
     geometryPaint.delete();
+    hoverPaint.delete();
+    selectedPaint.delete();
+    handlePaint.delete();
   }
 }
 
@@ -223,6 +277,7 @@ function renderSurface(
   camera: Camera2D,
   metrics: CanvasMetrics,
   document: SketchDocument | null,
+  selection: EditorSelection,
 ): void {
   const canvas = surface.getCanvas();
   canvas.clear(canvasKit.Color(247, 248, 249, 1));
@@ -233,7 +288,7 @@ function renderSurface(
   canvas.scale(camera.zoom, -camera.zoom);
   drawGrid(canvasKit, canvas, camera, metrics);
   drawAxes(canvasKit, canvas, camera, metrics);
-  drawSketch(canvasKit, canvas, camera, document);
+  drawSketch(canvasKit, canvas, camera, document, selection);
   canvas.restore();
   canvas.restore();
   surface.flush();
@@ -259,10 +314,10 @@ export const WorkspaceCanvas = forwardRef<
     readonly projectName: string;
     readonly cursorMode: EditorCursorMode;
     readonly document: SketchDocument | null;
-    readonly onEditGeometry?: (patches: readonly GeometryPatch[]) => Promise<void>;
+    readonly onMoveNode?: (nodeId: string, position: SketchPoint2D) => Promise<void>;
   }
 >(function WorkspaceCanvas(
-  { insets, renderComments, projectName, document, cursorMode, onEditGeometry },
+  { insets, renderComments, projectName, document, cursorMode, onMoveNode },
   forwardedRef,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -275,13 +330,22 @@ export const WorkspaceCanvas = forwardRef<
   const redrawRef = useRef<() => void>(() => undefined);
   const initializedRef = useRef(false);
   const cameraAnimationRef = useRef<number | null>(null);
+  const previewSequenceRef = useRef(0);
+  const selectionRef = useRef<EditorSelection>({
+    selectedEntityId: null,
+    selectedNodeId: null,
+    hoveredEntityId: null,
+    hoveredNodeId: null,
+  });
   const pointerRef = useRef<
     | { readonly mode: 'pan'; readonly id: number; x: number; y: number }
     | {
-        readonly mode: 'resize-circle';
+        readonly mode: 'drag-node';
         readonly id: number;
-        readonly entityId: string;
-        readonly original: CircleEntity;
+        readonly nodeId: string;
+        readonly base: SketchDocument;
+        readonly origin: SketchPoint2D;
+        readonly target: SketchPoint2D;
       }
     | null
   >(null);
@@ -290,6 +354,7 @@ export const WorkspaceCanvas = forwardRef<
     null,
   );
   const [surfaceState, setSurfaceState] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [, setSelectionRevision] = useState(0);
   const [viewState, setViewState] = useState<CameraViewState>({
     x: 0,
     y: 0,
@@ -301,6 +366,12 @@ export const WorkspaceCanvas = forwardRef<
 
   insetsRef.current = insets;
   documentRef.current = document;
+
+  const updateSelection = (changes: Partial<EditorSelection>) => {
+    selectionRef.current = { ...selectionRef.current, ...changes };
+    setSelectionRevision((revision) => revision + 1);
+    redrawRef.current();
+  };
 
   const documentBounds = (): SketchBounds | null => {
     const entities = documentRef.current?.entities ?? [];
@@ -434,6 +505,7 @@ export const WorkspaceCanvas = forwardRef<
               cameraRef.current,
               metricsRef.current,
               documentRef.current,
+              selectionRef.current,
             );
           }
         };
@@ -458,28 +530,64 @@ export const WorkspaceCanvas = forwardRef<
   }, []);
 
   useEffect(() => {
+    void getBrowserPlaneGcsSolver();
+  }, []);
+
+  useEffect(() => {
     documentRef.current = document;
+    if (
+      selectionRef.current.selectedEntityId &&
+      !document?.entities.some(({ id }) => id === selectionRef.current.selectedEntityId)
+    ) {
+      selectionRef.current = {
+        selectedEntityId: null,
+        selectedNodeId: null,
+        hoveredEntityId: null,
+        hoveredNodeId: null,
+      };
+    }
     redrawRef.current();
   }, [document]);
 
   useEffect(() => {
     const element = canvasRef.current;
     if (!element) return undefined;
+
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       cancelCameraAnimation();
+
       const bounds = element.getBoundingClientRect();
-      const cursor = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+      const cursor = {
+        x: event.clientX - bounds.left,
+        y: event.clientY - bounds.top,
+      };
+
+      // macOS:
+      // ⌘ + scroll = zoom
+      // ⌥ + scroll = pan
+      //
+      // ctrlKey is kept because trackpad pinch zoom reports as ctrl + wheel.
+      const wantsZoom = event.metaKey || event.ctrlKey;
+      const wantsPan = event.altKey;
+
       const looksLikeTrackpadPan =
-        !event.ctrlKey &&
+        !wantsZoom &&
         event.deltaMode === WheelEvent.DOM_DELTA_PIXEL &&
         (Math.abs(event.deltaX) > 0 || Math.abs(event.deltaY) < 45);
-      if (looksLikeTrackpadPan) {
+
+      if (wantsZoom) {
+        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.012 : 0.0018));
+
+        cameraRef.current.zoomAt(cursor, factor);
+      } else if (wantsPan || looksLikeTrackpadPan) {
         cameraRef.current.panBy(-event.deltaX, -event.deltaY);
       } else {
-        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.012 : 0.0018));
+        // Keep your current normal mouse-wheel behavior.
+        const factor = Math.exp(-event.deltaY * 0.0018);
         cameraRef.current.zoomAt(cursor, factor);
       }
+
       redrawRef.current();
       publishView();
     };
@@ -497,27 +605,46 @@ export const WorkspaceCanvas = forwardRef<
     const screen = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
     const sketch = documentRef.current;
     if (event.button === 0 && cursorMode === 'select' && sketch) {
-      const context = createSelectionContext(sketch, {
+      const hit = hitTestSketch(sketch, {
         screenPoint: screen,
         camera: {
           x: cameraRef.current.x,
           y: cameraRef.current.y,
           zoom: cameraRef.current.zoom,
         },
+        selectedEntityId: selectionRef.current.selectedEntityId,
       });
-      const hovered = context.hoveredEntity
-        ? sketch.entities.find(({ id }) => id === context.hoveredEntity?.entityId)
-        : undefined;
-      if (hovered?.kind === 'circle') {
+      if (hit?.kind === 'node') {
+        const node = sketch.nodes.find(({ id }) => id === hit.id);
+        if (!node) return;
+        updateSelection({ selectedNodeId: node.id, hoveredNodeId: node.id });
         pointerRef.current = {
-          mode: 'resize-circle',
+          mode: 'drag-node',
           id: event.pointerId,
-          entityId: hovered.id,
-          original: hovered,
+          nodeId: node.id,
+          base: sketch,
+          origin: node.position,
+          target: node.position,
         };
         setDragging(true);
         return;
       }
+      if (hit?.kind === 'entity') {
+        updateSelection({
+          selectedEntityId: hit.id,
+          selectedNodeId: null,
+          hoveredEntityId: hit.id,
+          hoveredNodeId: null,
+        });
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        return;
+      }
+      updateSelection({
+        selectedEntityId: null,
+        selectedNodeId: null,
+        hoveredEntityId: null,
+        hoveredNodeId: null,
+      });
     }
     pointerRef.current = {
       mode: 'pan',
@@ -530,37 +657,59 @@ export const WorkspaceCanvas = forwardRef<
 
   const onPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const pointer = pointerRef.current;
-    if (!pointer || pointer.id !== event.pointerId) return;
+    if (!pointer || pointer.id !== event.pointerId) {
+      if (cursorMode !== 'select') return;
+      const sketch = documentRef.current;
+      if (!sketch) return;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const hit = hitTestSketch(sketch, {
+        screenPoint: { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+        camera: {
+          x: cameraRef.current.x,
+          y: cameraRef.current.y,
+          zoom: cameraRef.current.zoom,
+        },
+        selectedEntityId: selectionRef.current.selectedEntityId,
+      });
+      const next = {
+        hoveredEntityId: hit?.kind === 'entity' ? hit.id : null,
+        hoveredNodeId: hit?.kind === 'node' ? hit.id : null,
+      };
+      if (
+        next.hoveredEntityId !== selectionRef.current.hoveredEntityId ||
+        next.hoveredNodeId !== selectionRef.current.hoveredNodeId
+      ) {
+        updateSelection(next);
+      }
+      return;
+    }
     if (pointer.mode === 'pan') {
       cameraRef.current.panBy(event.clientX - pointer.x, event.clientY - pointer.y);
       pointerRef.current = { ...pointer, x: event.clientX, y: event.clientY };
     } else {
-      const sketch = documentRef.current;
-      if (!sketch) return;
       const bounds = event.currentTarget.getBoundingClientRect();
-      const world = cameraRef.current.screenToWorld({
+      const target = cameraRef.current.screenToWorld({
         x: event.clientX - bounds.left,
         y: event.clientY - bounds.top,
       });
-      const snapped = snapSketchPoint(sketch, world, {
-        gridStep: adaptiveGridStep(cameraRef.current.zoom),
-        tolerance: 9 / cameraRef.current.zoom,
+      pointerRef.current = { ...pointer, target };
+      const sequence = ++previewSequenceRef.current;
+      void getBrowserPlaneGcsSolver().then((solver) => {
+        const active = pointerRef.current;
+        if (
+          sequence !== previewSequenceRef.current ||
+          active?.mode !== 'drag-node' ||
+          active.id !== pointer.id
+        ) {
+          return;
+        }
+        const preview = solver.solve(pointer.base, [
+          { kind: 'node_target', nodeId: pointer.nodeId, position: target },
+        ]);
+        if (preview.status !== 'success' && preview.status !== 'converged') return;
+        documentRef.current = preview.document;
+        redrawRef.current();
       });
-      const radius = Math.max(
-        0.1,
-        Math.hypot(
-          snapped.point.x - pointer.original.center.x,
-          snapped.point.y - pointer.original.center.y,
-        ),
-      );
-      documentRef.current = {
-        ...sketch,
-        entities: sketch.entities.map((entity) =>
-          entity.id === pointer.entityId && entity.kind === 'circle'
-            ? Object.assign({}, entity, { radius })
-            : entity,
-        ),
-      };
     }
     redrawRef.current();
     publishView();
@@ -570,24 +719,18 @@ export const WorkspaceCanvas = forwardRef<
     const pointer = pointerRef.current;
     if (pointer?.id !== event.pointerId) return;
     pointerRef.current = null;
+    previewSequenceRef.current += 1;
     setDragging(false);
     event.currentTarget.releasePointerCapture(event.pointerId);
-    if (pointer.mode === 'resize-circle') {
-      const changed = documentRef.current?.entities.find(
-        (entity): entity is CircleEntity =>
-          entity.id === pointer.entityId && entity.kind === 'circle',
+    if (pointer.mode === 'drag-node') {
+      const moved = Math.hypot(
+        pointer.target.x - pointer.origin.x,
+        pointer.target.y - pointer.origin.y,
       );
       documentRef.current = document;
       redrawRef.current();
-      if (changed && Math.abs(changed.radius - pointer.original.radius) > 1e-6) {
-        void onEditGeometry?.([
-          {
-            id: changed.id,
-            kind: 'circle',
-            center: changed.center,
-            radius: changed.radius,
-          },
-        ]).catch(() => {
+      if (moved > 1e-7) {
+        void onMoveNode?.(pointer.nodeId, pointer.target).catch(() => {
           documentRef.current = document;
           redrawRef.current();
         });

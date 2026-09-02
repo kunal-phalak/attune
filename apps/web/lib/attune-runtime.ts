@@ -182,6 +182,7 @@ async function viewForBundle(
         ? [
             'create_geometry',
             'edit_geometry',
+            'move_node',
             'apply_constraint',
             'set_dimension',
             'forecast_change',

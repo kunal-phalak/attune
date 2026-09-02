@@ -4,6 +4,12 @@ export interface SketchGroup {
   readonly name: string;
   readonly entityIds: readonly string[];
   readonly childGroupIds?: readonly string[];
+  readonly sourceRef?: {
+    readonly kind: 'maker-model';
+    readonly routeKey: string;
+    readonly route: readonly string[];
+    readonly layer?: string;
+  };
 }
 
 export type GroupInput = Omit<SketchGroup, 'version'>;

@@ -9,6 +9,7 @@ import {
   type AttuneRole,
   type AttuneWorkspace,
   type GeometryEntity,
+  geometryNodeIds,
   type SelectionContextRequest,
 } from '@attune/domain';
 
@@ -24,6 +25,11 @@ export interface AgentContextSnapshot {
   readonly geometry: readonly (GeometryEntity & {
     readonly bounds: ReturnType<typeof geometryBounds>;
   })[];
+  readonly nodes: readonly {
+    readonly id: string;
+    readonly version: number;
+    readonly position: { readonly x: number; readonly y: number };
+  }[];
   readonly groups: readonly {
     readonly id: string;
     readonly version: number;
@@ -149,6 +155,10 @@ export function compileAgentContext(input: {
   const geometry = input.workspace.sketchDocument.entities
     .filter(({ id }) => relevantIds.has(id))
     .map((entity) => Object.assign({}, entity, { bounds: geometryBounds(entity) }));
+  const relevantNodeIds = new Set(geometry.flatMap(geometryNodeIds));
+  const nodes = (input.workspace.sketchDocument.nodes ?? [])
+    .filter(({ id }) => relevantNodeIds.has(id))
+    .map(({ id, version, position }) => ({ id, version, position }));
   const groups = input.workspace.sketchDocument.groups
     .filter((group) => relevantIds.size === 0 || group.entityIds.some((id) => relevantIds.has(id)))
     .map(({ id, version, name, entityIds }) => ({ id, version, name, entityIds }));
@@ -166,6 +176,7 @@ export function compileAgentContext(input: {
       hoveredEntityId: selection.hoveredEntity?.entityId ?? null,
     },
     geometry,
+    nodes,
     groups,
     constraints,
     solver: {

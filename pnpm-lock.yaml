@@ -171,6 +171,9 @@ importers:
       makerjs:
         specifier: 0.19.2
         version: 0.19.2
+      makerjs-spokes-straight:
+        specifier: 1.1.2
+        version: 1.1.2
     devDependencies:
       '@types/node':
         specifier: 24.10.1
@@ -3643,6 +3646,12 @@ packages:
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
+
+  makerjs-spoke-wedge@1.0.2:
+    resolution: {integrity: sha512-e14WhsFY64pIRs5+RXM4KgyD/2nWVvbfXxn1oMgyjltov0p8Vq/9/eMqQNCpnmJ3oN6AaDvbf4jP/X6Gm4QW+Q==}
+
+  makerjs-spokes-straight@1.1.2:
+    resolution: {integrity: sha512-oB4xZpzb6UD9I++UHdg7WlXGf+sOYtZVZVLuQrZgAF98kAfs0XaRJ7v6Ic6gxqnF4dljNh/v6CzaKETh6tbpNw==}
 
   makerjs@0.19.2:
     resolution: {integrity: sha512-+W30jtxgM5ht8jWyxOpoLpz/6u9DEDjW9XXbvkyAba9xIDXnUB4vaB+JajMm7i6QbD7E41rxSl6VFkOcNMwFBA==}
@@ -7219,6 +7228,15 @@ snapshots:
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  makerjs-spoke-wedge@1.0.2:
+    dependencies:
+      makerjs: 0.19.2
+
+  makerjs-spokes-straight@1.1.2:
+    dependencies:
+      makerjs: 0.19.2
+      makerjs-spoke-wedge: 1.0.2
 
   makerjs@0.19.2:
     dependencies:

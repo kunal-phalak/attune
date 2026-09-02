@@ -22,6 +22,7 @@ const compiledFrontiers = new Map<string, readonly CapabilityFrontierEntry[]>();
 const COMMAND_CAPABILITY: Readonly<Partial<Record<AttuneCommandType, CapabilityId>>> = {
   create_geometry: 'edit_draft',
   edit_geometry: 'edit_draft',
+  move_node: 'edit_draft',
   delete_geometry: 'edit_draft',
   create_group: 'edit_draft',
   move_to_group: 'edit_draft',

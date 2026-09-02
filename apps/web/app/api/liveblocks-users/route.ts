@@ -23,9 +23,10 @@ function requestBody(
 }
 
 export async function POST(request: Request) {
-  const body = requestBody(await request.json());
+  const body = requestBody(await request.json().catch(() => null));
   const user = await currentAttuneUser();
-  if (!body || !user) return new Response('Unauthorized', { status: 401 });
+  if (!body) return new Response('Invalid request', { status: 400 });
+  if (!user) return new Response('Unauthorized', { status: 401 });
   if (body.roomId) {
     const permission = await liveblocksRoomPermission(body.roomId, user.userId);
     if (!permission.read) return new Response('Forbidden', { status: 403 });

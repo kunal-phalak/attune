@@ -913,31 +913,28 @@ function NewCommentComposer({
   placement,
   draftVersion,
   specHash,
+  onPlacementClear,
 }: {
   readonly workspaceId: string;
   readonly placement: CanvasCommentPlacement | null;
   readonly draftVersion: number;
   readonly specHash: string;
+  readonly onPlacementClear: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<CanvasCommentPlacement | null>(null);
-  const activePlacement = open ? anchor : placement;
-  const onOpenChange = (nextOpen: boolean) => {
-    if (nextOpen && placement) setAnchor(placement);
-    if (!nextOpen) setAnchor(null);
-    setOpen(nextOpen);
-  };
-  if (!activePlacement) return null;
+  if (!placement) return null;
   return (
     <FloatingComposer
-      open={open}
-      onOpenChange={onOpenChange}
+      open
+      onOpenChange={(open) => {
+        if (!open) onPlacementClear();
+      }}
+      onComposerSubmit={onPlacementClear}
       metadata={{
         workspaceId,
-        ...(activePlacement.entityId ? { entityId: activePlacement.entityId } : {}),
-        ...(activePlacement.nodeId ? { nodeId: activePlacement.nodeId } : {}),
-        worldX: activePlacement.world.x,
-        worldY: activePlacement.world.y,
+        ...(placement.entityId ? { entityId: placement.entityId } : {}),
+        ...(placement.nodeId ? { nodeId: placement.nodeId } : {}),
+        worldX: placement.world.x,
+        worldY: placement.world.y,
         revisionId: `draft:r${draftVersion}`,
         specHash,
       }}
@@ -946,7 +943,7 @@ function NewCommentComposer({
     >
       <CommentPin
         className="workspace-new-comment-pin"
-        style={{ left: activePlacement.screen.x, top: activePlacement.screen.y }}
+        style={{ left: placement.screen.x, top: placement.screen.y }}
         aria-label="Add canvas comment"
       >
         <AppIcons.New size={15} weight="bold" />
@@ -961,6 +958,7 @@ export function LiveCommentPins({
   placement,
   draftVersion,
   specHash,
+  onPlacementClear,
   onEntityFocus,
 }: {
   readonly workspaceId: string;
@@ -968,6 +966,7 @@ export function LiveCommentPins({
   readonly placement: CanvasCommentPlacement | null;
   readonly draftVersion: number;
   readonly specHash: string;
+  readonly onPlacementClear: () => void;
   readonly onEntityFocus?: (entityId: string | null) => void;
 }) {
   const result = useThreads({ query: { metadata: { workspaceId } } });
@@ -1006,6 +1005,7 @@ export function LiveCommentPins({
           placement={placement}
           draftVersion={draftVersion}
           specHash={specHash}
+          onPlacementClear={onPlacementClear}
         />
       ) : null}
     </div>

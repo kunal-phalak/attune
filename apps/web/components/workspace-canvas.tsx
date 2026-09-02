@@ -1196,6 +1196,7 @@ export const WorkspaceCanvas = forwardRef<
     readonly renderComments?: (
       view: CameraViewState,
       placement: CanvasCommentPlacement | null,
+      clearPlacement: () => void,
     ) => ReactNode;
     readonly projectName: string;
     readonly cursorMode: EditorCursorMode;
@@ -1206,6 +1207,7 @@ export const WorkspaceCanvas = forwardRef<
     readonly autoConstrain: boolean;
     readonly profileFill: boolean;
     readonly readOnly?: boolean;
+    readonly canComment?: boolean;
     readonly remoteSelections?: readonly {
       readonly color: readonly [number, number, number];
       readonly entityIds: readonly string[];
@@ -1228,6 +1230,7 @@ export const WorkspaceCanvas = forwardRef<
     autoConstrain,
     profileFill,
     readOnly = false,
+    canComment = false,
     remoteSelections = EMPTY_REMOTE_SELECTIONS,
     onSelectionChange,
     onToolChange,
@@ -1272,7 +1275,7 @@ export const WorkspaceCanvas = forwardRef<
     'idle' | 'dragging' | 'previewing' | 'committing'
   >('idle');
   const [interactionMessage, setInteractionMessage] = useState<string | null>(null);
-  const [commentPointer, setCommentPointer] = useState<CanvasCommentPlacement['screen'] | null>(
+  const [commentAnchor, setCommentAnchor] = useState<Omit<CanvasCommentPlacement, 'screen'> | null>(
     null,
   );
   const [surfaceState, setSurfaceState] = useState<'loading' | 'ready' | 'failed'>('loading');
@@ -1291,6 +1294,10 @@ export const WorkspaceCanvas = forwardRef<
   profileFillRef.current = profileFill;
   remoteSelectionsRef.current = remoteSelections;
   selectionRef.current = selection;
+
+  useEffect(() => {
+    if (cursorMode !== 'comment') setCommentAnchor(null);
+  }, [cursorMode]);
 
   const updateSelection = (next: SelectionSet) => {
     selectionRef.current = next;
@@ -1904,6 +1911,20 @@ export const WorkspaceCanvas = forwardRef<
       setInteractionState('dragging');
       return;
     }
+    if (cursorMode === 'comment') {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (!canComment) return;
+      setCommentAnchor({
+        world,
+        ...((hoverRef.current.entityId ?? selectionRef.current.entityIds[0])
+          ? { entityId: hoverRef.current.entityId ?? selectionRef.current.entityIds[0] }
+          : {}),
+        ...((hoverRef.current.nodeId ?? selectionRef.current.nodeIds[0])
+          ? { nodeId: hoverRef.current.nodeId ?? selectionRef.current.nodeIds[0] }
+          : {}),
+      });
+      return;
+    }
     if (readOnly) {
       event.currentTarget.releasePointerCapture(event.pointerId);
       return;
@@ -2324,16 +2345,10 @@ export const WorkspaceCanvas = forwardRef<
     ) ?? [];
   const panning = pointerRef.current?.mode === 'pan';
   const cursor = editorCursorFor(panning ? 'pan' : cursorMode);
-  const commentPlacement = commentPointer
+  const commentPlacement = commentAnchor
     ? {
-        screen: commentPointer,
-        world: cameraRef.current.screenToWorld(commentPointer),
-        ...((hoverRef.current.entityId ?? selection.entityIds[0])
-          ? { entityId: hoverRef.current.entityId ?? selection.entityIds[0] }
-          : {}),
-        ...((hoverRef.current.nodeId ?? selection.nodeIds[0])
-          ? { nodeId: hoverRef.current.nodeId ?? selection.nodeIds[0] }
-          : {}),
+        ...commentAnchor,
+        screen: cameraRef.current.worldToScreen(commentAnchor.world),
       }
     : null;
 
@@ -2349,12 +2364,6 @@ export const WorkspaceCanvas = forwardRef<
       data-cursor-mode={cursorMode}
       data-interaction-state={interactionState}
       data-read-only={readOnly || undefined}
-      onPointerMove={(event) => {
-        if (cursorMode !== 'comment') return;
-        const bounds = event.currentTarget.getBoundingClientRect();
-        setCommentPointer({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
-      }}
-      onPointerLeave={() => setCommentPointer(null)}
     >
       <canvas
         ref={canvasRef}
@@ -2582,7 +2591,7 @@ export const WorkspaceCanvas = forwardRef<
       {interactionMessage ? (
         <output className="sketch-interaction-message">{interactionMessage}</output>
       ) : null}
-      {renderComments?.(viewState, commentPlacement)}
+      {renderComments?.(viewState, commentPlacement, () => setCommentAnchor(null))}
       <WorkspaceOrientationHud right={insets.right} />
       {surfaceState !== 'ready' ? (
         <span

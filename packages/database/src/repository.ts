@@ -1181,6 +1181,49 @@ export async function listProjectsForUser(userId: string) {
   }));
 }
 
+export async function listProjectsForLiveblocksRooms(roomIds: readonly string[]) {
+  if (roomIds.length === 0) return [];
+  const projectRows = await getDatabase()
+    .select({
+      projectId: projects.id,
+      projectName: projects.name,
+      projectCode: projects.code,
+      organizationId: projects.organizationId,
+      workspaceId: workspaces.id,
+      workspaceName: workspaces.name,
+      fileName: workspaceFiles.name,
+      fileKind: workspaceFiles.kind,
+      liveblocksRoomId: workspaces.liveblocksRoomId,
+      workspaceSeq: workspaces.workspaceSeq,
+      draftVersion: workspaces.draftVersion,
+      capabilityEpoch: workspaces.capabilityEpoch,
+      updatedAt: workspaces.updatedAt,
+    })
+    .from(workspaces)
+    .innerJoin(projects, eq(projects.id, workspaces.projectId))
+    .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
+    .where(inArray(workspaces.liveblocksRoomId, [...roomIds]))
+    .orderBy(desc(workspaces.updatedAt));
+  return projectRows.map((row) => ({
+    projectId: row.projectId,
+    projectName: row.projectName,
+    projectCode: row.projectCode,
+    organizationId: row.organizationId,
+    workspaceId: row.workspaceId,
+    workspaceName: row.workspaceName,
+    fileName: row.fileName,
+    fileKind: row.fileKind,
+    liveblocksRoomId: row.liveblocksRoomId,
+    workspaceSeq: row.workspaceSeq,
+    draftVersion: row.draftVersion,
+    capabilityEpoch: row.capabilityEpoch,
+    updatedAt: row.updatedAt,
+    access: 'shared' as const,
+    canManage: false,
+    template: row.fileKind === 'sketch:blank' ? ('blank' as const) : ('spoke' as const),
+  }));
+}
+
 export async function readWorkspaceBundle(
   workspaceId: string,
   observationCursor?: number,

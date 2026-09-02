@@ -422,6 +422,7 @@ function WorkspaceShell({
   roomId,
   collaboration,
   canEdit = true,
+  canComment = canEdit,
   perspective,
   actorName,
   projectName,
@@ -434,6 +435,7 @@ function WorkspaceShell({
   readonly roomId?: string;
   readonly collaboration: boolean;
   readonly canEdit?: boolean;
+  readonly canComment?: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly actorName: string;
   readonly projectName: string;
@@ -471,32 +473,29 @@ function WorkspaceShell({
 
   useEffect(() => {
     if (!collaborativeDraft) return;
-    setView((current) => {
-      if (!current || collaborativeDraft.workspaceSeq <= current.workspace.workspaceSeq) {
-        return current;
-      }
-      const next: AttuneApiView = {
-        ...current,
-        specHash: collaborativeDraft.specHash,
-        workspace: {
-          ...current.workspace,
-          workspaceSeq: collaborativeDraft.workspaceSeq,
-          draftVersion: collaborativeDraft.draftVersion,
-          capabilityEpoch: collaborativeDraft.capabilityEpoch,
-          authorityEpoch: collaborativeDraft.authorityEpoch,
-          geometry: structuredClone(collaborativeDraft.geometry),
-          sketchDocument: structuredClone(collaborativeDraft.sketchDocument),
-        },
-        semantic: {
-          ...current.semantic,
-          documentRevision: collaborativeDraft.sketchDocument.revision,
-          solve: collaborativeDraft.sketchDocument.lastSolve ?? null,
-        },
-      };
-      viewRef.current = next;
-      window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: next }));
-      return next;
-    });
+    const current = viewRef.current;
+    if (!current || collaborativeDraft.workspaceSeq <= current.workspace.workspaceSeq) return;
+    const next: AttuneApiView = {
+      ...current,
+      specHash: collaborativeDraft.specHash,
+      workspace: {
+        ...current.workspace,
+        workspaceSeq: collaborativeDraft.workspaceSeq,
+        draftVersion: collaborativeDraft.draftVersion,
+        capabilityEpoch: collaborativeDraft.capabilityEpoch,
+        authorityEpoch: collaborativeDraft.authorityEpoch,
+        geometry: structuredClone(collaborativeDraft.geometry),
+        sketchDocument: structuredClone(collaborativeDraft.sketchDocument),
+      },
+      semantic: {
+        ...current.semantic,
+        documentRevision: collaborativeDraft.sketchDocument.revision,
+        solve: collaborativeDraft.sketchDocument.lastSolve ?? null,
+      },
+    };
+    viewRef.current = next;
+    setView(next);
+    window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: next }));
   }, [collaborativeDraft]);
 
   const insets = viewportInsetsFor(panels, showToolLabels, panelWidths);
@@ -610,6 +609,7 @@ function WorkspaceShell({
       autoConstrain={autoConstrain}
       profileFill={profileFill}
       readOnly={versionPreview !== null || !canEdit}
+      canComment={versionPreview === null && canComment}
       onSelectionChange={setSelection}
       onToolChange={setActiveCanvasTool}
       onConstraintToolChange={setActiveConstraintTool}
@@ -618,13 +618,14 @@ function WorkspaceShell({
       }
       renderComments={
         collaboration && panels.leftPanel === 'comments'
-          ? (camera, placement) => (
+          ? (camera, placement, clearPlacement) => (
               <LiveCommentPins
                 workspaceId={workspaceId}
                 camera={camera}
                 placement={placement}
                 draftVersion={draftVersion}
                 specHash={specHash}
+                onPlacementClear={clearPlacement}
               />
             )
           : undefined
@@ -756,6 +757,7 @@ function CollaborativeWorkspaceShell({
   const room = useRoom();
   const provider = useMemo(() => getYjsProviderForRoom(room), [room]);
   const canEdit = useSelf((self) => self.canWrite) ?? false;
+  const canComment = useSelf((self) => self.canComment) ?? false;
   const [draft, setDraft] = useState<AttuneCollaborativeDraft | null>(null);
   const remoteSelections = useOthersMapped((other) => ({
     color: collaborationColor(other.info.color),
@@ -799,6 +801,7 @@ function CollaborativeWorkspaceShell({
       roomId={roomId}
       collaboration
       canEdit={canEdit}
+      canComment={canComment}
       collaborativeDraft={draft}
       remoteSelections={remoteSelections}
       onSaveVersion={canEdit ? saveVersion : undefined}

@@ -11,7 +11,9 @@ function roomFrom(value: unknown): string | null | undefined {
 }
 
 export async function POST(request: Request) {
-  const roomId = roomFrom(await request.json());
+  const body = await request.json().catch(() => null);
+  if (body === null) return new Response('Invalid request', { status: 400 });
+  const roomId = roomFrom(body);
   const user = await currentAttuneUser();
   if (roomId === null || !user) return new Response('Unauthorized', { status: 401 });
   if (roomId) {

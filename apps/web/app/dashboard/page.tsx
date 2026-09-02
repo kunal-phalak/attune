@@ -2,6 +2,7 @@ import {
   canCreateProjectsForUser,
   databaseConfigured,
   ensureJudgeWorkspace,
+  listProjectsForLiveblocksRooms,
   listProjectsForUser,
 } from '@attune/database';
 import Link from 'next/link';
@@ -10,10 +11,25 @@ import { redirect } from 'next/navigation';
 import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashboard-library';
 import { DashboardNotifications } from '../../components/dashboard-notifications';
 import { currentAttuneUser } from '../../lib/auth/session';
-import { liveblocksConfigured } from '../../lib/liveblocks/server';
-import { parseLibraryFilter } from '../../lib/projects/library';
+import { liveblocksConfigured, liveblocksRoomIdsForUser } from '../../lib/liveblocks/server';
+import { mergeLibraryProjects, parseLibraryFilter } from '../../lib/projects/library';
 
 export const dynamic = 'force-dynamic';
+
+function toLibraryFile(
+  row: Awaited<ReturnType<typeof listProjectsForUser>>[number],
+): AttuneLibraryFile {
+  return {
+    workspaceId: row.workspaceId,
+    roomId: row.liveblocksRoomId,
+    projectName: row.projectName,
+    updatedAt: row.updatedAt,
+    status: 'draft',
+    access: row.access,
+    canManage: row.canManage,
+    template: row.template,
+  };
+}
 
 function SetupRequired() {
   return (
@@ -43,22 +59,17 @@ export default async function DashboardPage({
   const user = await currentAttuneUser();
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
-  const [projectRows, hasProjectCreatePermission] = await Promise.all([
+  const collaboration = liveblocksConfigured();
+  const [membershipRows, hasProjectCreatePermission, accessibleRoomIds] = await Promise.all([
     listProjectsForUser(user.userId),
     canCreateProjectsForUser(user.userId),
+    collaboration ? liveblocksRoomIdsForUser(user.userId) : Promise.resolve([]),
   ]);
-  const files: AttuneLibraryFile[] = projectRows.map((row) => ({
-    workspaceId: row.workspaceId,
-    roomId: row.liveblocksRoomId,
-    projectName: row.projectName,
-    updatedAt: row.updatedAt,
-    status: 'draft',
-    access: row.access,
-    canManage: row.canManage,
-    template: row.template,
-  }));
+  const roomRows = collaboration ? await listProjectsForLiveblocksRooms(accessibleRoomIds) : [];
+  const ownedFiles = membershipRows.filter((row) => row.access === 'owned').map(toLibraryFile);
+  const liveblocksFiles = roomRows.map(toLibraryFile);
+  const files = mergeLibraryProjects(ownedFiles, liveblocksFiles);
   const filter = parseLibraryFilter((await searchParams).view);
-  const collaboration = liveblocksConfigured();
 
   return (
     <DashboardLibrary

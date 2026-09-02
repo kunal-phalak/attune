@@ -68,13 +68,7 @@ function NotificationTray() {
           }
         />
         {unreadCount > 0 ? <span className={styles.badge}>{unreadCount}</span> : null}
-        <Popover.Content
-          side="bottom"
-          align="end"
-          sideOffset={8}
-          positionMethod="fixed"
-          className={styles.popover}
-        >
+        <Popover.Content side="bottom" align="end" sideOffset={8} className={styles.popover}>
           <div className={styles.header}>
             <Popover.Title>Notifications</Popover.Title>
             <Button type="button" variant="ghost" size="sm" onClick={() => markAllAsRead()}>

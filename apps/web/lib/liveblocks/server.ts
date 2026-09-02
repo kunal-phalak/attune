@@ -25,6 +25,21 @@ export function getLiveblocks(): Liveblocks {
   return liveblocks;
 }
 
+export async function liveblocksRoomIdsForUser(userId: string): Promise<readonly string[]> {
+  if (!liveblocksConfigured()) return [];
+  const roomIds: string[] = [];
+  for await (const room of getLiveblocks().iterRooms(
+    {
+      userId,
+      query: { roomId: { startsWith: 'attune:workspace:' } },
+    },
+    { pageSize: 100 },
+  )) {
+    roomIds.push(room.id);
+  }
+  return roomIds;
+}
+
 async function migrateLegacyWorkspaceAccess(roomId: string): Promise<void> {
   const previous = accessMigrationQueue.get(roomId);
   if (previous) return previous;

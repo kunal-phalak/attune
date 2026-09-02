@@ -3,10 +3,14 @@
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
+import { Radio } from '@cloudflare/kumo/components/radio';
+import { Avatar } from '@liveblocks/react-ui';
 import { useEffect, useState, type FormEvent } from 'react';
 
 import type { AttuneShareRole } from '../lib/liveblocks/access';
 import { AppIcons } from './ui/app-icons';
+
+import styles from './workspace-share-dialog.module.css';
 
 interface SharedUser {
   readonly id: string;
@@ -113,9 +117,9 @@ export function WorkspaceShareDialog({ roomId }: { readonly roomId: string }) {
           ></Button>
         }
       />
-      <Dialog size="base" className="workspace-share-dialog">
-        <div className="workspace-share-header">
-          <div>
+      <Dialog size="base" className={`${styles.dialog} attune-liveblocks-bridge`}>
+        <div className={styles.header}>
+          <div className={styles.heading}>
             <Dialog.Title>Share workspace</Dialog.Title>
             <Dialog.Description>
               Room access updates connected collaborators immediately.
@@ -134,40 +138,40 @@ export function WorkspaceShareDialog({ roomId }: { readonly roomId: string }) {
             }
           />
         </div>
-        <form className="workspace-share-form" onSubmit={(event) => void submit(event)}>
-          <Input
-            value={identifier}
-            onChange={(event) => setIdentifier(event.target.value)}
-            aria-label="Email or Attune user ID"
-            placeholder="Email or Attune user ID"
-          />
-          <div className="workspace-share-roles" aria-label="Access role">
-            {(['viewer', 'commenter', 'editor'] as const).map((candidate) => (
-              <Button
-                key={candidate}
-                type="button"
-                size="sm"
-                variant={role === candidate ? 'primary' : 'secondary'}
-                aria-pressed={role === candidate}
-                onClick={() => setRole(candidate)}
-              >
-                {candidate[0].toUpperCase() + candidate.slice(1)}
-              </Button>
-            ))}
+        <form className={styles.form} onSubmit={(event) => void submit(event)}>
+          <div className={styles.inviteRow}>
+            <Input
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              aria-label="Email or Attune user ID"
+              placeholder="Email or Attune user ID"
+            />
+            <Button type="submit" variant="primary" loading={busy} disabled={!identifier.trim()}>
+              Invite
+            </Button>
           </div>
-          <Button type="submit" variant="primary" loading={busy} disabled={!identifier.trim()}>
-            Invite
-          </Button>
+          <Radio.Group<AttuneShareRole>
+            legend="Access role"
+            orientation="horizontal"
+            value={role}
+            onValueChange={(nextRole) => setRole(nextRole)}
+            className={styles.roles}
+          >
+            <Radio.Item<AttuneShareRole> label="Viewer" value="viewer" />
+            <Radio.Item<AttuneShareRole> label="Commenter" value="commenter" />
+            <Radio.Item<AttuneShareRole> label="Editor" value="editor" />
+          </Radio.Group>
         </form>
-        {error ? <p className="workspace-share-error">{error}</p> : null}
-        <ul className="workspace-share-members">
+        {error ? <p className={styles.error}>{error}</p> : null}
+        <ul className={styles.members}>
           {users.map((user) => (
             <li key={user.id}>
-              <span>
-                <strong>{user.name}</strong>
-                <small>{user.currentUser ? 'You' : user.id}</small>
+              <Avatar name={user.name} tooltip={user.name} className={styles.avatar} />
+              <span className={styles.identity}>
+                <span className={styles.name}>{user.name}</span>
+                <span className={styles.secondary}>{user.currentUser ? 'You' : user.id}</span>
               </span>
-              <small>{user.role ?? 'No access'}</small>
+              <span className={styles.role}>{user.role ?? 'No access'}</span>
             </li>
           ))}
         </ul>

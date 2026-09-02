@@ -16,6 +16,22 @@ export function parseLibraryFilter(value: string | undefined): LibraryFilter {
   return value === 'drafts' || value === 'shared' ? value : 'recents';
 }
 
+export function mergeLibraryProjects(
+  membershipProjects: readonly LibraryProject[],
+  liveblocksProjects: readonly LibraryProject[],
+): readonly LibraryProject[] {
+  const projects = new Map<string, LibraryProject>();
+  for (const project of [...liveblocksProjects, ...membershipProjects]) {
+    const current = projects.get(project.workspaceId);
+    if (!current || project.access === 'owned' || project.canManage) {
+      projects.set(project.workspaceId, project);
+    }
+  }
+  return [...projects.values()].toSorted(
+    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+  );
+}
+
 export function filterLibraryProjects(
   projects: readonly LibraryProject[],
   filter: LibraryFilter,

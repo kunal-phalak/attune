@@ -19,6 +19,7 @@ export {
   JUDGE_AUTH_USER_ID,
   JUDGE_USER_ID,
   JUDGE_WORKSPACE_ID,
+  listProjectsForLiveblocksRooms,
   listProjectsForUser,
   liveblocksRoomIdForWorkspace,
   renameSketchProjectRecord,

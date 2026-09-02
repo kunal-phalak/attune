@@ -1,4 +1,12 @@
-export type CanvasTool = 'select' | 'sketch';
+export type CanvasTool =
+  | 'select'
+  | 'line'
+  | 'rectangle'
+  | 'circle'
+  | 'arc'
+  | 'ellipse'
+  | 'bspline'
+  | 'trim';
 export type LeftPanel = 'items' | 'comments';
 export type RightPanel = 'constraints' | 'history';
 export type EditorPanel = LeftPanel | RightPanel;

@@ -58,6 +58,13 @@ describe('manufacturing request lifecycle', () => {
       version.versionId,
     ]);
     expect([request.versionNumber, quote.versionNumber, frozen.versionNumber]).toEqual([1, 1, 1]);
+    expect(request.reviewAccess).toEqual({
+      providerId: request.provider.providerId,
+      versionId: version.versionId,
+      permission: 'VIEW_FROZEN_VERSION',
+      reason: 'Shared for manufacturing review',
+      grantedAt: expect.any(String),
+    });
 
     const accepted = transition(
       quoted,
@@ -130,6 +137,43 @@ describe('manufacturing request lifecycle', () => {
     expect(changed.changeRequests[0]).toMatchObject({
       requestId: changed.manufacturingRequests[0].requestId,
       fromVersionId: changed.savedVersions[0].versionId,
+    });
+  });
+
+  it('preserves accepted history when the buyer starts a new change lifecycle', () => {
+    const requested = transition(
+      validWorkspace(),
+      { type: 'request_quote', configuration, buyerPrincipalId: 'user:buyer' },
+      'request',
+    );
+    const quoted = transition(
+      requested,
+      { type: 'freeze_and_quote_revision', amountMinor: 245_000, currency: 'INR' },
+      'quote',
+    );
+    const quote = quoted.quotes[0];
+    const accepted = transition(
+      quoted,
+      { type: 'accept_revision', revisionId: quote.revisionId, quoteId: quote.quoteId },
+      'accept',
+    );
+    const changed = transition(
+      accepted,
+      { type: 'request_changes', requestId: accepted.manufacturingRequests[0].requestId },
+      'accepted-change',
+    );
+
+    expect(changed.manufacturingRequests[0].status).toBe('ACCEPTED');
+    expect(changed.quotes[0].status).toBe('ACCEPTED');
+    expect(changed.acceptances).toHaveLength(1);
+    expect(changed.manufacturingRequests[1]).toMatchObject({
+      status: 'CHANGES_REQUESTED',
+      versionNumber: 2,
+      supersedesRequestId: changed.manufacturingRequests[0].requestId,
+      reviewAccess: {
+        permission: 'VIEW_FROZEN_VERSION',
+        reason: 'Shared for manufacturing review',
+      },
     });
   });
 });

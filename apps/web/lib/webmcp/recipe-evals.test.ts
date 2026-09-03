@@ -262,13 +262,13 @@ describe('focused native WebMCP mechanical acceptance prompts', () => {
     expect(native.context.getTools()).toEqual([
       'check_design',
       'constrain_geometry',
-      'continue_to_shopify',
       'find_makers',
       'forecast_change',
       'inspect_context',
-      'inspect_manufacturing_order',
+      'inspect_quote_or_order',
+      'manage_manufacturing_request',
       'modify_geometry',
-      'open_attune_surface',
+      'navigate_workspace',
     ]);
     expect(native.calls).toHaveLength(1);
     expect(native.calls[0]).toEqual(

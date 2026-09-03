@@ -58,6 +58,7 @@ export interface ProviderCapabilityProfile {
   readonly providerId: string;
   readonly providerName: string;
   readonly source?: 'SHOPIFY_AND_ATTUNE' | 'DEMO';
+  readonly marketplaceListed?: boolean;
   readonly shopify?: {
     readonly shopId: string;
     readonly shopDomain: string;
@@ -322,6 +323,13 @@ export interface ManufacturingRequest {
   readonly specHash: string;
   readonly provider: ProviderBinding;
   readonly visibility: DesignVisibility;
+  readonly reviewAccess?: {
+    readonly providerId: string;
+    readonly versionId: string;
+    readonly permission: 'VIEW_FROZEN_VERSION';
+    readonly reason: 'Shared for manufacturing review';
+    readonly grantedAt: string;
+  };
   readonly configuration?: ManufacturingConfiguration;
   readonly providerProfileVersion?: string;
   readonly shopDomain?: string;

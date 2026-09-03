@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { manufacturingAccessForRoles } from './access';
+import { assertMarketplaceRouteAccess, manufacturingAccessForRoles } from './access';
 
 describe('manufacturing marketplace access', () => {
   it.each([
@@ -20,4 +20,26 @@ describe('manufacturing marketplace access', () => {
       expect(access.finalizeQuote).toBe(maker);
     },
   );
+
+  it.each([
+    ['owner', ['buyer', 'editor', 'reviewer']],
+    ['editor', ['editor', 'reviewer']],
+    ['viewer', ['reviewer']],
+    ['commenter', ['reviewer']],
+    ['maker', ['provider', 'reviewer']],
+    ['judge', ['buyer', 'provider', 'editor', 'reviewer']],
+  ] as const)('allows %s through the marketplace GET route', (_label, roles) => {
+    expect(() => assertMarketplaceRouteAccess(roles, 'GET')).not.toThrow();
+  });
+
+  it('limits maker-profile POST updates to Maker authority', () => {
+    expect(() => assertMarketplaceRouteAccess(['provider', 'reviewer'], 'POST')).not.toThrow();
+    for (const roles of [
+      ['buyer', 'editor', 'reviewer'],
+      ['editor', 'reviewer'],
+      ['reviewer'],
+    ] as const) {
+      expect(() => assertMarketplaceRouteAccess(roles, 'POST')).toThrow('WORKSPACE_ROLE_REQUIRED');
+    }
+  });
 });

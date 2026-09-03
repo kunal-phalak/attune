@@ -540,11 +540,11 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
 }
 
 function manufacturingConfiguration(input: unknown): Readonly<Record<string, unknown>> {
-  const value = object(input, 'request_manufacturing_quote input');
+  const value = object(input, 'manufacturing configuration');
   exact(
     value,
     ['material', 'thickness_mm', 'finish', 'quantity', 'tolerance_mm'],
-    'request_manufacturing_quote input',
+    'manufacturing configuration',
   );
   if (value.material !== 'aluminium' && value.material !== 'acrylic') {
     throw new TypeError('material must be aluminium or acrylic.');
@@ -562,6 +562,31 @@ function manufacturingConfiguration(input: unknown): Readonly<Record<string, unk
     quantity,
     toleranceMm,
   };
+}
+
+function quoteTerms(input: Record<string, unknown>) {
+  const amountMinor = finite(input.amount_minor, 'amount_minor');
+  const leadTimeDays = finite(input.lead_time_days, 'lead_time_days');
+  const currency = string(input.currency, 'currency').toUpperCase();
+  const validUntil = string(input.valid_until, 'valid_until');
+  if (
+    !Number.isSafeInteger(amountMinor) ||
+    amountMinor <= 0 ||
+    !Number.isSafeInteger(leadTimeDays) ||
+    leadTimeDays < 1 ||
+    leadTimeDays > 365 ||
+    !/^[A-Z]{3}$/.test(currency) ||
+    !Number.isFinite(Date.parse(validUntil))
+  ) {
+    throw new TypeError('Quote terms are invalid.');
+  }
+  return { amountMinor, currency, leadTimeDays, validUntil };
+}
+
+function requireCapability(capabilityIds: ReadonlySet<string>, capabilityId: string): void {
+  if (!capabilityIds.has(capabilityId)) {
+    throw new Error(`The current principal does not have ${capabilityId} authority.`);
+  }
 }
 
 function manufacturingTools(
@@ -596,10 +621,10 @@ function manufacturingTools(
       },
     },
     {
-      name: 'inspect_manufacturing_order',
-      title: 'Inspect manufacturing request and order',
+      name: 'inspect_quote_or_order',
+      title: 'Inspect a quote or order',
       description:
-        'Read the current manufacturing configuration, requests, immutable revisions, quotes, acceptances, and verified Shopify Draft Order without mutation.',
+        'Read linked manufacturing requests, exact saved versions, quotes, acceptances, and verified Shopify Draft Orders without mutation.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: true },
       async execute(input, execution) {
@@ -615,7 +640,13 @@ function manufacturingTools(
             manufacturingConfiguration: view.workspace.manufacturingConfiguration,
             provider: view.workspace.providerCapabilityProfile,
             requests: view.workspace.manufacturingRequests,
-            frozenRevisions: view.workspace.frozenRevisions,
+            savedVersions: view.workspace.savedVersions.map((version) => ({
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              name: version.name,
+              specificationHash: version.specHash,
+              previewStatus: version.preview.status,
+            })),
             quotes: view.workspace.quotes,
             acceptances: view.workspace.acceptances,
             shopifyDraftOrders: view.workspace.externalCommerceRecords,
@@ -625,141 +656,233 @@ function manufacturingTools(
       },
     },
     {
-      name: 'open_attune_surface',
-      title: 'Open an Attune manufacturing surface',
+      name: 'navigate_workspace',
+      title: 'Navigate the Attune workspace',
       description:
-        'Navigate the visible workspace to buyer marketplace/orders or maker requests/provider profile. Before switching buyer or maker perspective, tell the user which perspective will open and why.',
+        'Navigate to a reversible Attune destination. The server derives and revalidates the required Buyer or Maker authority; changing perspective never grants authority.',
       inputSchema: {
         type: 'object',
         properties: {
-          perspective: { type: 'string', enum: ['buyer', 'provider'] },
-          surface: {
+          destination: {
             type: 'string',
-            enum: ['marketplace', 'buyer_orders', 'provider_requests', 'provider_profile'],
+            enum: ['design', 'marketplace', 'buyer_orders', 'maker_requests', 'maker_profile'],
           },
         },
-        required: ['perspective', 'surface'],
+        required: ['destination'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: true, untrustedContentHint: false },
-      async execute(input) {
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      async execute(input, execution) {
         const startedAt = performance.now();
-        const value = object(input, 'open_attune_surface input');
-        exact(value, ['perspective', 'surface'], 'open_attune_surface input');
-        if (value.perspective !== 'buyer' && value.perspective !== 'provider') {
-          throw new TypeError('perspective must be buyer or provider.');
-        }
+        const value = object(input, 'navigate_workspace input');
+        exact(value, ['destination'], 'navigate_workspace input');
         if (
-          value.surface !== 'marketplace' &&
-          value.surface !== 'buyer_orders' &&
-          value.surface !== 'provider_requests' &&
-          value.surface !== 'provider_profile'
+          value.destination !== 'design' &&
+          value.destination !== 'marketplace' &&
+          value.destination !== 'buyer_orders' &&
+          value.destination !== 'maker_requests' &&
+          value.destination !== 'maker_profile'
         ) {
-          throw new TypeError('surface is unsupported.');
+          throw new TypeError('destination is unsupported.');
         }
         if (!runtime.navigate) throw new Error('Workspace navigation is unavailable.');
-        const result = await runtime.navigate({
-          perspective: value.perspective,
-          surface: value.surface,
-        });
+        const result = await runtime.navigate(value.destination, execution?.signal);
         return withToolDispatchTiming(result, startedAt);
       },
     },
     {
-      name: 'continue_to_shopify',
-      title: 'Continue an accepted quote to Shopify',
+      name: 'manage_manufacturing_request',
+      title: 'Manage a manufacturing request',
       description:
-        'Open the verified Shopify Draft Order invoice for the accepted exact revision. Fails closed unless an in-sync Draft Order and matching acceptance are present.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
-      async execute(input, execution) {
-        const startedAt = performance.now();
-        empty(input);
-        if (!runtime.current || !runtime.navigate)
-          throw new Error('Shopify checkout navigation is unavailable.');
-        const view = await runtime.current(execution?.signal);
-        const acceptance = view.workspace.acceptances.at(-1);
-        const draftOrder = view.workspace.externalCommerceRecords.find(
-          (record) =>
-            record.syncState === 'IN_SYNC' &&
-            record.invoiceUrl &&
-            acceptance?.revisionId === record.specRevision &&
-            acceptance.specHash === record.specHash,
-        );
-        if (!draftOrder?.invoiceUrl) {
-          throw new Error('No accepted, in-sync Shopify Draft Order is ready for checkout.');
-        }
-        const result = await runtime.navigate({ url: draftOrder.invoiceUrl });
-        return withToolDispatchTiming(
-          {
-            ...object(result, 'navigation result'),
-            draftOrder: { id: draftOrder.externalId, name: draftOrder.name },
-          },
-          startedAt,
-        );
-      },
-    },
-  ];
-
-  if (capabilityIds.has('request_quote')) {
-    tools.push({
-      name: 'request_manufacturing_quote',
-      title: 'Request a maker quote',
-      description:
-        'Submit the exact current design and manufacturing configuration to the selected live maker. Freezes the request specification hash; use only after find_makers confirms compatibility.',
+        'Configure, bind an exact version, submit or revise a request, prepare Maker quote terms, or accept an exact quote. Maker quote sending stays an explicit human action and Buyer acceptance requires confirmed user intent.',
       inputSchema: {
         type: 'object',
         properties: {
-          material: { type: 'string', enum: ['aluminium', 'acrylic'] },
-          thickness_mm: { type: 'number', exclusiveMinimum: 0 },
-          finish: { type: 'string', minLength: 1, maxLength: 120 },
-          quantity: { type: 'integer', minimum: 1, maximum: 10000 },
-          tolerance_mm: { type: 'number', exclusiveMinimum: 0 },
-        },
-        required: ['material', 'thickness_mm', 'finish', 'quantity', 'tolerance_mm'],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
-      async execute(input, execution) {
-        const startedAt = performance.now();
-        const result = await runtime.execute(
-          { type: 'request_quote', configuration: manufacturingConfiguration(input) },
-          execution?.signal,
-        );
-        return withToolDispatchTiming(result, startedAt);
-      },
-    });
-  }
-
-  if (capabilityIds.has('accept_revision')) {
-    tools.push({
-      name: 'accept_manufacturing_quote',
-      title: 'Accept an exact maker quote',
-      description:
-        'Accept the quoted immutable revision. Requires the revision and quote IDs shown by inspect_manufacturing_order; Attune rejects stale or mismatched authority.',
-      inputSchema: {
-        type: 'object',
-        properties: { revision_id: { type: 'string' }, quote_id: { type: 'string' } },
-        required: ['revision_id', 'quote_id'],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
-      async execute(input, execution) {
-        const startedAt = performance.now();
-        const value = object(input, 'accept_manufacturing_quote input');
-        exact(value, ['revision_id', 'quote_id'], 'accept_manufacturing_quote input');
-        const result = await runtime.execute(
-          {
-            type: 'accept_revision',
-            revisionId: string(value.revision_id, 'revision_id'),
-            quoteId: string(value.quote_id, 'quote_id'),
+          operation: {
+            type: 'string',
+            enum: [
+              'configure',
+              'select_version',
+              'submit',
+              'request_changes',
+              'prepare_quote',
+              'finalize_quote',
+              'accept_quote',
+            ],
           },
-          execution?.signal,
-        );
-        return withToolDispatchTiming(result, startedAt);
+          configuration: {
+            type: 'object',
+            properties: {
+              material: { type: 'string', enum: ['aluminium', 'acrylic'] },
+              thickness_mm: { type: 'number', exclusiveMinimum: 0 },
+              finish: { type: 'string', minLength: 1, maxLength: 120 },
+              quantity: { type: 'integer', minimum: 1, maximum: 10000 },
+              tolerance_mm: { type: 'number', exclusiveMinimum: 0 },
+            },
+            required: ['material', 'thickness_mm', 'finish', 'quantity', 'tolerance_mm'],
+            additionalProperties: false,
+          },
+          version_id: { type: 'string' },
+          request_id: { type: 'string' },
+          note: { type: 'string', maxLength: 500 },
+          amount_minor: { type: 'integer', minimum: 1 },
+          currency: { type: 'string', minLength: 3, maxLength: 3 },
+          lead_time_days: { type: 'integer', minimum: 1, maximum: 365 },
+          valid_until: { type: 'string' },
+          revision_id: { type: 'string' },
+          quote_id: { type: 'string' },
+          user_confirmed: { type: 'boolean' },
+        },
+        required: ['operation'],
+        additionalProperties: false,
       },
-    });
-  }
+      annotations: { readOnlyHint: false, untrustedContentHint: true },
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        const value = object(input, 'manage_manufacturing_request input');
+        const operation = string(value.operation, 'operation');
+        if (!runtime.current) throw new Error('Manufacturing access is unavailable.');
+
+        if (operation === 'configure') {
+          exact(value, ['operation', 'configuration'], 'configure input');
+          requireCapability(capabilityIds, 'request_quote');
+          return withToolDispatchTiming(
+            {
+              status: 'CONFIGURATION_READY',
+              configuration: manufacturingConfiguration(value.configuration),
+              nextAction: 'Select an exact version, then submit after informing the user.',
+            },
+            startedAt,
+          );
+        }
+
+        if (operation === 'select_version') {
+          exact(value, ['operation', 'version_id'], 'select_version input');
+          requireCapability(capabilityIds, 'request_quote');
+          const versionId = string(value.version_id, 'version_id');
+          const view = await runtime.current(execution?.signal);
+          if (versionId === 'current_draft') {
+            return withToolDispatchTiming(
+              {
+                status: 'CURRENT_DRAFT_SELECTED',
+                nextAction: 'Submitting will atomically save and bind a new immutable version.',
+              },
+              startedAt,
+            );
+          }
+          const version = view.workspace.savedVersions.find(
+            (candidate) => candidate.versionId === versionId,
+          );
+          if (!version) throw new Error('The selected saved version does not exist.');
+          return withToolDispatchTiming(
+            {
+              status: 'EXACT_VERSION_SELECTED',
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              specificationHash: version.specHash,
+              previewStatus: version.preview.status,
+            },
+            startedAt,
+          );
+        }
+
+        if (operation === 'submit') {
+          exact(value, ['operation', 'configuration', 'version_id'], 'submit input');
+          requireCapability(capabilityIds, 'request_quote');
+          const versionId =
+            value.version_id === undefined ? 'current_draft' : string(value.version_id, 'version_id');
+          const result = await runtime.execute(
+            {
+              type: 'request_quote',
+              configuration: manufacturingConfiguration(value.configuration),
+              ...(versionId === 'current_draft' ? {} : { versionId }),
+            },
+            execution?.signal,
+          );
+          return withToolDispatchTiming(result, startedAt);
+        }
+
+        if (operation === 'request_changes') {
+          exact(
+            value,
+            ['operation', 'request_id', 'note', 'configuration'],
+            'request_changes input',
+          );
+          requireCapability(capabilityIds, 'request_quote');
+          const result = await runtime.execute(
+            {
+              type: 'request_changes',
+              requestId: string(value.request_id, 'request_id'),
+              ...(typeof value.note === 'string' && value.note.trim()
+                ? { note: value.note.trim() }
+                : {}),
+              ...(value.configuration
+                ? { configuration: manufacturingConfiguration(value.configuration) }
+                : {}),
+            },
+            execution?.signal,
+          );
+          return withToolDispatchTiming(result, startedAt);
+        }
+
+        if (operation === 'prepare_quote' || operation === 'finalize_quote') {
+          exact(
+            value,
+            ['operation', 'amount_minor', 'currency', 'lead_time_days', 'valid_until'],
+            `${operation} input`,
+          );
+          requireCapability(capabilityIds, 'freeze_and_quote_revision');
+          const view = await runtime.current(execution?.signal);
+          const request = view.workspace.manufacturingRequests.findLast((candidate) =>
+            ['PROVIDER_REVIEW_REQUESTED', 'CHANGES_REQUESTED'].includes(candidate.status),
+          );
+          if (!request) throw new Error('No active Maker request is ready to quote.');
+          return withToolDispatchTiming(
+            {
+              status: 'HUMAN_CONFIRMATION_REQUIRED',
+              operation,
+              requestId: request.requestId,
+              versionId: request.versionId,
+              versionNumber: request.versionNumber,
+              specificationHash: request.specHash,
+              quoteTerms: quoteTerms(value),
+              nextAction: 'Open Maker requests and have the Maker explicitly select Send quote.',
+            },
+            startedAt,
+          );
+        }
+
+        if (operation === 'accept_quote') {
+          exact(
+            value,
+            ['operation', 'revision_id', 'quote_id', 'user_confirmed'],
+            'accept_quote input',
+          );
+          requireCapability(capabilityIds, 'accept_revision');
+          if (value.user_confirmed !== true) {
+            return withToolDispatchTiming(
+              {
+                status: 'USER_CONFIRMATION_REQUIRED',
+                nextAction: 'Ask the Buyer to explicitly confirm acceptance of this exact quote.',
+              },
+              startedAt,
+            );
+          }
+          const result = await runtime.execute(
+            {
+              type: 'accept_revision',
+              revisionId: string(value.revision_id, 'revision_id'),
+              quoteId: string(value.quote_id, 'quote_id'),
+            },
+            execution?.signal,
+          );
+          return withToolDispatchTiming(result, startedAt);
+        }
+
+        throw new TypeError('manage_manufacturing_request.operation is unsupported.');
+      },
+    },
+  ];
   return tools;
 }
 
@@ -779,12 +902,10 @@ export function toolNamesForCapabilities(capabilityIds: ReadonlySet<string>): re
   if (capabilityIds.has('edit_draft')) names.push('modify_geometry', 'constrain_geometry');
   names.push(
     'find_makers',
-    'inspect_manufacturing_order',
-    'open_attune_surface',
-    'continue_to_shopify',
+    'inspect_quote_or_order',
+    'manage_manufacturing_request',
+    'navigate_workspace',
   );
-  if (capabilityIds.has('request_quote')) names.push('request_manufacturing_quote');
-  if (capabilityIds.has('accept_revision')) names.push('accept_manufacturing_quote');
   return names;
 }
 

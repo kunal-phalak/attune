@@ -32,11 +32,7 @@ export interface AgentContextFocus {
 export interface ToolRuntime {
   readonly current?: (signal?: AbortSignal) => Promise<AttuneApiView>;
   readonly marketplace?: (signal?: AbortSignal) => Promise<unknown>;
-  readonly navigate?: (
-    destination:
-      | { readonly perspective: 'buyer' | 'provider'; readonly surface: string }
-      | { readonly url: string },
-  ) => Promise<unknown>;
+  readonly navigate?: (surface: string, signal?: AbortSignal) => Promise<unknown>;
   readonly observe: (
     focus?: AgentContextFocus,
     signal?: AbortSignal,
@@ -322,7 +318,7 @@ export function createToolRuntime(input: {
     }
   };
   const current = async (signal?: AbortSignal) => {
-    input.report({ execution: 'executing', lastAction: 'inspect_manufacturing_order' });
+    input.report({ execution: 'executing', lastAction: 'inspect_quote_or_order' });
     try {
       const response = await fetch(workspaceEndpoint(), {
         cache: 'no-store',
@@ -333,10 +329,10 @@ export function createToolRuntime(input: {
       if (!isAttuneApiView(next)) throw new TypeError('Attune returned an invalid workspace view.');
       input.viewRef.current = next;
       input.updateView(next);
-      input.report({ execution: 'completed', lastAction: 'inspect_manufacturing_order' });
+      input.report({ execution: 'completed', lastAction: 'inspect_quote_or_order' });
       return next;
     } catch (error) {
-      input.report({ execution: 'failed', lastAction: 'inspect_manufacturing_order' });
+      input.report({ execution: 'failed', lastAction: 'inspect_quote_or_order' });
       throw error;
     }
   };
@@ -361,14 +357,52 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
-  const navigate: ToolRuntime['navigate'] = async (destination) => {
-    const url =
-      'url' in destination
-        ? destination.url
-        : `/workspace/${encodeURIComponent(input.workspaceId)}?perspective=${destination.perspective}&surface=${encodeURIComponent(destination.surface)}`;
-    input.report({ execution: 'completed', lastAction: 'open_attune_surface' });
-    window.setTimeout(() => window.location.assign(url), 50);
-    return { status: 'OPENING', destination: url };
+  const navigate: ToolRuntime['navigate'] = async (surface, signal) => {
+    const fromSurface = new URLSearchParams(window.location.search).get('surface') ?? 'design';
+    const currentPerspective = perspective();
+    const requiredPerspective =
+      surface === 'buyer_orders'
+        ? 'buyer'
+        : surface === 'maker_requests' || surface === 'maker_profile'
+          ? 'provider'
+          : currentPerspective;
+    const action = 'navigate_workspace';
+    input.report({ execution: 'executing', lastAction: action });
+    try {
+      const response = await fetch(
+        attuneWorkspaceEndpoint('/api/attune/webmcp', input.workspaceId, {
+          perspective: requiredPerspective,
+        }),
+        { cache: 'no-store', headers: { Accept: 'application/json' }, signal },
+      );
+      const authorizedView = await responseJson(response);
+      if (!isAttuneApiView(authorizedView)) {
+        throw new TypeError('Attune returned an invalid navigation authority response.');
+      }
+      signal?.throwIfAborted();
+      const pageSurface =
+        surface === 'maker_requests'
+          ? 'provider_requests'
+          : surface === 'maker_profile'
+            ? 'provider_profile'
+            : surface;
+      const parameters = new URLSearchParams();
+      if (requiredPerspective === 'provider') parameters.set('perspective', 'provider');
+      if (pageSurface !== 'design') parameters.set('surface', pageSurface);
+      const url = `/workspace/${encodeURIComponent(input.workspaceId)}${parameters.size ? `?${parameters}` : ''}`;
+      window.location.assign(url);
+      input.report({ execution: 'completed', lastAction: action });
+      return {
+        status: 'NAVIGATION_INITIATED',
+        fromSurface,
+        toSurface: surface,
+        perspective: requiredPerspective,
+        authorityUnchanged: true,
+      };
+    } catch (error) {
+      input.report({ execution: 'failed', lastAction: action });
+      throw error;
+    }
   };
   const execute = async (command: Readonly<Record<string, unknown>>, signal?: AbortSignal) => {
     const startedAt = performance.now();

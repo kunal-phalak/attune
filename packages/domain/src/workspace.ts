@@ -663,6 +663,13 @@ export function transitionWorkspace(
               specHash,
               provider,
               visibility: 'PRIVATE',
+              reviewAccess: {
+                providerId: provider.providerId,
+                versionId: version.versionId,
+                permission: 'VIEW_FROZEN_VERSION',
+                reason: 'Shared for manufacturing review',
+                grantedAt: metadata.now,
+              },
               status: 'PROVIDER_REVIEW_REQUESTED',
               configuration,
               providerProfileVersion: provider.profileVersion,
@@ -684,9 +691,9 @@ export function transitionWorkspace(
         ({ requestId }) => requestId === command.requestId,
       );
       if (!previous) throw new Error('The manufacturing request was not found.');
-      if (workspace.acceptances.some(({ requestId }) => requestId === previous.requestId)) {
-        throw new Error('Accepted work requires a new manufacturing request.');
-      }
+      const accepted = workspace.acceptances.some(
+        ({ requestId }) => requestId === previous.requestId,
+      );
       const configuration = command.configuration ?? previous.configuration;
       if (!configuration) throw new Error('Manufacturing configuration is required.');
       const version = nextSavedVersion(workspace, metadata);
@@ -705,7 +712,9 @@ export function transitionWorkspace(
           manufacturingRequests: [
             ...workspace.manufacturingRequests.map((request) =>
               request.requestId === previous.requestId
-                ? { ...request, status: 'SUPERSEDED' as const, updatedAt: metadata.now }
+                ? accepted
+                  ? request
+                  : { ...request, status: 'SUPERSEDED' as const, updatedAt: metadata.now }
                 : request,
             ),
             {
@@ -718,6 +727,13 @@ export function transitionWorkspace(
               specRevision: `r${version.sourceDraftVersion}`,
               specHash,
               configuration,
+              reviewAccess: {
+                providerId: provider.providerId,
+                versionId: version.versionId,
+                permission: 'VIEW_FROZEN_VERSION',
+                reason: 'Shared for manufacturing review',
+                grantedAt: metadata.now,
+              },
               status: 'CHANGES_REQUESTED',
               requestedAt: metadata.now,
               updatedAt: metadata.now,

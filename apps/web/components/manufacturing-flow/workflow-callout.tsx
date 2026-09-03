@@ -1,0 +1,118 @@
+'use client';
+
+import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Collapsible } from '@cloudflare/kumo/components/collapsible';
+import { Surface } from '@cloudflare/kumo/components/surface';
+import { CaretDownIcon, SealCheckIcon } from '@phosphor-icons/react';
+import { useEffect, useMemo, useState } from 'react';
+
+import type { AttuneApiView, CapabilityRole } from '../../lib/attune-view';
+import type { ManufacturingSurface } from '../manufacturing-flow';
+
+export function WorkflowCallout({
+  workspaceId,
+  perspective,
+  view,
+  onSurface,
+}: {
+  readonly workspaceId: string;
+  readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly view: AttuneApiView;
+  readonly onSurface: (surface: ManufacturingSurface) => void;
+}) {
+  const state = useMemo(() => {
+    const request = view.workspace.manufacturingRequests.findLast(
+      ({ status }) => status !== 'SUPERSEDED',
+    );
+    const quote = request
+      ? view.workspace.quotes.findLast(({ requestId }) => requestId === request.requestId)
+      : undefined;
+    const acceptance = quote
+      ? view.workspace.acceptances.find(({ quoteId }) => quoteId === quote.quoteId)
+      : undefined;
+    if (!request || !quote) return null;
+    if (acceptance) {
+      return {
+        key: `accepted:${acceptance.acceptanceId}`,
+        title: 'Version accepted',
+        detail: `Version ${acceptance.versionNumber} is locked and ready for commerce.`,
+        versionNumber: acceptance.versionNumber,
+        kind: 'accepted' as const,
+      };
+    }
+    if (quote.status !== 'READY') return null;
+    return perspective === 'provider'
+      ? {
+          key: `maker:${quote.quoteId}`,
+          title: 'Quote sent',
+          detail: `Buyer can now review Version ${quote.versionNumber}.`,
+          versionNumber: quote.versionNumber,
+          kind: 'maker' as const,
+        }
+      : {
+          key: `buyer:${quote.quoteId}`,
+          title: 'Quote ready',
+          detail: `${view.workspace.providerCapabilityProfile.providerName} quoted Version ${quote.versionNumber}.`,
+          versionNumber: quote.versionNumber,
+          kind: 'buyer' as const,
+        };
+  }, [perspective, view.workspace]);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => setOpen(true), [state?.key]);
+  if (!state) return null;
+
+  return (
+    <Surface render={<aside />} className="workflow-callout t-acc" data-open={open}>
+      <Collapsible.Root open={open} onOpenChange={setOpen}>
+        <div className="workflow-callout-head">
+          <span className="workflow-callout-icon"><SealCheckIcon size={18} weight="fill" /></span>
+          <span>
+            <strong>{state.title}</strong>
+            {!open ? <small>Version {state.versionNumber}</small> : null}
+          </span>
+          <Collapsible.Trigger
+            className="workflow-callout-toggle t-acc-head"
+            aria-label={open ? 'Collapse workflow status' : 'Expand workflow status'}
+          >
+            <span className="t-acc-chevron"><CaretDownIcon size={16} /></span>
+          </Collapsible.Trigger>
+        </div>
+        <Collapsible.Panel className="t-acc-panel">
+          <div className="t-acc-panel-inner">
+            <p>{state.detail}</p>
+            <div className="workflow-callout-actions">
+              {state.kind === 'maker' ? (
+                <LinkButton
+                  href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=buyer_orders`}
+                  size="sm"
+                  variant="primary"
+                >
+                  Go to Buyer view
+                </LinkButton>
+              ) : null}
+              {state.kind === 'buyer' ? (
+                <Button type="button" size="sm" variant="primary" onClick={() => onSurface('buyer_orders')}>
+                  Review quote
+                </Button>
+              ) : null}
+              {state.kind === 'accepted' ? (
+                <>
+                  <Button type="button" size="sm" variant="primary" onClick={() => onSurface('buyer_orders')}>
+                    Continue to checkout
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => onSurface('design')}>
+                    Return to design
+                  </Button>
+                </>
+              ) : null}
+              <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+                Collapse
+              </Button>
+            </div>
+          </div>
+        </Collapsible.Panel>
+      </Collapsible.Root>
+    </Surface>
+  );
+}

@@ -201,6 +201,8 @@ function WorkspaceTools({
   constraintTool,
   panels,
   collaboration,
+  canEdit,
+  canComment,
   showLabels,
   onCanvasTool,
   onConstraintTool,
@@ -210,6 +212,8 @@ function WorkspaceTools({
   readonly constraintTool: ConstraintTool | null;
   readonly panels: EditorPanelState;
   readonly collaboration: boolean;
+  readonly canEdit: boolean;
+  readonly canComment: boolean;
   readonly showLabels: boolean;
   readonly onCanvasTool: (tool: CanvasTool) => void;
   readonly onConstraintTool: (tool: ConstraintTool | null) => void;
@@ -230,14 +234,15 @@ function WorkspaceTools({
           icon={<AppIcons.Select size={20} weight="regular" />}
           onClick={() => onCanvasTool('select')}
         />
-        <ToolButton
-          label="Comments"
-          showLabel={showLabels}
-          active={panels.leftPanel === 'comments'}
-          disabled={!collaboration}
-          icon={<AppIcons.Comments size={20} weight="regular" />}
-          onClick={() => onPanel('comments')}
-        />
+        {collaboration && canComment ? (
+          <ToolButton
+            label="Comments"
+            showLabel={showLabels}
+            active={panels.leftPanel === 'comments'}
+            icon={<AppIcons.Comments size={20} weight="regular" />}
+            onClick={() => onPanel('comments')}
+          />
+        ) : null}
         <ToolButton
           label="Items"
           showLabel={showLabels}
@@ -246,7 +251,8 @@ function WorkspaceTools({
           onClick={() => onPanel('items')}
         />
       </Toolbar>
-      <Toolbar
+      {canEdit ? (
+        <Toolbar
         orientation="vertical"
         className="workspace-tool-island is-left is-geometry"
         aria-label="Geometry tools"
@@ -272,7 +278,8 @@ function WorkspaceTools({
             onClick={() => onCanvasTool(geometryTool)}
           />
         ))}
-      </Toolbar>
+        </Toolbar>
+      ) : null}
       <Toolbar
         orientation="vertical"
         className="workspace-tool-island is-right is-context"
@@ -287,7 +294,8 @@ function WorkspaceTools({
           side="left"
         />
       </Toolbar>
-      <Toolbar
+      {canEdit ? (
+        <Toolbar
         orientation="vertical"
         className="workspace-tool-island is-right is-constraints"
         aria-label="Constraint tools"
@@ -330,8 +338,10 @@ function WorkspaceTools({
             }
           />
         ))}
-      </Toolbar>
-      <Toolbar
+        </Toolbar>
+      ) : null}
+      {canEdit ? (
+        <Toolbar
         orientation="vertical"
         className="workspace-tool-island is-right is-dimensions"
         aria-label="Dimension tools"
@@ -363,7 +373,8 @@ function WorkspaceTools({
             }
           />
         ))}
-      </Toolbar>
+        </Toolbar>
+      ) : null}
     </TooltipProvider>
   );
 }
@@ -435,6 +446,7 @@ function WorkspaceShell({
   collaboration,
   canEdit = true,
   canComment = canEdit,
+  canManageSharing = false,
   perspective,
   actorName,
   actorId,
@@ -450,6 +462,7 @@ function WorkspaceShell({
   readonly collaboration: boolean;
   readonly canEdit?: boolean;
   readonly canComment?: boolean;
+  readonly canManageSharing?: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly actorName: string;
   readonly actorId: string;
@@ -699,17 +712,19 @@ function WorkspaceShell({
           onVersionPreview={setVersionPreview}
           onSaveVersion={onSaveVersion}
           agentControl={
-            canEdit ? (
-              <>
-                <FindMakersButton onClick={() => setManufacturingSurface('marketplace')} />
-                {collaboration && roomId ? <WorkspaceShareDialog roomId={roomId} /> : null}
+            <>
+              <FindMakersButton onClick={() => setManufacturingSurface('marketplace')} />
+              {collaboration && roomId && canManageSharing ? (
+                <WorkspaceShareDialog roomId={roomId} />
+              ) : null}
+              {initialView.product.agentToolsEnabled ? (
                 <AttuneWebMcp
                   workspaceId={workspaceId}
                   perspective={perspective}
                   initialView={initialView}
                 />
-              </>
-            ) : null
+              ) : null}
+            </>
           }
         />
         {view ? (
@@ -733,19 +748,21 @@ function WorkspaceShell({
             <Button type="button" variant="ghost" size="sm" onClick={() => setVersionPreview(null)}>
               Back to current
             </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                void applySketchCommand({
-                  type: 'restore_sketch',
-                  snapshot: sketchSnapshotFromDocument(versionPreview.document),
-                }).then(() => setVersionPreview(null));
-              }}
-            >
-              Restore this version
-            </Button>
+            {canEdit ? (
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  void applySketchCommand({
+                    type: 'restore_sketch',
+                    snapshot: sketchSnapshotFromDocument(versionPreview.document),
+                  }).then(() => setVersionPreview(null));
+                }}
+              >
+                Restore this version
+              </Button>
+            ) : null}
           </output>
         ) : null}
         <LayerCard render={<section />} className="workspace-mobile-notice" aria-live="polite">
@@ -756,6 +773,8 @@ function WorkspaceShell({
           constraintTool={constraintTool}
           panels={panels}
           collaboration={collaboration}
+          canEdit={canEdit}
+          canComment={canComment}
           showLabels={showToolLabels}
           onCanvasTool={setActiveCanvasTool}
           onConstraintTool={setActiveConstraintTool}
@@ -876,6 +895,7 @@ export function WorkspaceProduct({
   projectName,
   initialView,
   initialSurface = 'design',
+  canManageSharing = false,
 }: {
   readonly workspaceId: string;
   readonly roomId: string;
@@ -885,6 +905,7 @@ export function WorkspaceProduct({
   readonly projectName: string;
   readonly initialView: AttuneApiView;
   readonly initialSurface?: ManufacturingSurface;
+  readonly canManageSharing?: boolean;
 }) {
   const resolver = useMemo(() => workspaceUserResolver(roomId), [roomId]);
   if (!collaboration) {
@@ -898,6 +919,7 @@ export function WorkspaceProduct({
         projectName={projectName}
         initialView={initialView}
         initialSurface={initialSurface}
+        canManageSharing={canManageSharing}
       />
     );
   }
@@ -922,6 +944,7 @@ export function WorkspaceProduct({
           projectName={projectName}
           initialView={initialView}
           initialSurface={initialSurface}
+          canManageSharing={canManageSharing}
         />
       </RoomProvider>
     </LiveblocksProvider>

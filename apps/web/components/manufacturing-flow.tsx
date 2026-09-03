@@ -1,8 +1,10 @@
 'use client';
 
-import type { ProviderCapabilityProfile } from '@attune/domain';
+import type { PanelGeometry, ProviderCapabilityProfile } from '@attune/domain';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
+import { Select } from '@cloudflare/kumo/components/select';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import {
   ArrowRightIcon,
@@ -11,7 +13,6 @@ import {
   ClockIcon,
   CubeIcon,
   FactoryIcon,
-  MapPinIcon,
   PackageIcon,
   SealCheckIcon,
   ShoppingBagOpenIcon,
@@ -24,8 +25,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   attuneWorkspaceEndpoint,
   commandRequestBody,
-  isAttuneApiView,
   requestAttuneView,
+  AttuneHttpError,
   type AttuneApiView,
   type CapabilityRole,
 } from '../lib/attune-view';
@@ -35,6 +36,15 @@ import {
   validateUniversalGeometry,
 } from '../lib/manufacturing/validation';
 import { attuneToastManager } from './attune-ui-provider';
+import { BuyerProfileDialog } from './manufacturing-flow/buyer-profile-dialog';
+import { MakerMap } from './manufacturing-flow/maker-map';
+import { ProviderProfileSurface } from './manufacturing-flow/provider-profile';
+import {
+  isMarketplacePayload,
+  type MarketplacePayload,
+  type MarketplaceProvider,
+} from './manufacturing-flow/types';
+import { WorkflowCallout } from './manufacturing-flow/workflow-callout';
 
 export type ManufacturingSurface =
   | 'design'
@@ -43,246 +53,63 @@ export type ManufacturingSurface =
   | 'provider_requests'
   | 'provider_profile';
 
-interface MarketplaceProvider {
-  readonly id: string;
-  readonly name: string;
-  readonly label: 'Live provider' | 'Demo profile';
-  readonly connectionLabel?: string;
-  readonly locationName?: string;
-  readonly address?: string;
-  readonly latitude?: number;
-  readonly longitude?: number;
-  readonly fit: 'Compatible' | 'Needs review' | 'Not compatible';
-  readonly reason: string;
-}
-
-interface MarketplacePayload {
-  readonly view: AttuneApiView;
-  readonly providerProfile: ProviderCapabilityProfile;
-  readonly connection: {
-    readonly verifiedAt: string;
-    readonly shop: {
-      readonly id: string;
-      readonly name: string;
-      readonly myshopifyDomain: string;
-      readonly primaryDomain: { readonly host: string; readonly url: string };
-      readonly currencyCode: string;
-    };
-    readonly locations: readonly {
-      readonly id: string;
-      readonly name: string;
-      readonly isActive: boolean;
-      readonly fulfillsOnlineOrders: boolean;
-      readonly address?: { readonly formatted?: readonly string[] } | null;
-    }[];
-    readonly capabilities: {
-      readonly identity: boolean;
-      readonly locations: boolean;
-      readonly draftOrders: boolean;
-      readonly productMaterialization: boolean;
-      readonly storefront: boolean;
-    };
-  };
-  readonly providers: readonly MarketplaceProvider[];
-}
-
-function isMarketplacePayload(value: unknown): value is MarketplacePayload {
-  if (typeof value !== 'object' || value === null) return false;
-  const connection = Reflect.get(value, 'connection');
-  const profile = Reflect.get(value, 'providerProfile');
-  return (
-    isAttuneApiView(Reflect.get(value, 'view')) &&
-    Array.isArray(Reflect.get(value, 'providers')) &&
-    typeof connection === 'object' &&
-    connection !== null &&
-    Array.isArray(Reflect.get(connection, 'locations')) &&
-    typeof profile === 'object' &&
-    profile !== null &&
-    typeof Reflect.get(profile, 'providerId') === 'string'
-  );
-}
-
-interface MapboxMapInstance {
-  flyTo(options: { center: [number, number]; zoom: number; essential: boolean }): void;
-  remove(): void;
-}
-
-interface MapboxMarkerInstance {
-  setLngLat(coordinates: [number, number]): MapboxMarkerInstance;
-  addTo(map: MapboxMapInstance): MapboxMarkerInstance;
-  getElement(): HTMLElement;
-  remove(): void;
-}
-
-interface MapboxRuntime {
-  accessToken: string;
-  Map: new (options: {
-    container: HTMLElement;
-    style: string;
-    center: [number, number];
-    zoom: number;
-    attributionControl: boolean;
-  }) => MapboxMapInstance;
-  Marker: new (options: { element: HTMLElement; anchor: string }) => MapboxMarkerInstance;
-}
-
-declare global {
-  interface Window {
-    mapboxgl?: MapboxRuntime;
-  }
-}
-
-function MapboxProviderMap({
-  providers,
-  selectedId,
-  onSelect,
+function DesignPreview({
+  view,
+  versionId,
 }: {
-  readonly providers: readonly MarketplaceProvider[];
-  readonly selectedId: string;
-  readonly onSelect: (id: string) => void;
+  readonly view: AttuneApiView;
+  readonly versionId?: string;
 }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapboxMapInstance | null>(null);
-  const markersRef = useRef<MapboxMarkerInstance[]>([]);
-  const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
-  const selected = providers.find(({ id }) => id === selectedId);
-
-  useEffect(() => {
-    if (!token || !rootRef.current) return undefined;
-    let cancelled = false;
-    let script = document.querySelector<HTMLScriptElement>('script[data-attune-mapbox]');
-    let stylesheet = document.querySelector<HTMLLinkElement>('link[data-attune-mapbox]');
-    if (!stylesheet) {
-      stylesheet = document.createElement('link');
-      stylesheet.rel = 'stylesheet';
-      stylesheet.href = 'https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.css';
-      stylesheet.dataset.attuneMapbox = '';
-      document.head.append(stylesheet);
-    }
-    const initialize = () => {
-      if (cancelled || !rootRef.current || !window.mapboxgl || mapRef.current) return;
-      window.mapboxgl.accessToken = token;
-      const first = providers.find(
-        (provider) =>
-          typeof provider.longitude === 'number' && typeof provider.latitude === 'number',
-      );
-      const map = new window.mapboxgl.Map({
-        container: rootRef.current,
-        style: 'mapbox://styles/mapbox/light-v11',
-        center: [first?.longitude ?? 78.9629, first?.latitude ?? 20.5937],
-        zoom: first ? 8 : 4,
-        attributionControl: false,
-      });
-      mapRef.current = map;
-      markersRef.current = providers.flatMap((provider) => {
-        if (typeof provider.longitude !== 'number' || typeof provider.latitude !== 'number')
-          return [];
-        const element = document.createElement('button');
-        element.type = 'button';
-        element.className = 'maker-map-pin';
-        element.dataset.selected = provider.id === selectedId ? 'true' : 'false';
-        element.setAttribute('aria-label', `Select ${provider.name}`);
-        element.addEventListener('click', () => onSelect(provider.id));
-        return [
-          new window.mapboxgl!.Marker({ element, anchor: 'bottom' })
-            .setLngLat([provider.longitude, provider.latitude])
-            .addTo(map),
-        ];
-      });
-    };
-    if (window.mapboxgl) initialize();
-    else {
-      script = document.createElement('script');
-      script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.js';
-      script.async = true;
-      script.dataset.attuneMapbox = '';
-      script.addEventListener('load', initialize, { once: true });
-      document.head.append(script);
-    }
-    return () => {
-      cancelled = true;
-      markersRef.current.forEach((marker) => marker.remove());
-      markersRef.current = [];
-      mapRef.current?.remove();
-      mapRef.current = null;
-    };
-  }, [onSelect, providers, selectedId, token]);
-
-  useEffect(() => {
-    markersRef.current.forEach((marker) => {
-      const markerId = marker.getElement().getAttribute('aria-label');
-      marker.getElement().dataset.selected =
-        markerId === `Select ${selected?.name}` ? 'true' : 'false';
-    });
-    if (
-      mapRef.current &&
-      typeof selected?.longitude === 'number' &&
-      typeof selected.latitude === 'number'
-    ) {
-      mapRef.current.flyTo({
-        center: [selected.longitude, selected.latitude],
-        zoom: 10,
-        essential: true,
-      });
-    }
-  }, [selected]);
-
-  return (
-    <div className="maker-map" aria-label="Maker locations">
-      <div ref={rootRef} className="maker-mapbox" />
-      {!token ? (
-        <div className="maker-map-fallback">
-          <div className="maker-map-grid" aria-hidden />
-          {providers.map((provider, index) => (
-            <button
-              key={provider.id}
-              type="button"
-              className="maker-map-fallback-pin"
-              style={{ left: `${22 + index * 28}%`, top: `${38 + (index % 2) * 18}%` }}
-              data-selected={provider.id === selectedId}
-              onClick={() => onSelect(provider.id)}
-              aria-label={`Select ${provider.name}`}
-            >
-              <MapPinIcon size={provider.id === selectedId ? 30 : 24} weight="fill" />
-            </button>
-          ))}
-          <span className="maker-map-unavailable">Mapbox token required for geographic tiles</span>
-        </div>
-      ) : null}
-      <div className="maker-map-caption">
-        <MapPinIcon size={16} />
-        <span>{selected?.address || selected?.locationName || 'Select a maker'}</span>
-      </div>
-    </div>
-  );
-}
-
-function DesignPreview({ view }: { readonly view: AttuneApiView }) {
-  const geometry = view.workspace.geometry;
+  const version = versionId
+    ? view.workspace.savedVersions.find((candidate) => candidate.versionId === versionId)
+    : undefined;
+  const preview = versionId
+    ? view.versionPreviews.find((candidate) => candidate.versionId === versionId)
+    : undefined;
+  const geometry: PanelGeometry = version?.geometry ?? view.workspace.geometry;
+  if (preview?.status === 'STORED' && preview.url) {
+    return (
+      <img
+        className="manufacturing-design-preview"
+        src={preview.url}
+        alt={`Exact preview of Version ${version?.versionNumber ?? ''}`.trim()}
+      />
+    );
+  }
   const sx = 330 / Math.max(geometry.width, 1);
   const sy = 188 / Math.max(geometry.height, 1);
+  const storageMessage = versionId
+    ? preview?.status === 'UNCONFIGURED'
+      ? 'Private preview storage is not configured. Showing exact local geometry.'
+      : preview?.status === 'FAILED'
+        ? 'Private preview storage failed. Showing exact local geometry.'
+        : preview?.status === 'PENDING'
+          ? 'Private preview storage is pending. Showing exact local geometry.'
+          : 'Exact preview is not stored yet. Showing exact local geometry.'
+    : null;
   return (
-    <svg
-      className="manufacturing-design-preview"
-      viewBox="0 0 360 218"
-      aria-label="Exact design preview"
-    >
-      <defs>
-        <pattern id="manufacturing-grid" width="14" height="14" patternUnits="userSpaceOnUse">
-          <path d="M14 0H0V14" />
-        </pattern>
-      </defs>
-      <rect width="360" height="218" className="manufacturing-preview-bg" />
-      <rect
-        width="360"
-        height="218"
-        fill="url(#manufacturing-grid)"
-        className="manufacturing-preview-grid"
-      />
-      <g
-        transform={`translate(15 15) scale(${sx} ${sy})`}
-        className="manufacturing-preview-geometry"
+    <figure className="exact-preview-frame">
+      <svg
+        className="manufacturing-design-preview"
+        viewBox="0 0 360 218"
+        aria-label="Exact design preview"
       >
+        <defs>
+          <pattern id="manufacturing-grid" width="14" height="14" patternUnits="userSpaceOnUse">
+            <path d="M14 0H0V14" />
+          </pattern>
+        </defs>
+        <rect width="360" height="218" className="manufacturing-preview-bg" />
+        <rect
+          width="360"
+          height="218"
+          fill="url(#manufacturing-grid)"
+          className="manufacturing-preview-grid"
+        />
+        <g
+          transform={`translate(15 15) scale(${sx} ${sy})`}
+          className="manufacturing-preview-geometry"
+        >
         <rect width={geometry.width} height={geometry.height} rx={5 / Math.max(sx, sy)} />
         {[...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts].map(
           (feature) => (
@@ -310,8 +137,10 @@ function DesignPreview({ view }: { readonly view: AttuneApiView }) {
             vectorEffect="non-scaling-stroke"
           />
         ))}
-      </g>
-    </svg>
+        </g>
+      </svg>
+      {storageMessage ? <figcaption>{storageMessage}</figcaption> : null}
+    </figure>
   );
 }
 
@@ -329,6 +158,15 @@ function StatusBadge({ status }: { readonly status: string }) {
       {label}
     </span>
   );
+}
+
+function makerInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
 }
 
 function FitReport({
@@ -357,34 +195,63 @@ function FitReport({
   const process = profile.processes[0];
   const holes = [...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts];
   const smallestHole = Math.min(...holes.map(({ diameter }) => diameter));
+  const slots = [geometry.slot, ...geometry.ventSlots];
+  const smallestSlot = Math.min(...slots.map(({ width, height }) => Math.min(width, height)));
+  const materialCapability = Array.isArray(profile.materials)
+    ? profile.materials.find(({ material }) => material === configuration.material)
+    : undefined;
   const compatible = universal.length === 0 && providerIssues.length === 0;
   const checks = [
     {
-      label: 'Work envelope',
-      detail: `${geometry.width} × ${geometry.height} mm · provider ${process?.workEnvelopeMm.width} × ${process?.workEnvelopeMm.height} mm`,
+      label: 'Overall size',
+      detail: `${geometry.width} × ${geometry.height} mm actual · ${process?.workEnvelopeMm.width} × ${process?.workEnvelopeMm.height} mm envelope`,
+      source: 'Maker profile',
       pass: !issueIds.has('provider_work_envelope'),
     },
     {
-      label: 'Material and thickness',
-      detail: `${configuration.thicknessMm} mm ${configuration.material}`,
-      pass: !issueIds.has('provider_material') && !issueIds.has('provider_thickness'),
+      label: 'Material',
+      detail: `${configuration.material} requested · ${materialCapability ? 'supported' : 'not declared'}`,
+      source: 'Project requirement · Maker profile',
+      pass: !issueIds.has('provider_material'),
     },
     {
-      label: 'Minimum hole',
-      detail: `${smallestHole} mm actual · ≥ ${profile.minimums.holeDiameterMm} mm provider minimum`,
+      label: 'Thickness',
+      detail: `${configuration.thicknessMm} mm requested · ${Array.isArray(materialCapability?.thicknessesMm) ? materialCapability.thicknessesMm.join(', ') : (materialCapability?.thicknessesMm ?? 'not declared')} mm supported`,
+      source: 'Project requirement · Maker profile',
+      pass: !issueIds.has('provider_thickness'),
+    },
+    {
+      label: 'Smallest hole',
+      detail: `${smallestHole} mm actual · ${profile.minimums.holeDiameterMm} mm minimum`,
+      source: 'Universal geometry rule · Maker profile',
       pass: !issueIds.has('provider_hole_minimum'),
     },
     {
+      label: 'Slot / feature',
+      detail: `${smallestSlot} mm actual · ${profile.minimums.slotWidthMm} mm minimum`,
+      source: 'Universal geometry rule · Maker profile',
+      pass: !issueIds.has('provider_slot_minimum'),
+    },
+    {
       label: 'Edge clearance',
-      detail: `${calculateSlotRightClearance(geometry)} mm actual · ≥ ${profile.minimums.edgeClearanceMm} mm provider minimum`,
+      detail: `${calculateSlotRightClearance(geometry)} mm actual · ${profile.minimums.edgeClearanceMm} mm required`,
+      source: 'Universal geometry rule · Maker profile',
       pass: !issueIds.has('slot_clearance'),
+    },
+    {
+      label: 'Tolerance',
+      detail: `±${configuration.toleranceMm} mm requested · ±${profile.toleranceMm} mm capability`,
+      source: 'Project requirement · Maker profile',
+      pass:
+        typeof profile.toleranceMm !== 'number' ||
+        configuration.toleranceMm >= profile.toleranceMm,
     },
   ];
   return (
     <section className="fit-report">
       <div className="fit-report-heading">
         <div>
-          <span className="manufacturing-eyebrow">Provider fit</span>
+          <span className="manufacturing-eyebrow">Maker fit</span>
           <h3>
             {compatible ? 'Compatible' : universal.length ? 'Not compatible' : 'Needs review'}
           </h3>
@@ -406,6 +273,7 @@ function FitReport({
             <span>
               <strong>{check.label}</strong>
               <small>{check.detail}</small>
+              <small className="fit-check-source">Source: {check.source}</small>
             </span>
           </div>
         ))}
@@ -451,19 +319,19 @@ function MarketplaceSurface({
   view,
   payload,
   selectedId,
-  onPayload,
   onView,
   onSelectedId,
   onSurface,
+  canConfigure,
 }: {
   readonly workspaceId: string;
   readonly view: AttuneApiView;
   readonly payload: MarketplacePayload;
   readonly selectedId: string;
-  readonly onPayload: (payload: MarketplacePayload) => void;
   readonly onView: (view: AttuneApiView) => void;
   readonly onSelectedId: (id: string) => void;
   readonly onSurface: (surface: ManufacturingSurface) => void;
+  readonly canConfigure: boolean;
 }) {
   const profile = payload.providerProfile;
   const initial = view.workspace.manufacturingConfiguration ?? {
@@ -475,6 +343,9 @@ function MarketplaceSurface({
   };
   const [configuration, setConfiguration] = useState(initial);
   const [submitting, setSubmitting] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [selectedVersionId, setSelectedVersionId] = useState('current');
+  const makerCardRefs = useRef(new Map<string, HTMLElement>());
   const selected = payload.providers.find(({ id }) => id === selectedId) ?? payload.providers[0];
   const geometry = {
     ...view.workspace.geometry,
@@ -482,21 +353,9 @@ function MarketplaceSurface({
     thickness: configuration.thicknessMm,
   };
   const compatible =
-    selected?.label === 'Live provider' &&
+    selected?.label === 'Live maker' &&
     validateUniversalGeometry(geometry).length === 0 &&
     validateProviderCapability(geometry, profile).length === 0;
-
-  const selectLocation = async (locationId: string) => {
-    const response = await fetch(attuneWorkspaceEndpoint('/api/attune/marketplace', workspaceId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locationId }),
-    });
-    const next: unknown = await response.json();
-    if (!response.ok || !isMarketplacePayload(next)) throw new Error('Location update failed.');
-    onPayload(next);
-    onView(next.view);
-  };
 
   const submitRequest = async () => {
     setSubmitting(true);
@@ -507,7 +366,11 @@ function MarketplaceSurface({
           method: 'POST',
           body: commandRequestBody(
             view,
-            { type: 'request_quote', configuration },
+            {
+              type: 'request_quote',
+              configuration,
+              ...(selectedVersionId !== 'current' ? { versionId: selectedVersionId } : {}),
+            },
             'human-request',
             view.workspace.workspaceSeq,
           ),
@@ -516,14 +379,18 @@ function MarketplaceSurface({
       onView(next);
       attuneToastManager.add({
         title: 'Request sent',
-        description: `The exact r${next.workspace.draftVersion} revision is ready for maker review.`,
+        description: `Version ${next.workspace.manufacturingRequests.at(-1)?.versionNumber ?? next.workspace.savedVersions.at(-1)?.versionNumber} is ready for maker review.`,
         variant: 'success',
       });
       onSurface('buyer_orders');
     } catch (error) {
+      if (error instanceof AttuneHttpError && error.code === 'BUYER_COMMERCE_PROFILE_REQUIRED') {
+        setProfileOpen(true);
+        return;
+      }
       attuneToastManager.add({
         title: 'Request not sent',
-        description: error instanceof Error ? error.message : 'Review provider fit and try again.',
+        description: error instanceof Error ? error.message : 'Review maker fit and try again.',
         variant: 'error',
       });
     } finally {
@@ -533,6 +400,11 @@ function MarketplaceSurface({
 
   return (
     <div className="manufacturing-layout marketplace-layout">
+      <BuyerProfileDialog
+        open={profileOpen}
+        onOpenChange={setProfileOpen}
+        onSaved={() => submitRequest()}
+      />
       <section className="maker-results">
         <div className="surface-heading">
           <span className="manufacturing-eyebrow">Design-driven search</span>
@@ -550,14 +422,18 @@ function MarketplaceSurface({
               className="maker-card"
               data-selected={provider.id === selected?.id}
               onClick={() => onSelectedId(provider.id)}
+              ref={(element) => {
+                if (element) makerCardRefs.current.set(provider.id, element);
+                else makerCardRefs.current.delete(provider.id);
+              }}
             >
-              <span className="maker-card-icon">
-                <FactoryIcon size={20} />
+              <span className="maker-card-icon" aria-hidden>
+                {makerInitials(provider.name)}
               </span>
               <span className="maker-card-main">
                 <span className="maker-card-title">
                   <strong>{provider.name}</strong>
-                  <span data-live={provider.label === 'Live provider'}>{provider.label}</span>
+                  <span data-live={provider.label === 'Live maker'}>{provider.label}</span>
                 </span>
                 <small>
                   {provider.locationName} · {provider.address}
@@ -572,10 +448,20 @@ function MarketplaceSurface({
         </div>
       </section>
       <section className="maker-detail">
-        <MapboxProviderMap
+        <MakerMap
           providers={payload.providers}
           selectedId={selected?.id ?? ''}
-          onSelect={onSelectedId}
+          onSelect={(id) => {
+            onSelectedId(id);
+            requestAnimationFrame(() =>
+              makerCardRefs.current.get(id)?.scrollIntoView({
+                block: 'nearest',
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                  ? 'auto'
+                  : 'smooth',
+              }),
+            );
+          }}
         />
         <div className="maker-detail-body">
           <div className="maker-detail-heading">
@@ -586,37 +472,31 @@ function MarketplaceSurface({
               <h2>{selected?.name}</h2>
               <p>{selected?.reason}</p>
             </div>
-            {selected?.label === 'Live provider' ? (
+            {selected?.label === 'Live maker' ? (
               <StorefrontIcon size={28} />
             ) : (
               <BuildingsIcon size={28} />
             )}
           </div>
-          {selected?.label === 'Live provider' ? (
+          {selected?.label === 'Live maker' ? (
             <>
-              {payload.connection.locations.filter(({ isActive }) => isActive).length > 1 ? (
-                <div className="configuration-control">
-                  <span>Manufacturing location</span>
-                  <div>
-                    {payload.connection.locations
-                      .filter(({ isActive }) => isActive)
-                      .map((location) => (
-                        <Button
-                          key={location.id}
-                          type="button"
-                          size="sm"
-                          variant={
-                            profile.shopify?.locationId === location.id ? 'primary' : 'secondary'
-                          }
-                          onClick={() => void selectLocation(location.id)}
-                        >
-                          {location.name}
-                        </Button>
-                      ))}
-                  </div>
-                </div>
+              {canConfigure ? (
+                <Select
+                  label="Version to send"
+                  value={selectedVersionId}
+                  onValueChange={(value) => setSelectedVersionId(String(value))}
+                >
+                  <Select.Option value="current">Current draft</Select.Option>
+                  {view.workspace.savedVersions
+                    .toSorted((left, right) => right.versionNumber - left.versionNumber)
+                    .map((version) => (
+                      <Select.Option key={version.versionId} value={version.versionId}>
+                        Version {version.versionNumber} · {version.name}
+                      </Select.Option>
+                    ))}
+                </Select>
               ) : null}
-              <div className="configuration-grid">
+              {canConfigure ? <div className="configuration-grid">
                 <ConfigurationControl
                   label="Material"
                   values={['aluminium', 'acrylic']}
@@ -652,27 +532,29 @@ function MarketplaceSurface({
                     setConfiguration((current) => ({ ...current, quantity: Number(value) }))
                   }
                 />
-              </div>
+              </div> : null}
               <FitReport view={view} profile={profile} configuration={configuration} />
-              <div className="manufacturing-primary-action">
+              {canConfigure ? <div className="manufacturing-primary-action">
                 <div>
-                  <strong>Request a quote for the exact revision</strong>
-                  <small>Revision and specification hash freeze when submitted.</small>
+                  <strong>Request a quote for the exact version</strong>
+                  <small>Later design changes won&apos;t alter the submitted version.</small>
                 </div>
                 <Button
                   type="button"
                   variant="primary"
                   loading={submitting}
                   disabled={
-                    !compatible || submitting || view.workspace.manufacturingRequests.length > 0
+                    !compatible || submitting
                   }
                   onClick={() => void submitRequest()}
                 >
-                  {view.workspace.manufacturingRequests.length > 0
-                    ? 'Request sent'
-                    : 'Request quote'}
+                  Request quote
                 </Button>
-              </div>
+              </div> : (
+                <p className="manufacturing-readonly-note">
+                  You can inspect maker fit. Buyer authority is required to configure or submit a request.
+                </p>
+              )}
             </>
           ) : (
             <div className="demo-provider-note">
@@ -698,17 +580,47 @@ function OrdersSurface({
   readonly view: AttuneApiView;
   readonly onView: (view: AttuneApiView) => void;
 }) {
-  const request = view.workspace.manufacturingRequests.at(-1);
-  const quote = view.workspace.quotes.at(-1);
+  const request = view.workspace.manufacturingRequests.findLast(
+    ({ status }) => status !== 'SUPERSEDED',
+  );
+  const quote = request
+    ? view.workspace.quotes.findLast(({ requestId }) => requestId === request.requestId)
+    : undefined;
   const acceptance = quote
-    ? view.workspace.acceptances.find(({ quoteId }) => quoteId === quote.quoteId)
+    ? view.workspace.acceptances.find(
+        ({ quoteId, requestId, versionId, specHash }) =>
+          quoteId === quote.quoteId &&
+          requestId === request?.requestId &&
+          versionId === request.versionId &&
+          specHash === request.specHash,
+      )
     : undefined;
   const commerce = request
     ? view.workspace.externalCommerceRecords.find(
         ({ requestId }) => requestId === request.requestId,
       )
     : undefined;
-  const stale = Boolean(quote && quote.specHash !== view.specHash);
+  const stale = Boolean(
+    quote &&
+      (quote.status === 'STALE' ||
+        quote.status === 'SUPERSEDED' ||
+        request?.status === 'STALE' ||
+        request?.status === 'SUPERSEDED'),
+  );
+  const checkoutConformant = Boolean(
+    request &&
+      quote &&
+      acceptance &&
+      commerce &&
+      commerce.syncState === 'IN_SYNC' &&
+      commerce.customerId &&
+      commerce.requestId === request.requestId &&
+      commerce.versionId === acceptance.versionId &&
+      commerce.versionNumber === acceptance.versionNumber &&
+      commerce.specHash === acceptance.specHash &&
+      commerce.amountMinor === quote.amountMinor &&
+      commerce.currency === quote.currency,
+  );
   const [busy, setBusy] = useState(false);
 
   const accept = async () => {
@@ -730,12 +642,45 @@ function OrdersSurface({
       onView(next);
       attuneToastManager.add({
         title: 'Quote accepted',
-        description: 'The exact quoted revision is bound for checkout.',
+        description: `Version ${quote.versionNumber} is locked for checkout.`,
         variant: 'success',
       });
     } catch (error) {
       attuneToastManager.add({
         title: 'Quote not accepted',
+        description: error instanceof Error ? error.message : 'Try again.',
+        variant: 'error',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestChanges = async () => {
+    if (!request) return;
+    setBusy(true);
+    try {
+      const next = await requestAttuneView(
+        attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
+        {
+          method: 'POST',
+          body: commandRequestBody(
+            view,
+            { type: 'request_changes', requestId: request.requestId },
+            'human-request-changes',
+            view.workspace.workspaceSeq,
+          ),
+        },
+      );
+      onView(next);
+      attuneToastManager.add({
+        title: 'Change request started',
+        description: `Version ${next.workspace.manufacturingRequests.at(-1)?.versionNumber} is ready for maker review.`,
+        variant: 'success',
+      });
+    } catch (error) {
+      attuneToastManager.add({
+        title: 'Change request not started',
         description: error instanceof Error ? error.message : 'Try again.',
         variant: 'error',
       });
@@ -759,17 +704,17 @@ function OrdersSurface({
       <div className="surface-heading">
         <span className="manufacturing-eyebrow">Buyer workspace</span>
         <h2>Orders</h2>
-        <p>Commercial records stay bound to the exact design revision that was submitted.</p>
+        <p>Commercial records stay bound to the exact saved version that was submitted.</p>
       </div>
       <Surface render={<article />} className="order-record">
-        <DesignPreview view={view} />
+        <DesignPreview view={view} versionId={request.versionId} />
         <div className="order-record-main">
           <div className="order-record-title">
             <div>
               <span className="manufacturing-eyebrow">{view.product.projectName}</span>
               <h3>Custom fabrication</h3>
             </div>
-            <StatusBadge status={acceptance && commerce ? 'COMMERCE_READY' : request.status} />
+            <StatusBadge status={checkoutConformant ? 'COMMERCE_READY' : request.status} />
           </div>
           <dl className="order-facts">
             <div>
@@ -777,8 +722,8 @@ function OrdersSurface({
               <dd>{view.workspace.providerCapabilityProfile.providerName}</dd>
             </div>
             <div>
-              <dt>Revision</dt>
-              <dd>{request.specRevision}</dd>
+              <dt>Exact version</dt>
+              <dd>Version {request.versionNumber}</dd>
             </div>
             <div>
               <dt>Configuration</dt>
@@ -797,7 +742,8 @@ function OrdersSurface({
             <div className="revision-warning">
               <WarningCircleIcon size={18} />
               <span>
-                This quote belongs to {quote?.revisionId}. Your active design has changed.
+                This quote is stale. Version {request.versionNumber} remains unchanged, but the
+                request must be reviewed again.
               </span>
             </div>
           ) : null}
@@ -835,7 +781,7 @@ function OrdersSurface({
           )}
           {quote ? (
             <div className="order-actions">
-              {!acceptance ? (
+              {!acceptance && quote.status === 'READY' ? (
                 <Button
                   type="button"
                   variant="primary"
@@ -843,10 +789,10 @@ function OrdersSurface({
                   disabled={busy || stale}
                   onClick={() => void accept()}
                 >
-                  Accept exact revision
+                  Accept Version {quote.versionNumber}
                 </Button>
               ) : null}
-              {acceptance && commerce?.invoiceUrl ? (
+              {checkoutConformant && commerce?.invoiceUrl ? (
                 <LinkButton
                   href={commerce.invoiceUrl}
                   target="_blank"
@@ -856,10 +802,22 @@ function OrdersSurface({
                   Continue to Shopify
                 </LinkButton>
               ) : null}
+              {quote ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  loading={busy}
+                  disabled={busy}
+                  onClick={() => void requestChanges()}
+                >
+                  {acceptance ? 'Request design changes' : 'Request changes'}
+                </Button>
+              ) : null}
               {commerce ? (
                 <span className="commerce-binding">
                   <SealCheckIcon size={17} weight="fill" /> Shopify Draft Order{' '}
-                  {commerce.name ?? commerce.externalId.split('/').at(-1)} verified
+                  {commerce.name ?? commerce.externalId.split('/').at(-1)}{' '}
+                  {checkoutConformant ? 'verified' : 'awaiting exact conformance'}
                 </span>
               ) : null}
             </div>
@@ -879,8 +837,12 @@ function ProviderRequestsSurface({
   readonly view: AttuneApiView;
   readonly onView: (view: AttuneApiView) => void;
 }) {
-  const request = view.workspace.manufacturingRequests.at(-1);
-  const quote = view.workspace.quotes.at(-1);
+  const request = view.workspace.manufacturingRequests.findLast(
+    ({ status }) => status !== 'SUPERSEDED',
+  );
+  const quote = request
+    ? view.workspace.quotes.findLast(({ requestId }) => requestId === request.requestId)
+    : undefined;
   const commerce = request
     ? view.workspace.externalCommerceRecords.find(
         ({ requestId }) => requestId === request.requestId,
@@ -897,6 +859,7 @@ function ProviderRequestsSurface({
   }, []);
 
   const finalize = async () => {
+    if (!request) return;
     const amountMinor = Math.round(Number(amount) * 100);
     if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) return;
     setBusy(true);
@@ -920,9 +883,14 @@ function ProviderRequestsSurface({
         },
       );
       onView(next);
+      const nextCommerce = next.workspace.externalCommerceRecords.find(
+        ({ requestId }) => requestId === request.requestId,
+      );
       attuneToastManager.add({
         title: 'Quote sent',
-        description: 'Shopify Draft Order created and reread successfully.',
+        description: nextCommerce
+          ? 'Shopify customer and Draft Order were reread and verified.'
+          : `Version ${request.versionNumber} is ready for buyer review.`,
         variant: 'success',
       });
     } catch (error) {
@@ -956,7 +924,7 @@ function ProviderRequestsSurface({
       <div className="provider-request-layout">
         <Surface render={<article />} className="provider-request-card">
           <div className="provider-request-preview">
-            <DesignPreview view={view} />
+            <DesignPreview view={view} versionId={request.versionId} />
           </div>
           <div className="provider-request-meta">
             <div className="order-record-title">
@@ -969,11 +937,11 @@ function ProviderRequestsSurface({
             <dl className="order-facts">
               <div>
                 <dt>Buyer</dt>
-                <dd>Challenge Judge</dd>
+                <dd>Attune buyer</dd>
               </div>
               <div>
-                <dt>Exact revision</dt>
-                <dd>{request.specRevision}</dd>
+                <dt>Exact version</dt>
+                <dd>Version {request.versionNumber}</dd>
               </div>
               <div>
                 <dt>Material</dt>
@@ -997,8 +965,12 @@ function ProviderRequestsSurface({
             <div className="exact-binding">
               <SealCheckIcon size={18} weight="fill" />
               <span>
-                <strong>Exact design bound</strong>
-                <small className="technical-value">{request.specHash.slice(0, 20)}…</small>
+                <strong>Exact version locked</strong>
+                <small>
+                  This quote refers to Version {request.versionNumber}. Later design changes
+                  won&apos;t alter it.
+                </small>
+                <small>{request.reviewAccess?.reason ?? 'Shared for manufacturing review'}</small>
               </span>
             </div>
           </div>
@@ -1061,101 +1033,14 @@ function ProviderRequestsSurface({
                 disabled={busy || Number(amount) <= 0 || Number(leadTime) <= 0}
                 onClick={() => void finalize()}
               >
-                Send quote and create Draft Order
+                {request.shopDomain ? 'Send quote and prepare Draft Order' : 'Send quote'}
               </Button>
               <p className="human-authority-note">
-                This action commits the maker-entered price and exact revision. It is never sent
+                This action commits the maker-entered price and exact version. It is never sent
                 silently by the buyer-side agent.
               </p>
             </>
           )}
-        </Surface>
-      </div>
-    </div>
-  );
-}
-
-function ProviderProfileSurface({ payload }: { readonly payload: MarketplacePayload }) {
-  const profile = payload.providerProfile;
-  const shopify = profile.shopify;
-  return (
-    <div className="provider-profile-surface">
-      <div className="surface-heading">
-        <span className="manufacturing-eyebrow">Settings · Integrations</span>
-        <h2>Provider profile</h2>
-        <p>
-          Shopify supplies merchant identity and location. Attune stores manufacturing capability
-          facts.
-        </p>
-      </div>
-      <div className="provider-profile-grid">
-        <Surface render={<section />} className="provider-profile-section">
-          <div className="provider-section-icon">
-            <StorefrontIcon size={22} />
-          </div>
-          <div>
-            <span className="manufacturing-eyebrow">Shopify-sourced</span>
-            <h3>{shopify?.shopDomain ? payload.connection.shop.name : 'Connection unavailable'}</h3>
-          </div>
-          <dl className="profile-facts">
-            <div>
-              <dt>Primary domain</dt>
-              <dd>{shopify?.primaryDomain}</dd>
-            </div>
-            <div>
-              <dt>Manufacturing location</dt>
-              <dd>{shopify?.locationName}</dd>
-            </div>
-            <div>
-              <dt>Address</dt>
-              <dd>{shopify?.address}</dd>
-            </div>
-            <div>
-              <dt>Currency</dt>
-              <dd>{shopify?.currency}</dd>
-            </div>
-          </dl>
-          <span className="connection-state">
-            <CheckCircleIcon size={16} weight="fill" /> Shopify connected
-          </span>
-        </Surface>
-        <Surface render={<section />} className="provider-profile-section">
-          <div className="provider-section-icon">
-            <FactoryIcon size={22} />
-          </div>
-          <div>
-            <span className="manufacturing-eyebrow">Attune manufacturing profile</span>
-            <h3>{profile.processes[0]?.name}</h3>
-          </div>
-          <dl className="profile-facts">
-            <div>
-              <dt>Work envelope</dt>
-              <dd>
-                {profile.processes[0]?.workEnvelopeMm.width} ×{' '}
-                {profile.processes[0]?.workEnvelopeMm.height} mm
-              </dd>
-            </div>
-            <div>
-              <dt>Materials</dt>
-              <dd>
-                {typeof profile.materials === 'string'
-                  ? profile.materials
-                  : profile.materials.map(({ material }) => material).join(', ')}
-              </dd>
-            </div>
-            <div>
-              <dt>Minimum hole</dt>
-              <dd>{profile.minimums.holeDiameterMm} mm</dd>
-            </div>
-            <div>
-              <dt>Tolerance</dt>
-              <dd>±{profile.toleranceMm} mm</dd>
-            </div>
-            <div>
-              <dt>Finishes</dt>
-              <dd>{profile.finishes?.join(', ')}</dd>
-            </div>
-          </dl>
         </Surface>
       </div>
     </div>
@@ -1182,6 +1067,11 @@ export function ManufacturingFlow({
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const open = surface !== 'design';
+  const canBuy = view.authority.perspectives.includes('buyer');
+  const canMake = view.authority.perspectives.includes('provider');
+  const activeRequest = view.workspace.manufacturingRequests.findLast(
+    ({ status }) => status !== 'SUPERSEDED',
+  );
   const loadMarketplace = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -1192,7 +1082,7 @@ export function ManufacturingFlow({
       );
       const result: unknown = await response.json();
       if (!response.ok || !isMarketplacePayload(result))
-        throw new Error('The live provider connection could not be verified.');
+        throw new Error('The live maker connection could not be verified.');
       const next = result;
       setPayload(next);
       setSelectedId((current) => current || next.providers[0]?.id || '');
@@ -1222,6 +1112,14 @@ export function ManufacturingFlow({
 
   return (
     <section className="manufacturing-flow t-panel-slide" data-open={open} aria-hidden={!open}>
+      {view.product.agentToolsEnabled ? (
+        <div className="judge-mode-frame" data-perspective={perspective}>
+          <Badge variant="blue">Judge demo · {perspective === 'provider' ? 'Maker' : 'Buyer'} view</Badge>
+          {perspective === 'provider' ? (
+            <span>You&apos;re viewing the maker side with the same judge account. This is a demo convenience.</span>
+          ) : null}
+        </div>
+      ) : null}
       <header className="manufacturing-header">
         <div className="manufacturing-header-left">
           <Button
@@ -1235,7 +1133,9 @@ export function ManufacturingFlow({
           />
           <div>
             <span className="manufacturing-eyebrow">
-              Exact design · r{view.workspace.draftVersion}
+              {activeRequest
+                ? `Exact version locked · Version ${activeRequest.versionNumber}`
+                : 'Current design draft'}
             </span>
             <strong>{view.product.projectName}</strong>
           </div>
@@ -1245,39 +1145,55 @@ export function ManufacturingFlow({
             type="button"
             size="sm"
             variant={surface === 'marketplace' ? 'secondary' : 'ghost'}
+            aria-current={surface === 'marketplace' ? 'page' : undefined}
             onClick={() => setSurface('marketplace')}
           >
             Find makers
           </Button>
-          <Button
+          {canBuy ? <Button
             type="button"
             size="sm"
             variant={surface === 'buyer_orders' ? 'secondary' : 'ghost'}
+            aria-current={surface === 'buyer_orders' ? 'page' : undefined}
             onClick={() => setSurface('buyer_orders')}
           >
             Orders
-          </Button>
-          {view.authority.perspectives.includes('provider') ? (
+          </Button> : null}
+          {canMake ? (
             <Button
               type="button"
               size="sm"
               variant={surface === 'provider_requests' ? 'secondary' : 'ghost'}
+              aria-current={surface === 'provider_requests' ? 'page' : undefined}
               onClick={() => setSurface('provider_requests')}
             >
               Requests
             </Button>
           ) : null}
-          {view.authority.perspectives.includes('provider') ? (
+          {canMake ? (
             <Button
               type="button"
               size="sm"
               variant={surface === 'provider_profile' ? 'secondary' : 'ghost'}
+              aria-current={surface === 'provider_profile' ? 'page' : undefined}
               onClick={() => setSurface('provider_profile')}
             >
-              Provider profile
+              Maker profile
             </Button>
           ) : null}
         </nav>
+        <Select
+          aria-label="Manufacturing section"
+          className="manufacturing-nav-mobile"
+          value={surface}
+          onValueChange={(value) => setSurface(value as ManufacturingSurface)}
+        >
+          <Select.Option value="design">Design</Select.Option>
+          <Select.Option value="marketplace">Find makers</Select.Option>
+          {canBuy ? <Select.Option value="buyer_orders">Orders</Select.Option> : null}
+          {canMake ? <Select.Option value="provider_requests">Requests</Select.Option> : null}
+          {canMake ? <Select.Option value="provider_profile">Maker profile</Select.Option> : null}
+        </Select>
         <div className="perspective-switch" aria-label="Workspace perspective">
           <LinkButton
             href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=${surface}`}
@@ -1286,7 +1202,7 @@ export function ManufacturingFlow({
           >
             Buyer
           </LinkButton>
-          {view.authority.perspectives.includes('provider') ? (
+          {canMake ? (
             <LinkButton
               href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=${surface === 'buyer_orders' ? 'provider_requests' : surface}`}
               size="sm"
@@ -1297,7 +1213,13 @@ export function ManufacturingFlow({
           ) : null}
         </div>
       </header>
-      <div className="manufacturing-content">
+      <WorkflowCallout
+        workspaceId={workspaceId}
+        perspective={perspective}
+        view={view}
+        onSurface={setSurface}
+      />
+      <div className="manufacturing-content" aria-live="polite" aria-busy={loading}>
         {loading ? (
           <div className="manufacturing-empty">
             <CubeIcon className="manufacturing-loading" size={34} />
@@ -1308,7 +1230,7 @@ export function ManufacturingFlow({
         {error ? (
           <div className="manufacturing-empty">
             <WarningCircleIcon size={34} />
-            <h2>Live provider unavailable</h2>
+            <h2>Live maker unavailable</h2>
             <p>{error}</p>
             <Button type="button" variant="secondary" onClick={() => void loadMarketplace()}>
               Retry connection
@@ -1321,27 +1243,42 @@ export function ManufacturingFlow({
             view={view}
             payload={payload}
             selectedId={selectedId}
-            onPayload={setPayload}
             onView={onView}
             onSelectedId={setSelectedId}
             onSurface={setSurface}
+            canConfigure={canBuy}
           />
         ) : null}
-        {!loading && !error && payload && surface === 'buyer_orders' ? (
+        {!loading && !error && payload && canBuy && surface === 'buyer_orders' ? (
           <OrdersSurface workspaceId={workspaceId} view={view} onView={onView} />
         ) : null}
-        {!loading && !error && payload && surface === 'provider_requests' ? (
+        {!loading && !error && payload && canMake && surface === 'provider_requests' ? (
           <ProviderRequestsSurface workspaceId={workspaceId} view={view} onView={onView} />
         ) : null}
-        {!loading && !error && payload && surface === 'provider_profile' ? (
-          <ProviderProfileSurface payload={payload} />
+        {!loading && !error && payload && canMake && surface === 'provider_profile' ? (
+          <ProviderProfileSurface
+            workspaceId={workspaceId}
+            payload={payload}
+            onPayload={setPayload}
+            onView={onView}
+          />
         ) : null}
       </div>
       <footer className="manufacturing-footer">
         <span>
-          <SealCheckIcon size={15} weight="fill" /> Revision binding active
+          <SealCheckIcon size={15} weight="fill" />{' '}
+          {activeRequest
+            ? `Exact version locked · Version ${activeRequest.versionNumber}`
+            : 'Version will lock when submitted'}
         </span>
-        <span className="technical-value">{view.specHash.slice(0, 20)}…</span>
+        <span>
+          {activeRequest
+            ? view.versionPreviews.find(({ versionId }) => versionId === activeRequest.versionId)
+                ?.status === 'STORED'
+              ? 'Exact preview stored privately'
+              : 'Preview storage needs attention'
+            : 'Current draft'}
+        </span>
       </footer>
     </section>
   );

@@ -89,6 +89,7 @@ export async function POST(request: Request) {
       'set_dimension',
       'remove_dimension',
       'request_quote',
+      'request_changes',
       'accept_revision',
     ]);
     const result = isSketchCommand(input.command)

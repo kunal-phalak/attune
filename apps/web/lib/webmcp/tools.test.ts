@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ToolRuntime } from './runtime';
-import { parseModifyGeometryToolInput, registerAttuneTools } from './tools';
+import { parseModifyGeometryToolInput, registerAttuneTools, toolsForCapabilities } from './tools';
 
 const unavailable = () => Promise.reject(new Error('Not used by this contract test.'));
 
@@ -149,13 +149,13 @@ describe('native model-context registration contract', () => {
     expect(context.getTools()).toEqual([
       'check_design',
       'constrain_geometry',
-      'continue_to_shopify',
       'find_makers',
       'forecast_change',
       'inspect_context',
-      'inspect_manufacturing_order',
+      'inspect_quote_or_order',
+      'manage_manufacturing_request',
       'modify_geometry',
-      'open_attune_surface',
+      'navigate_workspace',
     ]);
     expect(registrationSignals.every((signal) => signal === registration.signal)).toBe(true);
 
@@ -209,5 +209,60 @@ describe('native model-context registration contract', () => {
       expect.objectContaining({ type: 'set_tangent' }),
       execution.signal,
     );
+  });
+
+  it('keeps manufacturing compact, confirms acceptance, and forwards navigation cancellation', async () => {
+    const execute = vi.fn(async () => ({ status: 'APPLIED' }));
+    const navigate = vi.fn(async (surface: string) => ({
+      status: 'NAVIGATION_INITIATED',
+      fromSurface: 'marketplace',
+      toSurface: surface,
+      perspective: 'provider',
+      authorityUnchanged: true,
+    }));
+    const runtime: ToolRuntime = {
+      current: vi.fn(unavailable),
+      observe: vi.fn(unavailable),
+      execute,
+      forecast: vi.fn(unavailable),
+      navigate,
+    };
+    const tools = toolsForCapabilities(
+      runtime,
+      new Set(['request_quote', 'accept_revision', 'freeze_and_quote_revision']),
+    );
+    const manage = tools.find(({ name }) => name === 'manage_manufacturing_request');
+    const navigation = tools.find(({ name }) => name === 'navigate_workspace');
+    expect(manage).toBeDefined();
+    expect(navigation?.annotations?.readOnlyHint).toBe(false);
+
+    await expect(
+      manage?.execute({
+        operation: 'configure',
+        configuration: {
+          material: 'aluminium',
+          thickness_mm: 3,
+          finish: 'Mill finish',
+          quantity: 4,
+          tolerance_mm: 0.2,
+        },
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: 'CONFIGURATION_READY' }));
+    await expect(
+      manage?.execute({
+        operation: 'accept_quote',
+        revision_id: 'r6',
+        quote_id: 'quote:6',
+        user_confirmed: false,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ status: 'USER_CONFIRMATION_REQUIRED' }));
+    expect(execute).not.toHaveBeenCalled();
+
+    const cancellation = new AbortController();
+    await navigation?.execute(
+      { destination: 'maker_requests' },
+      { signal: cancellation.signal },
+    );
+    expect(navigate).toHaveBeenCalledWith('maker_requests', cancellation.signal);
   });
 });

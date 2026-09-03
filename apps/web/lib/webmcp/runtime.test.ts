@@ -119,6 +119,68 @@ describe('one-request WebMCP semantic mutation runtime', () => {
     );
   });
 
+  it('derives Maker perspective from destination and acknowledges initiated navigation', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json(bootstrapView()),
+    );
+    const assign = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('window', {
+      location: { search: '?surface=marketplace', assign },
+    });
+    const viewRef = { current: bootstrapView() };
+    const reports: string[] = [];
+    const runtime = createToolRuntime({
+      workspaceId: 'workspace:at-1042',
+      perspective: 'buyer',
+      viewRef,
+      updateView: () => undefined,
+      report: ({ execution }) => reports.push(execution),
+    });
+
+    await expect(runtime.navigate?.('maker_requests')).resolves.toEqual({
+      status: 'NAVIGATION_INITIATED',
+      fromSurface: 'marketplace',
+      toSurface: 'maker_requests',
+      perspective: 'provider',
+      authorityUnchanged: true,
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('perspective=provider');
+    expect(assign).toHaveBeenCalledWith(
+      '/workspace/workspace%3Aat-1042?perspective=provider&surface=provider_requests',
+    );
+    expect(reports).toEqual(['executing', 'completed']);
+  });
+
+  it('cancels pending navigation before any visible destination change', async () => {
+    const assign = vi.fn();
+    vi.stubGlobal('window', { location: { search: '', assign } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError')),
+          );
+        }),
+      ),
+    );
+    const viewRef = { current: bootstrapView() };
+    const runtime = createToolRuntime({
+      workspaceId: 'workspace:at-1042',
+      perspective: 'buyer',
+      viewRef,
+      updateView: () => undefined,
+      report: () => undefined,
+    });
+    const cancellation = new AbortController();
+    const pending = runtime.navigate?.('maker_requests', cancellation.signal);
+    cancellation.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(assign).not.toHaveBeenCalled();
+  });
+
   it('returns a structured delegation error instead of throwing a generic failure', async () => {
     const fetchMock = vi.fn(async () =>
       Response.json(

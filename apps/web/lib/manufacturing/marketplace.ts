@@ -69,6 +69,7 @@ export function shopifyProviderProfile(
     providerName: connection.shop.name,
     version: sameBinding ? existing.version : 'v1',
     source: 'SHOPIFY_AND_ATTUNE',
+    marketplaceListed: existing.marketplaceListed ?? true,
     minimums: {
       ...existing.minimums,
       edgeClearanceMm: 3,

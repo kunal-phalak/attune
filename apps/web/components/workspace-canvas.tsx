@@ -1276,6 +1276,7 @@ export const WorkspaceCanvas = forwardRef<
   const redrawRef = useRef<() => void>(() => undefined);
   const initializedRef = useRef(false);
   const cameraAnimationRef = useRef<number | null>(null);
+  const viewPublishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewFrameRef = useRef<number | null>(null);
   const renderFrameRef = useRef<number | null>(null);
   const snapLockRef = useRef<SnapCandidate | null>(null);
@@ -1321,13 +1322,24 @@ export const WorkspaceCanvas = forwardRef<
     }
   }, [cursorMode]);
 
+  useEffect(
+    () => () => {
+      if (viewPublishTimerRef.current !== null) clearTimeout(viewPublishTimerRef.current);
+    },
+    [],
+  );
+
   const updateSelection = (next: SelectionSet) => {
     selectionRef.current = next;
     onSelectionChange(next);
     redrawRef.current();
   };
 
-  const publishView = () => {
+  const publishViewNow = () => {
+    if (viewPublishTimerRef.current !== null) {
+      clearTimeout(viewPublishTimerRef.current);
+      viewPublishTimerRef.current = null;
+    }
     const camera = cameraRef.current;
     setViewState({
       x: camera.x,
@@ -1337,6 +1349,14 @@ export const WorkspaceCanvas = forwardRef<
       width: metricsRef.current.width,
       height: metricsRef.current.height,
     });
+  };
+
+  const scheduleViewPublish = () => {
+    if (viewPublishTimerRef.current !== null) return;
+    viewPublishTimerRef.current = setTimeout(() => {
+      viewPublishTimerRef.current = null;
+      publishViewNow();
+    }, 50);
   };
 
   const marqueeVisual = (): MarqueeVisual | null => {
@@ -1379,7 +1399,7 @@ export const WorkspaceCanvas = forwardRef<
       const progress = Math.min(1, (time - startedAt) / 180);
       camera.interpolate(start, finish, 1 - (1 - progress) ** 3);
       redraw();
-      publishView();
+      scheduleViewPublish();
       cameraAnimationRef.current = progress < 1 ? requestAnimationFrame(frame) : null;
     };
     cameraAnimationRef.current = requestAnimationFrame(frame);
@@ -1532,7 +1552,7 @@ export const WorkspaceCanvas = forwardRef<
             );
           }
           redraw();
-          publishView();
+          publishViewNow();
         };
         redrawRef.current = () => {
           if (renderFrameRef.current !== null) return;
@@ -1670,7 +1690,7 @@ export const WorkspaceCanvas = forwardRef<
         cameraRef.current.panBy(-event.deltaX, -event.deltaY);
       else cameraRef.current.zoomAt(cursor, Math.exp(-event.deltaY * 0.0018));
       redraw();
-      publishView();
+      scheduleViewPublish();
     };
     element.addEventListener('wheel', onWheel, { passive: false });
     return () => element.removeEventListener('wheel', onWheel);
@@ -2173,7 +2193,7 @@ export const WorkspaceCanvas = forwardRef<
       pointer.x = event.clientX;
       pointer.y = event.clientY;
       redraw();
-      publishView();
+      scheduleViewPublish();
       return;
     }
     if (pointer.mode === 'marquee') {
@@ -2252,6 +2272,7 @@ export const WorkspaceCanvas = forwardRef<
       ) {
         suppressCommentClickUntilRef.current = performance.now() + 100;
       }
+      publishViewNow();
       return;
     }
     getBrowserPlaneGcsPreviewRuntime().cancel(pointer.dragSessionId);

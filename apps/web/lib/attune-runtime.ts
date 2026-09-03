@@ -60,6 +60,11 @@ import {
 import { requireWorkspaceIdentity, workspaceIdentity } from './auth/session';
 import { attuneActivityNotification } from './liveblocks/notifications';
 import { buyerCommerceProfileComplete } from './manufacturing/buyer-commerce';
+import { workspaceForMakerReview } from './manufacturing/maker-review';
+import {
+  shopifyProviderConnection,
+  shopifyProviderProfile,
+} from './manufacturing/marketplace';
 import {
   PreviewStorage,
   PreviewStorageConfigurationError,
@@ -425,7 +430,6 @@ async function viewForBundle(
     return { solver: runtimeSolver, solve: runtimeSolver.solve(bundle.workspace.sketchDocument) };
   });
   const viewStartedAt = performance.now();
-  const selection = createSelectionContext(solve.document);
   const bus = new AttuneCommandBus(bundle.workspace, undefined, solver, {}, timing);
   const inspection = bus.inspect(role);
   const authorityCapabilityIds = availableCapabilityIdsForWorkspaceAuthority(
@@ -439,22 +443,29 @@ async function viewForBundle(
   const delegatedCapabilities = delegation
     ? authorizedCapabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
     : authorizedCapabilities;
-  const businessAuthority = authorityRoles.some(
-    (candidate) => candidate === 'buyer' || candidate === 'provider',
-  );
-  const visibleWorkspace = businessAuthority
+  const buyerPerspective = role === 'buyer';
+  const providerPerspective = role === 'provider';
+  const makerWorkspace = workspaceForMakerReview(bundle.workspace);
+  const visibleWorkspace = buyerPerspective
     ? bundle.workspace
-    : {
-        ...bundle.workspace,
-        quoteRequests: [],
-        frozenRevisions: [],
-        quotes: [],
-        acceptances: [],
-        manufacturingRequests: [],
-        changeRequests: [],
-        externalCommerceRecords: [],
-        commerceLinks: [],
-      };
+    : providerPerspective
+      ? makerWorkspace
+      : {
+          ...bundle.workspace,
+          quoteRequests: [],
+          frozenRevisions: [],
+          quotes: [],
+          acceptances: [],
+          manufacturingRequests: [],
+          changeRequests: [],
+          externalCommerceRecords: [],
+          commerceLinks: [],
+        };
+  const visibleSolve =
+    visibleWorkspace.sketchDocument === bundle.workspace.sketchDocument
+      ? solve
+      : solver.solve(visibleWorkspace.sketchDocument);
+  const selection = createSelectionContext(visibleSolve.document);
   const previewStorage = new PreviewStorage();
   const versionPreviews = await Promise.all(
     visibleWorkspace.savedVersions.map(async (version) => {
@@ -508,22 +519,22 @@ async function viewForBundle(
       editor: bus.inspect('editor').frontier,
       reviewer: bus.inspect('reviewer').frontier,
     },
-    repairs: compareValidChanges(bundle.workspace),
+    repairs: compareValidChanges(visibleWorkspace),
     records: {
       receipts: bundle.receipts,
       capabilityTransitions: bundle.transitions,
       commandRejections: bundle.rejections,
-      externalCommerce: bundle.workspace.externalCommerceRecords,
-      externalVerifications: bundle.workspace.commerceLinks,
+      externalCommerce: visibleWorkspace.externalCommerceRecords,
+      externalVerifications: visibleWorkspace.commerceLinks,
     },
     latestReceipt: bundle.receipts.at(-1) ?? null,
     latestCapabilityTransition: bundle.transitions.at(-1) ?? null,
     receiptCount: bundle.receipts.length,
     impact: impactMetrics(bundle),
     semantic: {
-      documentRevision: bundle.workspace.sketchDocument.revision,
+      documentRevision: visibleWorkspace.sketchDocument.revision,
       selection,
-      rankedConstraintCandidates: rankConstraintCandidates(solve.document, selection),
+      rankedConstraintCandidates: rankConstraintCandidates(visibleSolve.document, selection),
       availableActions: delegatedCapabilities.some(({ id }) => id === 'edit_draft')
         ? [
             'instantiate_recipe',
@@ -546,7 +557,7 @@ async function viewForBundle(
             'check_design',
           ]
         : ['forecast_change', 'check_design'],
-      solve: solve.document.lastSolve ?? null,
+      solve: visibleSolve.document.lastSolve ?? null,
     },
   };
   timing?.('view_compile', performance.now() - viewStartedAt);
@@ -611,17 +622,19 @@ async function agentContextForBundle(
   timing?: ServerTimingRecorder,
 ) {
   const solver = await getPlaneGcsSolver();
+  const perspective = context.perspective ?? context.role;
+  const visibleWorkspace =
+    perspective === 'provider' ? workspaceForMakerReview(bundle.workspace) : bundle.workspace;
   const solution = await measureServerPhase(timing, 'plane_gcs', async () =>
-    solver.solve(bundle.workspace.sketchDocument),
+    solver.solve(visibleWorkspace.sketchDocument),
   );
   const workspace = {
-    ...bundle.workspace,
+    ...visibleWorkspace,
     sketchDocument: {
-      ...bundle.workspace.sketchDocument,
+      ...visibleWorkspace.sketchDocument,
       lastSolve: solution.document.lastSolve,
     },
   };
-  const perspective = context.perspective ?? context.role;
   const inspection = new AttuneCommandBus(workspace, undefined, solver).inspect(perspective);
   const capabilityIds = inspection.capabilities
     .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
@@ -781,22 +794,76 @@ async function requireProfileForLiveRequest(workspaceId: string, principalId: st
   return buyer;
 }
 
+async function persistProviderProfile(
+  workspaceId: string,
+  profile: ProviderCapabilityProfile,
+): Promise<WorkspaceBundle> {
+  const bundle = await readWorkspaceBundle(workspaceId);
+  if (JSON.stringify(bundle.workspace.providerCapabilityProfile) === JSON.stringify(profile)) {
+    return bundle;
+  }
+  await executePersistedCommand({
+    workspaceId,
+    command: { type: 'synchronize_provider_profile', profile },
+    envelope: {
+      commandId: `shopify-provider-${crypto.randomUUID()}`,
+      expectedWorkspaceSeq: bundle.workspace.workspaceSeq,
+      expectedCapabilityEpoch: bundle.workspace.capabilityEpoch,
+      expectedAuthorityEpoch: bundle.workspace.authorityEpoch,
+      expectedSpecHash: hashSpecification(bundle.workspace),
+    },
+    context: trustedSystemContext(workspaceId),
+  });
+  return readWorkspaceBundle(workspaceId);
+}
+
+async function synchronizeLiveMakerForRequest(workspaceId: string): Promise<WorkspaceBundle> {
+  const bundle = await readWorkspaceBundle(workspaceId);
+  const connection = await shopifyProviderConnection();
+  const profile = shopifyProviderProfile(
+    connection,
+    bundle.workspace.providerCapabilityProfile.shopify?.locationId,
+    bundle.workspace.providerCapabilityProfile,
+  );
+  return persistProviderProfile(workspaceId, profile);
+}
+
+function rebaseInputToBundle(
+  input: CommandExecutionInput,
+  bundle: WorkspaceBundle,
+): CommandExecutionInput {
+  return {
+    ...input,
+    envelope: {
+      ...input.envelope,
+      expectedWorkspaceSeq: bundle.workspace.workspaceSeq,
+      expectedCapabilityEpoch: bundle.workspace.capabilityEpoch,
+      expectedAuthorityEpoch: bundle.workspace.authorityEpoch,
+      expectedSpecHash: hashSpecification(bundle.workspace),
+      observationCursor: bundle.workspace.workspaceSeq,
+    },
+  };
+}
+
 export async function executeAgentCommand(
   workspaceId: string,
   perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   input: CommandExecutionInput,
 ) {
   const context = await trustedDelegatedContext(workspaceId, perspective, input.command.type);
+  let preparedInput = input;
   if (input.command.type === 'request_quote') {
+    preparedInput = rebaseInputToBundle(input, await synchronizeLiveMakerForRequest(workspaceId));
     await requireProfileForLiveRequest(workspaceId, context.principalId);
   }
-  const result = await executeWithContext(
-    workspaceId,
+  const executionInput: CommandExecutionInput =
     input.command.type === 'request_quote'
-      ? { ...input, command: { ...input.command, buyerPrincipalId: context.principalId } }
-      : input,
-    context,
-  );
+      ? {
+          ...preparedInput,
+          command: { ...input.command, buyerPrincipalId: context.principalId },
+        }
+      : preparedInput;
+  const result = await executeWithContext(workspaceId, executionInput, context);
   const version = versionForCommand(result.workspace, input.command);
   if (version) await ensureVersionPreview(workspaceId, version);
   if (input.command.type === 'request_quote') {
@@ -973,16 +1040,19 @@ export async function executeHumanCommand(
   role: AttuneRole = 'buyer',
 ) {
   const context = await trustedHumanContext(workspaceId, role);
+  let preparedInput = input;
   if (input.command.type === 'request_quote') {
+    preparedInput = rebaseInputToBundle(input, await synchronizeLiveMakerForRequest(workspaceId));
     await requireProfileForLiveRequest(workspaceId, context.principalId);
   }
-  const result = await executeWithContext(
-    workspaceId,
+  const executionInput: CommandExecutionInput =
     input.command.type === 'request_quote'
-      ? { ...input, command: { ...input.command, buyerPrincipalId: context.principalId } }
-      : input,
-    context,
-  );
+      ? {
+          ...preparedInput,
+          command: { ...input.command, buyerPrincipalId: context.principalId },
+        }
+      : preparedInput;
+  const result = await executeWithContext(workspaceId, executionInput, context);
   const version = versionForCommand(result.workspace, input.command);
   if (version) await ensureVersionPreview(workspaceId, version);
   if (input.command.type === 'request_quote') {
@@ -1011,38 +1081,7 @@ export async function synchronizeProviderProfile(
   profile: ProviderCapabilityProfile,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const bundle = await readWorkspaceBundle(workspaceId);
-  const current = bundle.workspace.providerCapabilityProfile;
-  const currentIdentity = current.shopify
-    ? {
-        providerId: current.providerId,
-        profileId: current.profileId,
-        version: current.version,
-        providerName: current.providerName,
-        shopify: current.shopify,
-      }
-    : null;
-  const nextIdentity = {
-    providerId: profile.providerId,
-    profileId: profile.profileId,
-    version: profile.version,
-    providerName: profile.providerName,
-    shopify: profile.shopify,
-  };
-  if (JSON.stringify(currentIdentity) !== JSON.stringify(nextIdentity)) {
-    await executePersistedCommand({
-      workspaceId,
-      command: { type: 'synchronize_provider_profile', profile },
-      envelope: {
-        commandId: `shopify-provider-${crypto.randomUUID()}`,
-        expectedWorkspaceSeq: bundle.workspace.workspaceSeq,
-        expectedCapabilityEpoch: bundle.workspace.capabilityEpoch,
-        expectedAuthorityEpoch: bundle.workspace.authorityEpoch,
-        expectedSpecHash: hashSpecification(bundle.workspace),
-      },
-      context: trustedSystemContext(workspaceId),
-    });
-  }
+  await persistProviderProfile(workspaceId, profile);
   return inspectForHuman(workspaceId);
 }
 

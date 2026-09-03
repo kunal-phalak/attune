@@ -2,6 +2,7 @@ import {
   databaseConfigured,
   ensureJudgeWorkspace,
   readWorkspaceBundle,
+  userCanManageLiveblocksRoom,
 } from '@attune/database';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -71,6 +72,7 @@ export default async function WorkspacePage({
           : 'reviewer';
   const perspective = role === 'provider' ? 'provider' : 'buyer';
   const bundle = await readWorkspaceBundle(workspaceId);
+  const canManageSharing = await userCanManageLiveblocksRoom(bundle.liveblocksRoomId, user.userId);
   const initialView = await viewForTrustedBundle(bundle, role, identity);
   const requestedSurface = manufacturingSurface(parameters.surface);
   const initialSurface =
@@ -92,6 +94,7 @@ export default async function WorkspacePage({
       projectName={bundle.projectName}
       initialView={initialView}
       initialSurface={initialSurface}
+      canManageSharing={canManageSharing}
       actor={{
         id: user.userId,
         name: user.displayName,

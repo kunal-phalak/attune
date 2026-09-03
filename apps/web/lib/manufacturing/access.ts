@@ -22,3 +22,14 @@ export function manufacturingAccessForRoles(
     finalizeQuote: roleSet.has('provider'),
   };
 }
+
+export function assertMarketplaceRouteAccess(
+  roles: readonly AttuneRole[],
+  method: 'GET' | 'POST',
+): ManufacturingAccess {
+  const access = manufacturingAccessForRoles(roles);
+  if (method === 'GET' ? !access.browseMarketplace : !access.finalizeQuote) {
+    throw new Error('WORKSPACE_ROLE_REQUIRED');
+  }
+  return access;
+}

@@ -1,7 +1,19 @@
+import {
+  buyerCommerceProfile,
+  ensureJudgeWorkspace,
+  JUDGE_WORKSPACE_ID,
+  listShopifyInstallations,
+} from '@attune/database';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Input } from '@cloudflare/kumo/components/input';
+import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { judgeCredentialConfigured } from '../../lib/auth/session';
+import { JudgeControlPanel } from '../../components/judge-control-panel';
+import { inspectForHuman } from '../../lib/attune-runtime';
+import { currentJudgeAttuneUser, judgeCredentialConfigured } from '../../lib/auth/session';
+import { buyerCommerceProfileComplete } from '../../lib/manufacturing/buyer-commerce';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,30 +30,63 @@ export default async function JudgeAccessPage({
 }) {
   const invalidCode = (await searchParams).error === 'invalid-code';
   const configured = judgeCredentialConfigured();
+  const user = await currentJudgeAttuneUser();
+
+  if (user?.judge) {
+    await ensureJudgeWorkspace();
+    const [view, profile, installations] = await Promise.all([
+      inspectForHuman(JUDGE_WORKSPACE_ID, 'buyer'),
+      buyerCommerceProfile(user.principalId),
+      listShopifyInstallations(user.principalId),
+    ]);
+    const makerName = view.workspace.providerCapabilityProfile.providerName;
+    const installation = installations.find(
+      ({ connectionStatus, makerProfile, shopName }) =>
+        (connectionStatus === 'connected' || connectionStatus === 'needs_reauthorization') &&
+        (makerProfile?.providerName === makerName || shopName === makerName),
+    );
+    const location = installation?.locations.find(
+      ({ id }) => id === installation.selectedLocationId,
+    );
+
+    return (
+      <JudgeControlPanel
+        workspaceId={JUDGE_WORKSPACE_ID}
+        projectName={view.product.projectName}
+        agentAccessOn={view.delegation.status === 'active'}
+        buyerReady={buyerCommerceProfileComplete(profile)}
+        makerName={makerName}
+        makerConnected={Boolean(installation)}
+        shopName={installation?.shopName}
+        shopDomain={installation?.primaryDomain}
+        locationName={location?.name}
+      />
+    );
+  }
 
   return (
     <main className="judge-page">
       <header className="judge-topbar">
         <Link className="wordmark" href="/">
-          ATTUNE
+          Attune
         </Link>
         <span>Challenge review · secure access</span>
       </header>
       <section className="judge-access">
         <div className="judge-introduction">
-          <p className="section-index">PRECISION DESIGN / REVIEW WORKSPACE</p>
-          <h1>Review the executable thread.</h1>
+          <p className="section-index">Precision design / review workspace</p>
+          <h1>Review the complete workflow.</h1>
           <p>
             Enter the supplied access code to open the persisted manufacturing workspace. The code
             is submitted once in the request body and is never placed in the URL.
           </p>
           <ol aria-label="Attune review sequence">
-            <li>Inspect authoritative r8</li>
+            <li>Open the clean manufacturing design</li>
             <li>Discover contextual WebMCP tools</li>
-            <li>Verify human and agent receipts</li>
+            <li>Follow Buyer requests through Maker jobs</li>
           </ol>
         </div>
-        <div className="judge-form-panel">
+        <LayerCard render={<div />} className="judge-form-panel">
           <div className="judge-form-heading">
             <span>Protected review</span>
             <strong>Seeded workspace</strong>
@@ -49,10 +94,11 @@ export default async function JudgeAccessPage({
           {configured ? (
             <form action="/api/judge-session" method="post">
               <label htmlFor="access-code">Access code</label>
-              <input
+              <Input
                 id="access-code"
                 name="accessCode"
                 type="password"
+                aria-label="Access code"
                 autoComplete="off"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -64,7 +110,9 @@ export default async function JudgeAccessPage({
                   That access code was not accepted. Check the supplied code and retry.
                 </p>
               ) : null}
-              <button type="submit">Open design workspace</button>
+              <Button type="submit" variant="primary">
+                Open review control center
+              </Button>
             </form>
           ) : (
             <div className="setup-callout">
@@ -75,7 +123,7 @@ export default async function JudgeAccessPage({
           <p className="judge-privacy-note">
             A renewable, signed HttpOnly session is created after server verification.
           </p>
-        </div>
+        </LayerCard>
       </section>
     </main>
   );

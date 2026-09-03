@@ -1,7 +1,9 @@
 'use client';
 
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { LinkButton } from '@cloudflare/kumo/components/button';
+import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { Select } from '@cloudflare/kumo/components/select';
-import { Surface } from '@cloudflare/kumo/components/surface';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { FactoryIcon, StorefrontIcon } from '@phosphor-icons/react';
 import { useState } from 'react';
@@ -31,11 +33,14 @@ export function ProviderProfileSurface({
   }) => {
     setBusy(true);
     try {
-      const response = await fetch(attuneWorkspaceEndpoint('/api/attune/marketplace', workspaceId), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const response = await fetch(
+        attuneWorkspaceEndpoint('/api/attune/marketplace', workspaceId),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
       const next: unknown = await response.json();
       if (!response.ok || !isMarketplacePayload(next)) {
         throw new Error('Maker profile update failed.');
@@ -63,13 +68,15 @@ export function ProviderProfileSurface({
         </p>
       </div>
       <div className="provider-profile-grid">
-        <Surface render={<section />} className="provider-profile-section ring ring-kumo-line">
+        <LayerCard render={<section />} className="provider-profile-section">
           <div className="provider-section-icon">
             <StorefrontIcon size={22} />
           </div>
           <div>
             <span className="manufacturing-eyebrow">Settings · Integrations · Shopify</span>
-            <h3>{shopify?.shopDomain ? payload.connection?.shop.name : 'Connect a Shopify store'}</h3>
+            <h3>
+              {shopify?.shopDomain ? payload.connection?.shop.name : 'Connect a Shopify store'}
+            </h3>
           </div>
           {payload.installations && payload.installations.length > 1 ? (
             <Select
@@ -89,24 +96,26 @@ export function ProviderProfileSurface({
                 ))}
             </Select>
           ) : null}
-          {payload.connection ? <dl className="profile-facts">
-            <div>
-              <dt>Primary domain</dt>
-              <dd>{shopify?.primaryDomain}</dd>
-            </div>
-            <div>
-              <dt>Manufacturing location</dt>
-              <dd>{shopify?.locationName}</dd>
-            </div>
-            <div>
-              <dt>Address</dt>
-              <dd>{shopify?.address}</dd>
-            </div>
-            <div>
-              <dt>Currency</dt>
-              <dd>{shopify?.currency}</dd>
-            </div>
-          </dl> : null}
+          {payload.connection ? (
+            <dl className="profile-facts">
+              <div>
+                <dt>Primary domain</dt>
+                <dd>{shopify?.primaryDomain}</dd>
+              </div>
+              <div>
+                <dt>Manufacturing location</dt>
+                <dd>{shopify?.locationName}</dd>
+              </div>
+              <div>
+                <dt>Address</dt>
+                <dd>{shopify?.address}</dd>
+              </div>
+              <div>
+                <dt>Currency</dt>
+                <dd>{shopify?.currency}</dd>
+              </div>
+            </dl>
+          ) : null}
           {payload.connection ? (
             <Badge variant="success" appearance="dot">
               Shopify connected
@@ -116,8 +125,8 @@ export function ProviderProfileSurface({
               Connect Shopify
             </LinkButton>
           )}
-        </Surface>
-        <Surface render={<section />} className="provider-profile-section ring ring-kumo-line">
+        </LayerCard>
+        <LayerCard render={<section />} className="provider-profile-section">
           <div className="provider-section-icon">
             <FactoryIcon size={22} />
           </div>
@@ -180,10 +189,8 @@ export function ProviderProfileSurface({
               Attune owns this directory listing. Turning it off does not disconnect Shopify.
             </small>
           </div>
-        </Surface>
+        </LayerCard>
       </div>
     </div>
   );
 }
-import { Badge } from '@cloudflare/kumo/components/badge';
-import { LinkButton } from '@cloudflare/kumo/components/button';

@@ -4,8 +4,8 @@ import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
+import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { Select } from '@cloudflare/kumo/components/select';
-import { Surface } from '@cloudflare/kumo/components/surface';
 import {
   ArrowClockwiseIcon,
   FactoryIcon,
@@ -47,6 +47,7 @@ interface ShopifyInstallationView {
   readonly selectedLocation?: InstallationLocation | null;
   readonly publicationMediaAvailable: boolean;
   readonly marketplaceListed: boolean;
+  readonly makerProfile?: object | null;
 }
 
 interface InstallationsEnvelope {
@@ -89,7 +90,7 @@ function formattedLocation(location: InstallationLocation | null | undefined): s
 
 function statusTreatment(status: ShopifyInstallationView['connectionStatus']) {
   if (status === 'connected') {
-    return { variant: 'success' as const, label: 'Connected' };
+    return { variant: 'success' as const, label: 'Healthy' };
   }
   if (status === 'needs_reauthorization') {
     return {
@@ -100,13 +101,7 @@ function statusTreatment(status: ShopifyInstallationView['connectionStatus']) {
   return { variant: 'secondary' as const, label: 'Disconnected' };
 }
 
-export function ProductSettings({
-  judge,
-  workspaceId,
-}: {
-  readonly judge: boolean;
-  readonly workspaceId?: string;
-}) {
+export function ProductSettings({ workspaceId }: { readonly workspaceId?: string }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [shopDialogOpen, setShopDialogOpen] = useState(false);
   const [shopDomain, setShopDomain] = useState('');
@@ -267,7 +262,7 @@ export function ProductSettings({
       </nav>
 
       <section id="profile" className="product-settings-section" aria-labelledby="profile-title">
-        <Surface render={<article />} className="product-settings-card ring ring-kumo-line">
+        <LayerCard render={<article />} className="product-settings-card">
           <span className="product-settings-icon" aria-hidden>
             <IdentificationCardIcon size={22} />
           </span>
@@ -282,7 +277,7 @@ export function ProductSettings({
           <Button type="button" variant="primary" onClick={() => setProfileOpen(true)}>
             Edit buyer details
           </Button>
-        </Surface>
+        </LayerCard>
       </section>
 
       <section
@@ -290,10 +285,7 @@ export function ProductSettings({
         className="product-settings-section"
         aria-labelledby="integrations-title"
       >
-        <Surface
-          render={<article />}
-          className="product-settings-card is-stacked ring ring-kumo-line"
-        >
+        <LayerCard render={<article />} className="product-settings-card is-stacked">
           <span className="product-settings-icon shopify-product-icon" aria-hidden>
             <img src="https://cdn.shopify.com/static/shopify-favicon.png" alt="" />
           </span>
@@ -311,7 +303,7 @@ export function ProductSettings({
                 disabled={envelope?.configured === false}
                 onClick={() => setShopDialogOpen(true)}
               >
-                Connect Shopify
+                {activeInstallations.length > 0 ? 'Connect another store' : 'Connect Shopify'}
               </Button>
             </div>
             {envelope?.configured === false ? (
@@ -361,14 +353,21 @@ export function ProductSettings({
                         </div>
                         <div>
                           <dt>Manufacturing location</dt>
-                          <dd>{installation.selectedLocation?.name ?? 'Select a location'}</dd>
+                          <dd>
+                            {installation.selectedLocation?.name ??
+                              'Manufacturing location unavailable'}
+                          </dd>
                         </div>
                         <div>
                           <dt>Actual address</dt>
                           <dd>
                             {formattedLocation(installation.selectedLocation) ||
-                              'Not provided by Shopify'}
+                              'Manufacturing location unavailable'}
                           </dd>
+                        </div>
+                        <div>
+                          <dt>Maker profile</dt>
+                          <dd>{installation.makerProfile ? 'Ready' : 'Needs setup'}</dd>
                         </div>
                         <div>
                           <dt>Product media</dt>
@@ -398,7 +397,7 @@ export function ProductSettings({
                         </Select>
                       ) : null}
                       <div className="shopify-installation-actions">
-                        {judge && workspaceId ? (
+                        {workspaceId ? (
                           <LinkButton
                             href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile&installation=${encodeURIComponent(installation.id)}`}
                             variant="secondary"
@@ -406,9 +405,9 @@ export function ProductSettings({
                             Manage
                           </LinkButton>
                         ) : (
-                          <Button type="button" variant="secondary" disabled>
-                            Manage
-                          </Button>
+                          <LinkButton href="/dashboard" variant="secondary">
+                            Create a project to manage
+                          </LinkButton>
                         )}
                         <Button
                           type="button"
@@ -456,7 +455,7 @@ export function ProductSettings({
               </p>
             ) : null}
           </div>
-        </Surface>
+        </LayerCard>
       </section>
 
       <section
@@ -464,7 +463,7 @@ export function ProductSettings({
         className="product-settings-section"
         aria-labelledby="maker-profile-title"
       >
-        <Surface render={<article />} className="product-settings-card ring ring-kumo-line">
+        <LayerCard render={<article />} className="product-settings-card">
           <span className="product-settings-icon" aria-hidden>
             <FactoryIcon size={22} />
           </span>
@@ -475,19 +474,23 @@ export function ProductSettings({
               Each Maker profile is bound to one authorized Shopify store and one selected location.
             </p>
           </div>
-          {judge && workspaceId && activeInstallations.length > 0 ? (
+          {workspaceId && activeInstallations.length > 0 ? (
             <LinkButton
               href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile`}
               variant="secondary"
             >
               Manage Maker profiles
             </LinkButton>
-          ) : (
+          ) : activeInstallations.length === 0 ? (
             <Badge variant="secondary" appearance="dot">
               Connect Shopify first
             </Badge>
+          ) : (
+            <Badge variant="warning" appearance="dot">
+              Create a project to manage
+            </Badge>
           )}
-        </Surface>
+        </LayerCard>
       </section>
     </main>
   );

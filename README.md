@@ -7,22 +7,34 @@ build begins with constrained 2D fabrication because it is the smallest domain w
 intent, geometry, manufacturability, commercial agreement, and external execution can be
 demonstrated objectively.
 
-## Current phase
+## Challenge release
 
-AT-1042 authoritative vertical slice:
+Attune carries one exact design version through a two-sided manufacturing workflow:
 
-- deterministic 218 × 120 × 3 mm acrylic-panel model and exact `8.1 mm < 12 mm`
-  manufacturability conflict;
-- one semantic command bus for human UI and native WebMCP;
-- immutable receipts, server-assigned provenance, state hashes, workspace sequence, draft
-  version, and capability epoch;
-- compiled and revocable quote, acceptance, revision, and commerce authority;
-- contextual `inspect_attune_workspace`, `compare_valid_changes`, and
-  `apply_attune_repair` tools registered through `document.modelContext`;
-- Shopify spike isolated on the pending `read_inventory` app scope rather than blocking
-  product-domain work.
+- **Buyer Requests** contain quote requests that were sent to makers.
+- **Orders** contain accepted quotes and their checkout/production state.
+- **Maker Requests** contain incoming work awaiting a maker commitment.
+- **Jobs** contain accepted manufacturing work.
+- Change requests stay inside the original manufacturing record and preserve the submitted
+  version, preview, specification hash, quote, and acceptance chain.
 
-Phase-A deployment: [attune-beta-five.vercel.app](https://attune-beta-five.vercel.app)
+Authenticated workspaces expose contextual browser-native WebMCP tools through
+`document.modelContext`. A normal Buyer/editor receives nine stable tools for inspection,
+forecasting, design changes, maker discovery, navigation, account setup, and manufacturing
+requests. Viewer and Commenter access remains read-only; tool schemas and server execution both
+derive authority from current workspace capabilities. Agent access is visible, enabled by default,
+finite, revocable, and revalidated after authority changes.
+
+Shopify OAuth creates a durable store installation, adds Maker authority without removing Buyer
+authority, selects a real active location when available, and prepares a Maker profile. OAuth
+approval remains a human merchant action.
+
+Production: [attune-webmcp.vercel.app](https://attune-webmcp.vercel.app)
+
+Challenge reviewers begin at
+[attune-webmcp.vercel.app/judge](https://attune-webmcp.vercel.app/judge). The protected control
+center links the clean demo workspace, Buyer Requests, Maker Requests, and the scoped reset. It
+contains no credentials.
 
 Public repository: [github.com/kunal-phalak/attune](https://github.com/kunal-phalak/attune)
 
@@ -43,7 +55,7 @@ If `SHOPIFY_STOREFRONT_ACCESS_TOKEN` is blank, the connectivity spike creates on
 Admin GraphQL, stores it only in the ignored local environment file, and records no token
 value in its evidence.
 
-## Shopify gate
+## Shopify setup
 
 See [Shopify integration](docs/SHOPIFY_INTEGRATION.md) and the
 [connectivity checklist](docs/SHOPIFY_SPIKE_CHECKLIST.md). Start with the

@@ -65,6 +65,7 @@ import type {
   ShopifyInstallationLocation,
   ShopifyInstallationStatus,
 } from './schema';
+import { rolesAfterShopifyConnection } from './shopify-authority';
 
 export const JUDGE_WORKSPACE_ID = 'workspace:at-1042';
 export const JUDGE_USER_ID = 'user:judge';
@@ -976,7 +977,7 @@ async function initializeJudgeWorkspace(): Promise<void> {
   if (
     current &&
     typeof Reflect.get(current, 'scenarioVersion') === 'number' &&
-    Number(Reflect.get(current, 'scenarioVersion')) >= 3 &&
+    Reflect.get(current, 'scenarioVersion') >= 3 &&
     current.providerCapabilityProfile
   ) {
     await database.transaction(async (transaction) => {
@@ -1105,7 +1106,7 @@ async function initializeJudgeWorkspace(): Promise<void> {
     if (
       stored &&
       (typeof Reflect.get(stored, 'scenarioVersion') !== 'number' ||
-        Number(Reflect.get(stored, 'scenarioVersion')) < 3)
+        Reflect.get(stored, 'scenarioVersion') < 3)
     ) {
       await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
       await transaction
@@ -1476,16 +1477,83 @@ export async function ensureAuthenticatedUser(input: {
     await transaction
       .insert(organizationMemberships)
       .values({ organizationId, userId, roles: ['buyer'] })
-      .onConflictDoUpdate({
-        target: [organizationMemberships.organizationId, organizationMemberships.userId],
-        set: { roles: ['buyer'] },
-      });
+      .onConflictDoNothing();
   });
   boundedCache(cache).set(cacheKey, {
     expiresAt: Date.now() + REPOSITORY_CACHE_TTL_MS,
     value: userId,
   });
   return userId;
+}
+
+export async function grantShopifyMakerAuthority(userId: string): Promise<void> {
+  const database = getDatabase();
+  const workspaceIds = await database.transaction(async (transaction) => {
+    const organizationRows = await transaction
+      .select({
+        organizationId: organizationMemberships.organizationId,
+        roles: organizationMemberships.roles,
+      })
+      .from(organizationMemberships)
+      .where(eq(organizationMemberships.userId, userId));
+    for (const membership of organizationRows) {
+      const next = rolesAfterShopifyConnection(membership.roles);
+      if (!next.changed) continue;
+      await transaction
+        .update(organizationMemberships)
+        .set({ roles: [...next.roles] })
+        .where(
+          and(
+            eq(organizationMemberships.organizationId, membership.organizationId),
+            eq(organizationMemberships.userId, userId),
+          ),
+        );
+    }
+    const organizationIds = organizationRows.map(({ organizationId }) => organizationId);
+    if (organizationIds.length === 0) return [];
+    const workspaceRows = await transaction
+      .select({
+        workspaceId: workspaceMemberships.workspaceId,
+        roles: workspaceMemberships.roles,
+        workspace: workspaces.currentSpecification,
+      })
+      .from(workspaceMemberships)
+      .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
+      .innerJoin(projects, eq(projects.id, workspaces.projectId))
+      .where(
+        and(
+          eq(workspaceMemberships.userId, userId),
+          inArray(projects.organizationId, organizationIds),
+        ),
+      );
+    const now = new Date().toISOString();
+    for (const membership of workspaceRows) {
+      const next = rolesAfterShopifyConnection(membership.roles);
+      if (!next.changed) continue;
+      await transaction
+        .update(workspaceMemberships)
+        .set({ roles: [...next.roles] })
+        .where(
+          and(
+            eq(workspaceMemberships.workspaceId, membership.workspaceId),
+            eq(workspaceMemberships.userId, userId),
+          ),
+        );
+      await transaction
+        .update(workspaces)
+        .set({
+          currentSpecification: {
+            ...membership.workspace,
+            authorityEpoch: membership.workspace.authorityEpoch + 1,
+          },
+          updatedAt: now,
+        })
+        .where(eq(workspaces.id, membership.workspaceId));
+    }
+    return workspaceRows.map(({ workspaceId }) => workspaceId);
+  });
+  const identities = repositoryGlobal().attuneWorkspaceIdentities;
+  for (const workspaceId of workspaceIds) identities?.delete(`${workspaceId}\u0000${userId}`);
 }
 
 export async function canCreateProjectsForUser(userId: string): Promise<boolean> {

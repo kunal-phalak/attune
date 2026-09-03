@@ -12,7 +12,8 @@ import {
 } from './access';
 
 let liveblocks: Liveblocks | undefined;
-const accessMigrationQueue = new Map<string, Promise<void>>();
+type LiveblocksRoom = Awaited<ReturnType<Liveblocks['getRoom']>>;
+const accessMigrationQueue = new Map<string, Promise<LiveblocksRoom>>();
 
 export function liveblocksConfigured(): boolean {
   return Boolean(process.env.LIVEBLOCKS_SECRET_KEY);
@@ -40,24 +41,25 @@ export async function liveblocksRoomIdsForUser(userId: string): Promise<readonly
   return roomIds;
 }
 
-async function migrateLegacyWorkspaceAccess(roomId: string): Promise<void> {
+async function roomWithCurrentAccessModel(roomId: string): Promise<LiveblocksRoom> {
   const previous = accessMigrationQueue.get(roomId);
   if (previous) return previous;
   const migration = (async () => {
     const client = getLiveblocks();
     const room = await client.getRoom(roomId);
-    if (room.metadata.attuneAccessModel === ATTUNE_ROOM_ACCESS_MODEL) return;
+    if (room.metadata.attuneAccessModel === ATTUNE_ROOM_ACCESS_MODEL) return room;
     const members = await workspaceMembersForLiveblocksRoom(roomId);
     const update = legacyWorkspaceAccessMigration(room, members);
-    if (!update) return;
+    if (!update) return room;
     await client.updateRoom(roomId, {
       usersAccesses: update.usersAccesses,
       metadata: { attuneAccessModel: ATTUNE_ROOM_ACCESS_MODEL },
     });
+    return client.getRoom(roomId);
   })();
   accessMigrationQueue.set(roomId, migration);
   try {
-    await migration;
+    return await migration;
   } finally {
     if (accessMigrationQueue.get(roomId) === migration) accessMigrationQueue.delete(roomId);
   }
@@ -68,8 +70,7 @@ export async function liveblocksRoomPermission(
   userId: string,
 ): Promise<{ readonly read: boolean; readonly comment: boolean; readonly write: boolean }> {
   if (!liveblocksConfigured()) return { read: false, comment: false, write: false };
-  await migrateLegacyWorkspaceAccess(roomId);
-  const room = await getLiveblocks().getRoom(roomId);
+  const room = await roomWithCurrentAccessModel(roomId);
   const permissions = effectiveRoomPermissions(room, userId);
   return {
     read: roomPermissionsAllow(permissions, 'read'),

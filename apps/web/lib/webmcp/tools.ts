@@ -88,6 +88,7 @@ function focus(input: unknown): AgentContextFocus {
       'group_ids',
       'active_group_id',
       'active_human_tool',
+      'include_manufacturing',
       'region',
     ],
     'inspect_context input',
@@ -303,7 +304,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'inspect_context',
       title: 'Inspect semantic sketch context',
       description:
-        'Use before editing when you need authoritative IDs, versions, nearby geometry, solver state, or unseen human changes. Do not use it to mutate the design or inspect commerce; it only reads the current sketch context.',
+        'Use before editing when you need authoritative IDs, versions, nearby geometry, solver state, unseen human changes, or the exact request/quote/order chain. Set include_manufacturing only when commerce context is relevant. Do not use it to mutate design or commerce state.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -313,6 +314,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
           group_ids: { type: 'array', items: { type: 'string' }, maxItems: 100 },
           active_group_id: { type: 'string' },
           active_human_tool: { type: 'string' },
+          include_manufacturing: { type: 'boolean' },
           region: {
             type: 'object',
             properties: {
@@ -336,8 +338,39 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       },
       async execute(input, execution) {
         const startedAt = performance.now();
-        const result = await runtime.observe(focus(input), execution?.signal);
-        return withToolDispatchTiming(result, startedAt);
+        const value =
+          input === undefined || input === null ? {} : object(input, 'inspect_context input');
+        if (
+          value.include_manufacturing !== undefined &&
+          typeof value.include_manufacturing !== 'boolean'
+        ) {
+          throw new TypeError('include_manufacturing must be a boolean.');
+        }
+        const context = await runtime.observe(focus(value), execution?.signal);
+        if (value.include_manufacturing !== true || !runtime.current) {
+          return withToolDispatchTiming(context, startedAt);
+        }
+        const view = await runtime.current(execution?.signal);
+        return withToolDispatchTiming(
+          {
+            ...context,
+            manufacturing: {
+              configuration: view.workspace.manufacturingConfiguration,
+              requests: view.workspace.manufacturingRequests,
+              savedVersions: view.workspace.savedVersions.map((version) => ({
+                versionId: version.versionId,
+                versionNumber: version.versionNumber,
+                name: version.name,
+                specificationHash: version.specHash,
+                previewStatus: version.preview.status,
+              })),
+              quotes: view.workspace.quotes,
+              acceptances: view.workspace.acceptances,
+              shopifyDraftOrders: view.workspace.externalCommerceRecords,
+            },
+          },
+          startedAt,
+        );
       },
     },
     {
@@ -619,10 +652,31 @@ function requireCapability(capabilityIds: ReadonlySet<string>, capabilityId: str
   }
 }
 
+function hasBuyerAuthority(capabilityIds: ReadonlySet<string>): boolean {
+  return capabilityIds.has('request_quote') || capabilityIds.has('accept_revision');
+}
+
+function hasMakerAuthority(capabilityIds: ReadonlySet<string>): boolean {
+  return (
+    capabilityIds.has('freeze_and_quote_revision') || capabilityIds.has('materialize_for_commerce')
+  );
+}
+
+function navigationDestinations(capabilityIds: ReadonlySet<string>): readonly string[] {
+  return [
+    'design',
+    'find_makers',
+    ...(hasBuyerAuthority(capabilityIds) ? ['buyer_requests', 'buyer_orders'] : []),
+    ...(hasMakerAuthority(capabilityIds) ? ['maker_requests', 'maker_jobs', 'maker_profile'] : []),
+    'settings',
+  ];
+}
+
 function manufacturingTools(
   runtime: ToolRuntime,
   capabilityIds: ReadonlySet<string>,
 ): readonly WebMcpTool[] {
+  const destinations = navigationDestinations(capabilityIds);
   const tools: WebMcpTool[] = [
     {
       name: 'find_makers',
@@ -671,47 +725,6 @@ function manufacturingTools(
       },
     },
     {
-      name: 'inspect_quote_or_order',
-      title: 'Inspect a quote or order',
-      description:
-        'Use to read the exact-version chain across a manufacturing request, quote, acceptance, and verified Shopify Draft Order. Do not use it to quote, accept, submit, or navigate; it never mutates product or commerce state.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-        untrustedContentHint: true,
-      },
-      async execute(input, execution) {
-        const startedAt = performance.now();
-        empty(input);
-        if (!runtime.current) throw new Error('Manufacturing order access is unavailable.');
-        const view = await runtime.current(execution?.signal);
-        return withToolDispatchTiming(
-          {
-            workspaceSequence: view.workspace.workspaceSeq,
-            draftVersion: view.workspace.draftVersion,
-            specificationHash: view.specHash,
-            manufacturingConfiguration: view.workspace.manufacturingConfiguration,
-            provider: view.workspace.providerCapabilityProfile,
-            requests: view.workspace.manufacturingRequests,
-            savedVersions: view.workspace.savedVersions.map((version) => ({
-              versionId: version.versionId,
-              versionNumber: version.versionNumber,
-              name: version.name,
-              specificationHash: version.specHash,
-              previewStatus: version.preview.status,
-            })),
-            quotes: view.workspace.quotes,
-            acceptances: view.workspace.acceptances,
-            shopifyDraftOrders: view.workspace.externalCommerceRecords,
-          },
-          startedAt,
-        );
-      },
-    },
-    {
       name: 'navigate_workspace',
       title: 'Navigate the Attune workspace',
       description:
@@ -721,14 +734,7 @@ function manufacturingTools(
         properties: {
           destination: {
             type: 'string',
-            enum: [
-              'design',
-              'find_makers',
-              'buyer_orders',
-              'maker_requests',
-              'maker_profile',
-              'settings',
-            ],
+            enum: destinations,
           },
         },
         required: ['destination'],
@@ -745,14 +751,7 @@ function manufacturingTools(
         const startedAt = performance.now();
         const value = object(input, 'navigate_workspace input');
         exact(value, ['destination'], 'navigate_workspace input');
-        if (
-          value.destination !== 'design' &&
-          value.destination !== 'find_makers' &&
-          value.destination !== 'buyer_orders' &&
-          value.destination !== 'maker_requests' &&
-          value.destination !== 'maker_profile' &&
-          value.destination !== 'settings'
-        ) {
+        if (typeof value.destination !== 'string' || !destinations.includes(value.destination)) {
           throw new TypeError('destination is unsupported.');
         }
         if (!runtime.navigate) throw new Error('Workspace navigation is unavailable.');
@@ -961,7 +960,146 @@ function manufacturingTools(
       },
     },
   ];
-  return tools;
+  return tools.filter(
+    ({ name }) =>
+      name !== 'manage_manufacturing_request' ||
+      hasBuyerAuthority(capabilityIds) ||
+      hasMakerAuthority(capabilityIds),
+  );
+}
+
+const COMMERCE_ADDRESS_SCHEMA = {
+  type: 'object',
+  properties: {
+    firstName: { type: 'string', minLength: 1, maxLength: 120 },
+    lastName: { type: 'string', minLength: 1, maxLength: 120 },
+    company: { type: 'string', maxLength: 160 },
+    address1: { type: 'string', minLength: 1, maxLength: 240 },
+    address2: { type: 'string', maxLength: 240 },
+    city: { type: 'string', minLength: 1, maxLength: 120 },
+    provinceCode: { type: 'string', maxLength: 12 },
+    countryCode: { type: 'string', minLength: 2, maxLength: 2 },
+    postalCode: { type: 'string', minLength: 1, maxLength: 32 },
+    phone: { type: 'string', maxLength: 40 },
+  },
+  required: ['firstName', 'lastName', 'address1', 'city', 'countryCode', 'postalCode'],
+  additionalProperties: false,
+} as const;
+
+function accountTools(
+  runtime: ToolRuntime,
+  capabilityIds: ReadonlySet<string>,
+): readonly WebMcpTool[] {
+  const operations = [
+    'inspect_setup',
+    ...(hasBuyerAuthority(capabilityIds) || hasMakerAuthority(capabilityIds)
+      ? ['start_shopify_connection']
+      : []),
+    ...(hasBuyerAuthority(capabilityIds) ? ['update_buyer_profile'] : []),
+    ...(hasMakerAuthority(capabilityIds)
+      ? ['select_manufacturing_location', 'update_maker_profile']
+      : []),
+  ];
+  return [
+    {
+      name: 'manage_account',
+      title: 'Inspect or update Attune setup',
+      description:
+        'Use to inspect setup completeness, update explicitly provided Buyer details, start Shopify authorization, select a manufacturing location, or update a Maker listing. Do not use it to infer private address fields, enter merchant credentials, approve Shopify permissions, or claim OAuth completed before the callback.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          operation: {
+            type: 'string',
+            enum: operations,
+          },
+          profile: {
+            type: 'object',
+            properties: {
+              firstName: { type: 'string', minLength: 1, maxLength: 120 },
+              lastName: { type: 'string', minLength: 1, maxLength: 120 },
+              email: { type: 'string', minLength: 3, maxLength: 254 },
+              phone: { type: 'string', maxLength: 40 },
+              shippingAddress: COMMERCE_ADDRESS_SCHEMA,
+              billingSameAsShipping: { type: 'boolean' },
+              billingAddress: COMMERCE_ADDRESS_SCHEMA,
+            },
+            required: [
+              'firstName',
+              'lastName',
+              'email',
+              'shippingAddress',
+              'billingSameAsShipping',
+            ],
+            additionalProperties: false,
+          },
+          shop_domain: { type: 'string', minLength: 16, maxLength: 80 },
+          installation_id: { type: 'string' },
+          location_id: { type: 'string' },
+          marketplace_listed: { type: 'boolean' },
+        },
+        required: ['operation'],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: operations.length === 1,
+        destructiveHint: false,
+        idempotentHint: operations.length === 1,
+        openWorldHint: operations.length > 1,
+        untrustedContentHint: true,
+      },
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        const value = object(input, 'manage_account input');
+        const operation = string(value.operation, 'operation');
+        if (!runtime.account) throw new Error('Account setup access is unavailable.');
+        if (operation === 'inspect_setup') {
+          exact(value, ['operation'], 'inspect_setup input');
+        } else if (operation === 'update_buyer_profile') {
+          exact(value, ['operation', 'profile'], 'update_buyer_profile input');
+          requireCapability(capabilityIds, 'request_quote');
+          object(value.profile, 'profile');
+        } else if (operation === 'start_shopify_connection') {
+          exact(value, ['operation', 'shop_domain'], 'start_shopify_connection input');
+          if (!hasBuyerAuthority(capabilityIds) && !hasMakerAuthority(capabilityIds)) {
+            throw new Error('Workspace Buyer or Maker authority is required.');
+          }
+          const shopDomain = string(value.shop_domain, 'shop_domain').trim().toLowerCase();
+          if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(shopDomain)) {
+            throw new TypeError('shop_domain must be a valid myshopify.com address.');
+          }
+          value.shop_domain = shopDomain;
+        } else if (operation === 'select_manufacturing_location') {
+          exact(
+            value,
+            ['operation', 'installation_id', 'location_id'],
+            'select_manufacturing_location input',
+          );
+          requireCapability(capabilityIds, 'freeze_and_quote_revision');
+          string(value.installation_id, 'installation_id');
+          string(value.location_id, 'location_id');
+        } else if (operation === 'update_maker_profile') {
+          exact(
+            value,
+            ['operation', 'installation_id', 'location_id', 'marketplace_listed'],
+            'update_maker_profile input',
+          );
+          requireCapability(capabilityIds, 'freeze_and_quote_revision');
+          string(value.installation_id, 'installation_id');
+          if (value.location_id !== undefined) string(value.location_id, 'location_id');
+          if (
+            value.marketplace_listed !== undefined &&
+            typeof value.marketplace_listed !== 'boolean'
+          ) {
+            throw new TypeError('marketplace_listed must be a boolean.');
+          }
+        } else {
+          throw new TypeError('manage_account.operation is unsupported.');
+        }
+        return withToolDispatchTiming(await runtime.account(value, execution?.signal), startedAt);
+      },
+    },
+  ];
 }
 
 export function toolsForCapabilities(
@@ -972,18 +1110,17 @@ export function toolsForCapabilities(
     ...semanticTools(runtime),
     ...(capabilityIds.has('edit_draft') ? editingTools(runtime) : []),
     ...manufacturingTools(runtime, capabilityIds),
+    ...accountTools(runtime, capabilityIds),
   ];
 }
 
 export function toolNamesForCapabilities(capabilityIds: ReadonlySet<string>): readonly string[] {
   const names = ['inspect_context', 'forecast_change', 'check_design'];
   if (capabilityIds.has('edit_draft')) names.push('modify_geometry', 'constrain_geometry');
-  names.push(
-    'find_makers',
-    'inspect_quote_or_order',
-    'manage_manufacturing_request',
-    'navigate_workspace',
-  );
+  names.push('find_makers', 'navigate_workspace', 'manage_account');
+  if (hasBuyerAuthority(capabilityIds) || hasMakerAuthority(capabilityIds)) {
+    names.push('manage_manufacturing_request');
+  }
   return names;
 }
 

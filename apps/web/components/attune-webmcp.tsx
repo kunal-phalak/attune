@@ -58,9 +58,10 @@ export function AttuneWebMcp({
     );
     updateView(next);
   }, [perspective, updateView, workspaceId]);
-  const capabilityKey = view
+  const authorityCapabilityKey = view
     ? (view.authority?.capabilityIds ?? view.capabilities.map(({ id }) => id)).toSorted().join('|')
     : '';
+  const capabilityKey = view?.delegation.status === 'active' ? authorityCapabilityKey : '';
   const capabilityIds = useMemo(
     () => new Set(capabilityKey ? capabilityKey.split('|') : []),
     [capabilityKey],
@@ -145,12 +146,13 @@ export function AttuneWebMcp({
             <Button
               type="button"
               variant="ghost"
-              size="base"
-              shape="square"
+              size="sm"
               icon={<AppIcons.Agent size={18} />}
-              aria-label={enabled ? 'Agent access enabled' : 'Enable agent access'}
+              aria-label={`Agent access ${enabled ? 'on' : 'off'}`}
               data-active={enabled || undefined}
-            />
+            >
+              Agent access: {enabled ? 'On' : 'Off'}
+            </Button>
           }
         />
         <Popover.Content

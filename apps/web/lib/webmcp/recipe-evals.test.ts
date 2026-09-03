@@ -248,7 +248,7 @@ describe('focused native WebMCP mechanical acceptance prompts', () => {
     await registerAttuneTools(
       native.context,
       runtime,
-      new Set(['edit_draft']),
+      new Set(['edit_draft', 'request_quote']),
       new AbortController().signal,
     );
 
@@ -265,7 +265,7 @@ describe('focused native WebMCP mechanical acceptance prompts', () => {
       'find_makers',
       'forecast_change',
       'inspect_context',
-      'inspect_quote_or_order',
+      'manage_account',
       'manage_manufacturing_request',
       'modify_geometry',
       'navigate_workspace',

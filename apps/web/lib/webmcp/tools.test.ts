@@ -5,6 +5,18 @@ import { parseModifyGeometryToolInput, registerAttuneTools, toolsForCapabilities
 
 const unavailable = () => Promise.reject(new Error('Not used by this contract test.'));
 
+function toolPropertyEnum(tool: unknown, property: string): unknown {
+  if (typeof tool !== 'object' || tool === null) return undefined;
+  const schema = Reflect.get(tool, 'inputSchema');
+  if (typeof schema !== 'object' || schema === null) return undefined;
+  const properties = Reflect.get(schema, 'properties');
+  if (typeof properties !== 'object' || properties === null) return undefined;
+  const propertySchema = Reflect.get(properties, property);
+  return typeof propertySchema === 'object' && propertySchema !== null
+    ? Reflect.get(propertySchema, 'enum')
+    : undefined;
+}
+
 describe('compact WebMCP geometry mutation surface', () => {
   it('represents a complete round plate as one typed recipe operation', () => {
     expect(
@@ -111,6 +123,51 @@ describe('compact WebMCP geometry mutation surface', () => {
 });
 
 describe('native model-context registration contract', () => {
+  it('keeps viewer tools read-only and scopes Buyer and Maker destinations independently', () => {
+    const runtime: ToolRuntime = {
+      observe: vi.fn(unavailable),
+      execute: vi.fn(unavailable),
+      forecast: vi.fn(unavailable),
+    };
+    const viewerTools = toolsForCapabilities(runtime, new Set());
+    expect(viewerTools.map(({ name }) => name)).not.toEqual(
+      expect.arrayContaining([
+        'modify_geometry',
+        'constrain_geometry',
+        'manage_manufacturing_request',
+      ]),
+    );
+    const viewerAccount = viewerTools.find(({ name }) => name === 'manage_account');
+    expect(viewerAccount?.annotations?.readOnlyHint).toBe(true);
+    expect(toolPropertyEnum(viewerAccount, 'operation')).toEqual(['inspect_setup']);
+
+    const buyerNavigation = toolsForCapabilities(runtime, new Set(['request_quote'])).find(
+      ({ name }) => name === 'navigate_workspace',
+    );
+    const buyerDestinations = toolPropertyEnum(buyerNavigation, 'destination');
+    expect(buyerDestinations).toEqual([
+      'design',
+      'find_makers',
+      'buyer_requests',
+      'buyer_orders',
+      'settings',
+    ]);
+
+    const makerNavigation = toolsForCapabilities(
+      runtime,
+      new Set(['freeze_and_quote_revision']),
+    ).find(({ name }) => name === 'navigate_workspace');
+    const makerDestinations = toolPropertyEnum(makerNavigation, 'destination');
+    expect(makerDestinations).toEqual([
+      'design',
+      'find_makers',
+      'maker_requests',
+      'maker_jobs',
+      'maker_profile',
+      'settings',
+    ]);
+  });
+
   it('exposes stable tools and executes geometry and constraint schemas with AbortSignal', async () => {
     const execute = vi.fn(async (command: Readonly<Record<string, unknown>>) => ({
       status: 'APPLIED',
@@ -142,7 +199,13 @@ describe('native model-context registration contract', () => {
     await registerAttuneTools(
       context,
       runtime,
-      new Set(['edit_draft', 'compare_valid_changes', 'apply_deterministic_repair']),
+      new Set([
+        'edit_draft',
+        'compare_valid_changes',
+        'apply_deterministic_repair',
+        'request_quote',
+        'accept_revision',
+      ]),
       registration.signal,
     );
 
@@ -152,7 +215,7 @@ describe('native model-context registration contract', () => {
       'find_makers',
       'forecast_change',
       'inspect_context',
-      'inspect_quote_or_order',
+      'manage_account',
       'manage_manufacturing_request',
       'modify_geometry',
       'navigate_workspace',
@@ -178,14 +241,7 @@ describe('native model-context registration contract', () => {
         : undefined;
     expect(destination).toEqual(
       expect.objectContaining({
-        enum: [
-          'design',
-          'find_makers',
-          'buyer_orders',
-          'maker_requests',
-          'maker_profile',
-          'settings',
-        ],
+        enum: ['design', 'find_makers', 'buyer_requests', 'buyer_orders', 'settings'],
       }),
     );
     expect(registrationSignals.every((signal) => signal === registration.signal)).toBe(true);

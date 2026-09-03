@@ -1,9 +1,5 @@
 import type { ForecastConsequence } from '@attune/command-bus';
-import {
-  type AttuneWorkspace,
-  type SelectionContext,
-  type SketchDocument,
-} from '@attune/domain';
+import { type AttuneWorkspace, type SelectionContext, type SketchDocument } from '@attune/domain';
 
 export type CapabilityRole = 'buyer' | 'provider' | 'editor' | 'reviewer';
 
@@ -32,6 +28,7 @@ export interface AttuneApiView {
   readonly product: {
     readonly workspaceId: string;
     readonly agentToolsEnabled: boolean;
+    readonly judgeMode: boolean;
     readonly projectName: string;
     readonly fileName: string;
     readonly liveblocksRoomId: string;

@@ -1,4 +1,9 @@
-import { databaseConfigured, ensureJudgeWorkspace, JUDGE_WORKSPACE_ID } from '@attune/database';
+import {
+  databaseConfigured,
+  ensureJudgeWorkspace,
+  JUDGE_WORKSPACE_ID,
+  listProjectsForUser,
+} from '@attune/database';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -25,7 +30,7 @@ export default async function SettingsPage() {
   const user = await currentAttuneUser();
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
-  return (
-    <ProductSettings judge={user.judge} workspaceId={user.judge ? JUDGE_WORKSPACE_ID : undefined} />
-  );
+  const projects = user.judge ? [] : await listProjectsForUser(user.userId);
+  const workspaceId = user.judge ? JUDGE_WORKSPACE_ID : projects[0]?.workspaceId;
+  return <ProductSettings workspaceId={workspaceId} />;
 }

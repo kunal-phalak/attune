@@ -189,15 +189,15 @@ async function accessForIdentity(
   let delegation = await agentDelegationForWorkspace(bundle.workspaceId, identity.principalId);
   let status = delegationStatus(delegation, bundle.workspace.authorityEpoch);
   const now = Date.now();
-  if (
+  const shouldEnableByDefault = !delegation;
+  const shouldRevalidateJudge =
     bundle.workspaceId === JUDGE_WORKSPACE_ID &&
     identity.roles.includes('buyer') &&
     identity.roles.includes('provider') &&
-    (!delegation ||
-      (status.status === 'revalidation_required' &&
-        !delegation.revokedAt &&
-        Date.parse(delegation.consentExpiresAt) > now))
-  ) {
+    status.status === 'revalidation_required' &&
+    !delegation?.revokedAt &&
+    Date.parse(delegation?.consentExpiresAt ?? '') > now;
+  if (shouldEnableByDefault || shouldRevalidateJudge) {
     delegation = await issueAgentDelegation({
       workspaceId: bundle.workspaceId,
       principalId: identity.principalId,
@@ -514,7 +514,8 @@ async function viewForBundle(
     observation: bundle.observation,
     product: {
       workspaceId: bundle.workspaceId,
-      agentToolsEnabled: bundle.workspaceId === JUDGE_WORKSPACE_ID,
+      agentToolsEnabled: true,
+      judgeMode: bundle.workspaceId === JUDGE_WORKSPACE_ID,
       projectName: bundle.projectName,
       fileName: bundle.fileName,
       liveblocksRoomId: bundle.liveblocksRoomId,

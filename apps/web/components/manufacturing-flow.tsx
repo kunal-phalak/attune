@@ -4,8 +4,8 @@ import type { PanelGeometry, ProviderCapabilityProfile } from '@attune/domain';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Combobox } from '@cloudflare/kumo/components/combobox';
 import { Input } from '@cloudflare/kumo/components/input';
+import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { Select } from '@cloudflare/kumo/components/select';
-import { Surface } from '@cloudflare/kumo/components/surface';
 import { Text } from '@cloudflare/kumo/components/text';
 import {
   ArrowRightIcon,
@@ -46,16 +46,20 @@ import { WorkflowCallout } from './manufacturing-flow/workflow-callout';
 export type ManufacturingSurface =
   | 'design'
   | 'marketplace'
+  | 'buyer_requests'
   | 'buyer_orders'
   | 'provider_requests'
+  | 'provider_jobs'
   | 'provider_profile';
 
 function isManufacturingSurface(value: string): value is ManufacturingSurface {
   return [
     'design',
     'marketplace',
+    'buyer_requests',
     'buyer_orders',
     'provider_requests',
+    'provider_jobs',
     'provider_profile',
   ].includes(value);
 }
@@ -427,12 +431,12 @@ function MarketplaceSurface({
         },
       );
       onView(next);
+      onSurface('buyer_requests');
       attuneToastManager.add({
         title: 'Request sent',
         description: `Version ${next.workspace.manufacturingRequests.at(-1)?.versionNumber ?? next.workspace.savedVersions.at(-1)?.versionNumber} is ready for maker review.`,
         variant: 'success',
       });
-      onSurface('buyer_orders');
     } catch (error) {
       if (error instanceof AttuneHttpError && error.code === 'BUYER_COMMERCE_PROFILE_REQUIRED') {
         setProfileOpen(true);
@@ -466,7 +470,7 @@ function MarketplaceSurface({
         </div>
         <div className="maker-list">
           {payload.providers.map((provider) => (
-            <Surface
+            <LayerCard
               key={provider.id}
               render={<button type="button" aria-label={`Select ${provider.name}`} />}
               className="maker-card"
@@ -500,7 +504,7 @@ function MarketplaceSurface({
                 </span>
               </span>
               <ArrowRightIcon size={17} />
-            </Surface>
+            </LayerCard>
           ))}
         </div>
       </section>
@@ -654,17 +658,24 @@ function MarketplaceSurface({
   );
 }
 
-function OrdersSurface({
+function BuyerRecordsSurface({
   workspaceId,
   view,
   onView,
+  onSurface,
+  mode,
 }: {
   readonly workspaceId: string;
   readonly view: AttuneApiView;
   readonly onView: (view: AttuneApiView) => void;
+  readonly onSurface: (surface: ManufacturingSurface) => void;
+  readonly mode: 'requests' | 'orders';
 }) {
+  const acceptedRequestIds = new Set(view.workspace.acceptances.map(({ requestId }) => requestId));
   const request = view.workspace.manufacturingRequests.findLast(
-    ({ status }) => status !== 'SUPERSEDED',
+    ({ requestId, status }) =>
+      status !== 'SUPERSEDED' &&
+      (mode === 'orders' ? acceptedRequestIds.has(requestId) : !acceptedRequestIds.has(requestId)),
   );
   const quote = request
     ? view.workspace.quotes.findLast(({ requestId }) => requestId === request.requestId)
@@ -723,6 +734,7 @@ function OrdersSurface({
         },
       );
       onView(next);
+      onSurface('buyer_orders');
       attuneToastManager.add({
         title: 'Quote accepted',
         description: `Version ${quote.versionNumber} is locked for checkout.`,
@@ -756,6 +768,7 @@ function OrdersSurface({
         },
       );
       onView(next);
+      onSurface('buyer_requests');
       attuneToastManager.add({
         title: 'Change request started',
         description: `Version ${next.workspace.manufacturingRequests.at(-1)?.versionNumber} is ready for maker review.`,
@@ -776,8 +789,12 @@ function OrdersSurface({
     return (
       <div className="manufacturing-empty">
         <ShoppingBagOpenIcon size={32} />
-        <h2>No manufacturing orders yet</h2>
-        <p>Choose a capable maker from the current design to request a quote.</p>
+        <h2>{mode === 'orders' ? 'No manufacturing orders yet' : 'No quote requests yet'}</h2>
+        <p>
+          {mode === 'orders'
+            ? 'Accepted quotes move here with checkout and production status.'
+            : 'Choose a capable Maker from the current design to request a quote.'}
+        </p>
       </div>
     );
   }
@@ -786,10 +803,14 @@ function OrdersSurface({
     <div className="orders-surface">
       <div className="surface-heading">
         <span className="manufacturing-eyebrow">Buyer workspace</span>
-        <h2>Orders</h2>
-        <p>Commercial records stay bound to the exact saved version that was submitted.</p>
+        <h2>{mode === 'orders' ? 'Orders' : 'Requests'}</h2>
+        <p>
+          {mode === 'orders'
+            ? 'Accepted manufacturing work with checkout and production state.'
+            : 'Quote requests you sent to Makers, bound to the exact submitted version.'}
+        </p>
       </div>
-      <Surface render={<article />} className="order-record">
+      <LayerCard render={<article />} className="order-record">
         <DesignPreview view={view} versionId={request.versionId} />
         <div className="order-record-main">
           <div className="order-record-title">
@@ -864,7 +885,7 @@ function OrdersSurface({
           )}
           {quote ? (
             <div className="order-actions">
-              {!acceptance && quote.status === 'READY' ? (
+              {mode === 'requests' && !acceptance && quote.status === 'READY' ? (
                 <Button
                   type="button"
                   variant="primary"
@@ -906,22 +927,27 @@ function OrdersSurface({
             </div>
           ) : null}
         </div>
-      </Surface>
+      </LayerCard>
     </div>
   );
 }
 
-function ProviderRequestsSurface({
+function ProviderRecordsSurface({
   workspaceId,
   view,
   onView,
+  mode,
 }: {
   readonly workspaceId: string;
   readonly view: AttuneApiView;
   readonly onView: (view: AttuneApiView) => void;
+  readonly mode: 'requests' | 'jobs';
 }) {
+  const acceptedRequestIds = new Set(view.workspace.acceptances.map(({ requestId }) => requestId));
   const request = view.workspace.manufacturingRequests.findLast(
-    ({ status }) => status !== 'SUPERSEDED',
+    ({ requestId, status }) =>
+      status !== 'SUPERSEDED' &&
+      (mode === 'jobs' ? acceptedRequestIds.has(requestId) : !acceptedRequestIds.has(requestId)),
   );
   const quote = request
     ? view.workspace.quotes.findLast(({ requestId }) => requestId === request.requestId)
@@ -991,8 +1017,12 @@ function ProviderRequestsSurface({
     return (
       <div className="manufacturing-empty">
         <PackageIcon size={32} />
-        <h2>No incoming requests</h2>
-        <p>Buyer manufacturing requests will appear here.</p>
+        <h2>{mode === 'jobs' ? 'No accepted jobs yet' : 'No incoming requests'}</h2>
+        <p>
+          {mode === 'jobs'
+            ? 'Buyer-accepted quotes move here with production and commerce status.'
+            : 'Buyer manufacturing requests will appear here.'}
+        </p>
       </div>
     );
   }
@@ -1001,11 +1031,15 @@ function ProviderRequestsSurface({
     <div className="provider-request-surface">
       <div className="surface-heading">
         <span className="manufacturing-eyebrow">Maker workspace</span>
-        <h2>Requests</h2>
-        <p>Review the exact frozen design before making a commercial commitment.</p>
+        <h2>{mode === 'jobs' ? 'Jobs' : 'Requests'}</h2>
+        <p>
+          {mode === 'jobs'
+            ? 'Accepted manufacturing work, bound to the exact quoted version.'
+            : 'Review the exact frozen design before making a commercial commitment.'}
+        </p>
       </div>
       <div className="provider-request-layout">
-        <Surface render={<article />} className="provider-request-card">
+        <LayerCard render={<article />} className="provider-request-card">
           <div className="provider-request-preview">
             <DesignPreview view={view} versionId={request.versionId} />
           </div>
@@ -1057,10 +1091,12 @@ function ProviderRequestsSurface({
               </span>
             </div>
           </div>
-        </Surface>
-        <Surface render={<aside />} className="quote-controls">
+        </LayerCard>
+        <LayerCard render={<aside />} className="quote-controls">
           <span className="manufacturing-eyebrow">Human commitment</span>
-          <h3>{quote ? 'Quote finalized' : 'Prepare quote'}</h3>
+          <h3>
+            {mode === 'jobs' ? 'Accepted commitment' : quote ? 'Quote finalized' : 'Prepare quote'}
+          </h3>
           {quote ? (
             <>
               <div className="finalized-quote">
@@ -1124,7 +1160,7 @@ function ProviderRequestsSurface({
               </p>
             </>
           )}
-        </Surface>
+        </LayerCard>
       </div>
     </div>
   );
@@ -1197,11 +1233,7 @@ export function ManufacturingFlow({
     next: ManufacturingSurface,
     destinationPerspective?: Extract<CapabilityRole, 'buyer' | 'provider'>,
   ) => {
-    if (
-      view.product.agentToolsEnabled &&
-      destinationPerspective &&
-      destinationPerspective !== perspective
-    ) {
+    if (destinationPerspective && destinationPerspective !== perspective) {
       window.location.assign(
         `/workspace/${encodeURIComponent(workspaceId)}?perspective=${destinationPerspective}&surface=${next}`,
       );
@@ -1214,10 +1246,10 @@ export function ManufacturingFlow({
     <section
       className="manufacturing-flow t-panel-slide"
       data-open={open}
-      data-judge-perspective={view.product.agentToolsEnabled ? perspective : undefined}
+      data-judge-perspective={view.product.judgeMode ? perspective : undefined}
       aria-hidden={!open}
     >
-      {view.product.agentToolsEnabled ? (
+      {view.product.judgeMode ? (
         <aside className="judge-mode-frame ring ring-kumo-line" aria-label="Judge demo context">
           <SealCheckIcon size={18} weight="fill" aria-hidden />
           <span>
@@ -1226,11 +1258,18 @@ export function ManufacturingFlow({
             </Text>
             <Text as="span" variant="secondary" size="sm">
               {perspective === 'provider'
-                ? "You're viewing the maker side with the same judge account."
-                : "You're viewing the buyer side with the same judge account."}{' '}
+                ? 'You are viewing the maker side with the same judge account.'
+                : 'You are viewing the buyer side with the same judge account.'}{' '}
               This is a challenge demonstration convenience.
             </Text>
           </span>
+          <LinkButton
+            href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=${perspective === 'provider' ? 'buyer&surface=buyer_requests' : 'provider&surface=provider_requests'}`}
+            size="sm"
+            variant="secondary"
+          >
+            Open {perspective === 'provider' ? 'Buyer requests' : 'Maker requests'}
+          </LinkButton>
         </aside>
       ) : null}
       <header className="manufacturing-header">
@@ -1269,11 +1308,22 @@ export function ManufacturingFlow({
             <Button
               type="button"
               size="sm"
+              variant={surface === 'buyer_requests' ? 'secondary' : 'ghost'}
+              aria-current={surface === 'buyer_requests' ? 'page' : undefined}
+              onClick={() => navigateSurface('buyer_requests', 'buyer')}
+            >
+              Buyer requests
+            </Button>
+          ) : null}
+          {canBuy ? (
+            <Button
+              type="button"
+              size="sm"
               variant={surface === 'buyer_orders' ? 'secondary' : 'ghost'}
               aria-current={surface === 'buyer_orders' ? 'page' : undefined}
               onClick={() => navigateSurface('buyer_orders', 'buyer')}
             >
-              Orders
+              Buyer orders
             </Button>
           ) : null}
           {canMake ? (
@@ -1284,7 +1334,18 @@ export function ManufacturingFlow({
               aria-current={surface === 'provider_requests' ? 'page' : undefined}
               onClick={() => navigateSurface('provider_requests', 'provider')}
             >
-              Requests
+              Maker requests
+            </Button>
+          ) : null}
+          {canMake ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={surface === 'provider_jobs' ? 'secondary' : 'ghost'}
+              aria-current={surface === 'provider_jobs' ? 'page' : undefined}
+              onClick={() => navigateSurface('provider_jobs', 'provider')}
+            >
+              Maker jobs
             </Button>
           ) : null}
           {canMake ? (
@@ -1308,9 +1369,11 @@ export function ManufacturingFlow({
             const next = value;
             navigateSurface(
               next,
-              next === 'buyer_orders'
+              next === 'buyer_requests' || next === 'buyer_orders'
                 ? 'buyer'
-                : next === 'provider_requests' || next === 'provider_profile'
+                : next === 'provider_requests' ||
+                    next === 'provider_jobs' ||
+                    next === 'provider_profile'
                   ? 'provider'
                   : undefined,
             );
@@ -1318,8 +1381,10 @@ export function ManufacturingFlow({
         >
           <Select.Option value="design">Design</Select.Option>
           <Select.Option value="marketplace">Find makers</Select.Option>
-          {canBuy ? <Select.Option value="buyer_orders">Orders</Select.Option> : null}
-          {canMake ? <Select.Option value="provider_requests">Requests</Select.Option> : null}
+          {canBuy ? <Select.Option value="buyer_requests">Buyer requests</Select.Option> : null}
+          {canBuy ? <Select.Option value="buyer_orders">Buyer orders</Select.Option> : null}
+          {canMake ? <Select.Option value="provider_requests">Maker requests</Select.Option> : null}
+          {canMake ? <Select.Option value="provider_jobs">Maker jobs</Select.Option> : null}
           {canMake ? <Select.Option value="provider_profile">Maker profile</Select.Option> : null}
         </Select>
       </header>
@@ -1359,11 +1424,39 @@ export function ManufacturingFlow({
             canConfigure={canBuy}
           />
         ) : null}
+        {!loading && !error && payload && canBuy && surface === 'buyer_requests' ? (
+          <BuyerRecordsSurface
+            workspaceId={workspaceId}
+            view={view}
+            onView={onView}
+            onSurface={setSurface}
+            mode="requests"
+          />
+        ) : null}
         {!loading && !error && payload && canBuy && surface === 'buyer_orders' ? (
-          <OrdersSurface workspaceId={workspaceId} view={view} onView={onView} />
+          <BuyerRecordsSurface
+            workspaceId={workspaceId}
+            view={view}
+            onView={onView}
+            onSurface={setSurface}
+            mode="orders"
+          />
         ) : null}
         {!loading && !error && payload && canMake && surface === 'provider_requests' ? (
-          <ProviderRequestsSurface workspaceId={workspaceId} view={view} onView={onView} />
+          <ProviderRecordsSurface
+            workspaceId={workspaceId}
+            view={view}
+            onView={onView}
+            mode="requests"
+          />
+        ) : null}
+        {!loading && !error && payload && canMake && surface === 'provider_jobs' ? (
+          <ProviderRecordsSurface
+            workspaceId={workspaceId}
+            view={view}
+            onView={onView}
+            mode="jobs"
+          />
         ) : null}
         {!loading && !error && payload && canMake && surface === 'provider_profile' ? (
           <ProviderProfileSurface

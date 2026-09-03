@@ -1,9 +1,15 @@
-import { saveShopifyInstallation, shopifyInstallationForShop } from '@attune/database';
+import {
+  grantShopifyMakerAuthority,
+  saveShopifyInstallation,
+  shopifyInstallationForShop,
+} from '@attune/database';
+import { createJudgeProviderCapabilityProfile } from '@attune/domain';
 import { createAdminClientForAccessToken, inspectShopifyProviderWithAdmin } from '@attune/shopify';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { currentAttuneUser } from '../../../../../lib/auth/session';
+import { shopifyProviderProfile } from '../../../../../lib/manufacturing/marketplace';
 import {
   registerShopifyUninstallWebhook,
   shopifyInstallationId,
@@ -105,11 +111,21 @@ export async function GET(request: Request) {
           : 'needs_reauthorization',
       locations: connection.locations,
       selectedLocationId,
-      makerProfile: existing?.makerProfile,
+      makerProfile:
+        existing?.makerProfile ??
+        (selectedLocationId
+          ? shopifyProviderProfile(
+              connection,
+              selectedLocationId,
+              createJudgeProviderCapabilityProfile(),
+            )
+          : null),
       marketplaceListed: existing?.marketplaceListed,
       installedAt: existing?.installedAt ?? now,
       updatedAt: now,
     });
+
+    await grantShopifyMakerAuthority(user.userId);
 
     if (installation.connectionStatus === 'connected') {
       const webhookUrl = new URL(

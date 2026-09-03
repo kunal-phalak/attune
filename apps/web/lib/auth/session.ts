@@ -28,6 +28,13 @@ interface AuthUser {
   readonly name?: string | null;
 }
 
+interface CurrentAttuneUser {
+  readonly userId: string;
+  readonly principalId: string;
+  readonly displayName: string;
+  readonly judge: boolean;
+}
+
 function sessionSecret(): string {
   const secret = process.env.ATTUNE_SESSION_SECRET;
   if (!secret || secret.length < 32) {
@@ -125,15 +132,25 @@ export async function currentAttuneUser(): Promise<{
   };
 }
 
+export async function currentJudgeAttuneUser(): Promise<CurrentAttuneUser | null> {
+  const cookieStore = await cookies();
+  const judge = parseJudgeSession(cookieStore.get(JUDGE_COOKIE)?.value);
+  return judge
+    ? {
+        userId: JUDGE_USER_ID,
+        principalId: `judge:${JUDGE_USER_ID}`,
+        displayName: 'Challenge Judge',
+        judge: true,
+      }
+    : null;
+}
+
 export async function requireWorkspaceIdentity(
   workspaceId: string,
   role: AttuneRole,
 ): Promise<WorkspaceIdentity> {
   const identity = await workspaceIdentity(workspaceId);
-  if (
-    !identity.roles.includes(role) &&
-    !(role === 'editor' && identity.roles.includes('buyer'))
-  ) {
+  if (!identity.roles.includes(role) && !(role === 'editor' && identity.roles.includes('buyer'))) {
     throw new Error('WORKSPACE_ROLE_REQUIRED');
   }
   return identity;

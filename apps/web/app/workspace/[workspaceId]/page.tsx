@@ -18,8 +18,10 @@ export const dynamic = 'force-dynamic';
 function manufacturingSurface(value: string | undefined): ManufacturingSurface {
   if (
     value === 'marketplace' ||
+    value === 'buyer_requests' ||
     value === 'buyer_orders' ||
     value === 'provider_requests' ||
+    value === 'provider_jobs' ||
     value === 'provider_profile'
   ) {
     return value;
@@ -77,11 +79,15 @@ export default async function WorkspacePage({
   const requestedSurface = manufacturingSurface(parameters.surface);
   const initialSurface =
     role === 'buyer'
-      ? requestedSurface === 'provider_requests' || requestedSurface === 'provider_profile'
+      ? requestedSurface === 'provider_requests' ||
+        requestedSurface === 'provider_jobs' ||
+        requestedSurface === 'provider_profile'
         ? 'design'
         : requestedSurface
       : role === 'provider'
-        ? requestedSurface === 'marketplace' || requestedSurface === 'buyer_orders'
+        ? requestedSurface === 'marketplace' ||
+          requestedSurface === 'buyer_requests' ||
+          requestedSurface === 'buyer_orders'
           ? 'design'
           : requestedSurface
         : 'design';

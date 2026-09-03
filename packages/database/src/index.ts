@@ -14,6 +14,7 @@ export {
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
+  grantShopifyMakerAuthority,
   identityForLiveblocksRoom,
   identityForWorkspace,
   issueAgentDelegation,
@@ -67,3 +68,4 @@ export type {
   WorkspaceIdentity,
 } from './repository';
 export * as schema from './schema';
+export { rolesAfterShopifyConnection } from './shopify-authority';

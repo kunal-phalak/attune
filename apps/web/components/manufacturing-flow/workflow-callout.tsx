@@ -2,7 +2,7 @@
 
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Collapsible } from '@cloudflare/kumo/components/collapsible';
-import { Surface } from '@cloudflare/kumo/components/surface';
+import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { CaretDownIcon, SealCheckIcon } from '@phosphor-icons/react';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -66,11 +66,7 @@ export function WorkflowCallout({
   if (!state) return null;
 
   return (
-    <Surface
-      render={<aside />}
-      className="workflow-callout t-acc ring ring-kumo-line"
-      data-open={open}
-    >
+    <LayerCard render={<aside />} className="workflow-callout t-acc" data-open={open}>
       <Collapsible.Root open={open} onOpenChange={setOpen}>
         <div className="workflow-callout-head">
           <span className="workflow-callout-icon">
@@ -110,7 +106,7 @@ export function WorkflowCallout({
             <div className="workflow-callout-actions">
               {state.kind === 'maker' ? (
                 <LinkButton
-                  href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=buyer_orders`}
+                  href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=buyer_requests`}
                   size="sm"
                   variant="primary"
                 >
@@ -122,7 +118,7 @@ export function WorkflowCallout({
                   type="button"
                   size="sm"
                   variant="primary"
-                  onClick={() => onSurface('buyer_orders')}
+                  onClick={() => onSurface('buyer_requests')}
                 >
                   Review quote
                 </Button>
@@ -133,9 +129,11 @@ export function WorkflowCallout({
                     type="button"
                     size="sm"
                     variant="primary"
-                    onClick={() => onSurface('buyer_orders')}
+                    onClick={() =>
+                      onSurface(perspective === 'provider' ? 'provider_jobs' : 'buyer_orders')
+                    }
                   >
-                    Continue
+                    Open {perspective === 'provider' ? 'job' : 'order'}
                   </Button>
                   <Button
                     type="button"
@@ -154,6 +152,6 @@ export function WorkflowCallout({
           </div>
         </Collapsible.Panel>
       </Collapsible.Root>
-    </Surface>
+    </LayerCard>
   );
 }

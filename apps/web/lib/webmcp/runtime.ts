@@ -30,6 +30,10 @@ export interface AgentContextFocus {
 }
 
 export interface ToolRuntime {
+  readonly account?: (
+    operation: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ) => Promise<unknown>;
   readonly current?: (signal?: AbortSignal) => Promise<AttuneApiView>;
   readonly marketplace?: (versionId?: string, signal?: AbortSignal) => Promise<unknown>;
   readonly navigate?: (surface: string, signal?: AbortSignal) => Promise<unknown>;
@@ -57,7 +61,9 @@ async function responseJson(response: Response): Promise<unknown> {
   const message =
     typeof error === 'object' && error !== null
       ? Reflect.get(error, 'message')
-      : 'The authoritative request failed.';
+      : typeof error === 'string'
+        ? error
+        : 'The authoritative request failed.';
   const rawChangedEntities: readonly unknown[] =
     typeof error === 'object' &&
     error !== null &&
@@ -275,6 +281,65 @@ export function compactWorkspaceResult(view: AttuneApiView) {
   };
 }
 
+function buyerProfileStatus(value: unknown) {
+  const profile =
+    typeof value === 'object' && value !== null ? Reflect.get(value, 'profile') : undefined;
+  const address =
+    typeof profile === 'object' && profile !== null
+      ? Reflect.get(profile, 'shippingAddress')
+      : undefined;
+  const fields: readonly (readonly [string, unknown, string])[] = [
+    ['firstName', profile, 'firstName'],
+    ['lastName', profile, 'lastName'],
+    ['email', profile, 'email'],
+    ['shippingAddress.firstName', address, 'firstName'],
+    ['shippingAddress.lastName', address, 'lastName'],
+    ['shippingAddress.address1', address, 'address1'],
+    ['shippingAddress.city', address, 'city'],
+    ['shippingAddress.countryCode', address, 'countryCode'],
+    ['shippingAddress.postalCode', address, 'postalCode'],
+  ];
+  const missingFields = fields.flatMap(([name, source, key]) => {
+    const field = typeof source === 'object' && source !== null ? Reflect.get(source, key) : null;
+    return typeof field === 'string' && field.trim() ? [] : [name];
+  });
+  return { buyerProfileComplete: missingFields.length === 0, missingFields };
+}
+
+function compactAccountSetup(profile: unknown, installationPayload: unknown) {
+  const installationCandidate =
+    typeof installationPayload === 'object' && installationPayload !== null
+      ? Reflect.get(installationPayload, 'installations')
+      : null;
+  const installations = Array.isArray(installationCandidate) ? installationCandidate : [];
+  return {
+    ...buyerProfileStatus(profile),
+    shopifyConfigured:
+      typeof installationPayload === 'object' && installationPayload !== null
+        ? Reflect.get(installationPayload, 'configured') === true
+        : false,
+    stores: installations.flatMap((candidate) => {
+      if (typeof candidate !== 'object' || candidate === null) return [];
+      const selectedLocation = Reflect.get(candidate, 'selectedLocation');
+      const makerProfile = Reflect.get(candidate, 'makerProfile');
+      return [
+        {
+          installationId: Reflect.get(candidate, 'id'),
+          shopName: Reflect.get(candidate, 'shopName'),
+          shopDomain: Reflect.get(candidate, 'shopDomain'),
+          connectionStatus: Reflect.get(candidate, 'connectionStatus'),
+          manufacturingLocation:
+            typeof selectedLocation === 'object' && selectedLocation !== null
+              ? Reflect.get(selectedLocation, 'name')
+              : null,
+          makerProfileReady: typeof makerProfile === 'object' && makerProfile !== null,
+          marketplaceListed: Reflect.get(candidate, 'marketplaceListed') === true,
+        },
+      ];
+    }),
+  };
+}
+
 export function createToolRuntime(input: {
   readonly workspaceId: string;
   readonly perspective:
@@ -318,7 +383,7 @@ export function createToolRuntime(input: {
     }
   };
   const current = async (signal?: AbortSignal) => {
-    input.report({ execution: 'executing', lastAction: 'inspect_quote_or_order' });
+    input.report({ execution: 'executing', lastAction: 'inspect_context' });
     try {
       const response = await fetch(workspaceEndpoint(), {
         cache: 'no-store',
@@ -329,10 +394,10 @@ export function createToolRuntime(input: {
       if (!isAttuneApiView(next)) throw new TypeError('Attune returned an invalid workspace view.');
       input.viewRef.current = next;
       input.updateView(next);
-      input.report({ execution: 'completed', lastAction: 'inspect_quote_or_order' });
+      input.report({ execution: 'completed', lastAction: 'inspect_context' });
       return next;
     } catch (error) {
-      input.report({ execution: 'failed', lastAction: 'inspect_quote_or_order' });
+      input.report({ execution: 'failed', lastAction: 'inspect_context' });
       throw error;
     }
   };
@@ -366,16 +431,20 @@ export function createToolRuntime(input: {
     const fromSurface =
       currentSurface === 'marketplace'
         ? 'find_makers'
-        : currentSurface === 'provider_requests'
-          ? 'maker_requests'
-          : currentSurface === 'provider_profile'
-            ? 'maker_profile'
-            : currentSurface;
+        : currentSurface === 'buyer_requests'
+          ? 'buyer_requests'
+          : currentSurface === 'provider_requests'
+            ? 'maker_requests'
+            : currentSurface === 'provider_jobs'
+              ? 'maker_jobs'
+              : currentSurface === 'provider_profile'
+                ? 'maker_profile'
+                : currentSurface;
     const currentPerspective = perspective();
     const requiredPerspective =
-      surface === 'buyer_orders'
+      surface === 'buyer_requests' || surface === 'buyer_orders'
         ? 'buyer'
-        : surface === 'maker_requests' || surface === 'maker_profile'
+        : surface === 'maker_requests' || surface === 'maker_jobs' || surface === 'maker_profile'
           ? 'provider'
           : currentPerspective;
     const action = 'navigate_workspace';
@@ -397,9 +466,11 @@ export function createToolRuntime(input: {
           ? 'marketplace'
           : surface === 'maker_requests'
             ? 'provider_requests'
-            : surface === 'maker_profile'
-              ? 'provider_profile'
-              : surface;
+            : surface === 'maker_jobs'
+              ? 'provider_jobs'
+              : surface === 'maker_profile'
+                ? 'provider_profile'
+                : surface;
       if (surface === 'settings') {
         window.location.assign('/settings?section=integrations');
         input.report({ execution: 'completed', lastAction: action });
@@ -525,5 +596,101 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
-  return { current, execute, forecast, marketplace, navigate, observe };
+  const account: ToolRuntime['account'] = async (operation, signal) => {
+    const action = 'manage_account';
+    input.report({ execution: 'executing', lastAction: action });
+    try {
+      const inspectSetup = async () => {
+        const [profileResponse, installationResponse] = await Promise.all([
+          fetch('/api/attune/commerce-profile', {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+            signal,
+          }),
+          fetch('/api/shopify/installations', {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+            signal,
+          }),
+        ]);
+        const [profile, installations] = await Promise.all([
+          responseJson(profileResponse),
+          responseJson(installationResponse),
+        ]);
+        return compactAccountSetup(profile, installations);
+      };
+      let result: unknown;
+      if (operation.operation === 'inspect_setup') {
+        result = await inspectSetup();
+      } else if (operation.operation === 'update_buyer_profile') {
+        const response = await fetch('/api/attune/commerce-profile', {
+          method: 'PUT',
+          cache: 'no-store',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify(operation.profile),
+          signal,
+        });
+        result = {
+          status: 'BUYER_PROFILE_UPDATED',
+          ...buyerProfileStatus(await responseJson(response)),
+        };
+      } else if (operation.operation === 'start_shopify_connection') {
+        if (typeof operation.shop_domain !== 'string') {
+          throw new TypeError('A Shopify store domain is required.');
+        }
+        const shopDomain = operation.shop_domain.trim().toLowerCase();
+        result = {
+          status: 'AUTHORIZATION_REQUIRED',
+          authorizationUrl: `/api/shopify/oauth/start?shop=${encodeURIComponent(shopDomain)}`,
+          nextAction: 'The merchant must review and approve Shopify permissions in their browser.',
+        };
+      } else if (operation.operation === 'select_manufacturing_location') {
+        const response = await fetch('/api/shopify/installations', {
+          method: 'PATCH',
+          cache: 'no-store',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            installationId: operation.installation_id,
+            locationId: operation.location_id,
+          }),
+          signal,
+        });
+        await responseJson(response);
+        result = { status: 'MANUFACTURING_LOCATION_UPDATED', ...(await inspectSetup()) };
+      } else if (operation.operation === 'update_maker_profile') {
+        const response = await fetch(
+          attuneWorkspaceEndpoint('/api/attune/marketplace', input.workspaceId),
+          {
+            method: 'POST',
+            cache: 'no-store',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              installationId: operation.installation_id,
+              ...(operation.location_id ? { locationId: operation.location_id } : {}),
+              ...(typeof operation.marketplace_listed === 'boolean'
+                ? { marketplaceListed: operation.marketplace_listed }
+                : {}),
+            }),
+            signal,
+          },
+        );
+        const payload = await responseJson(response);
+        const nextView =
+          typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'view') : null;
+        if (isAttuneApiView(nextView)) {
+          input.viewRef.current = nextView;
+          input.updateView(nextView);
+        }
+        result = { status: 'MAKER_PROFILE_UPDATED', ...(await inspectSetup()) };
+      } else {
+        throw new TypeError('manage_account.operation is unsupported.');
+      }
+      input.report({ execution: 'completed', lastAction: action });
+      return result;
+    } catch (error) {
+      input.report({ execution: 'failed', lastAction: action });
+      throw error;
+    }
+  };
+  return { account, current, execute, forecast, marketplace, navigate, observe };
 }

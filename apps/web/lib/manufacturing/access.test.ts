@@ -32,14 +32,27 @@ describe('manufacturing marketplace access', () => {
     expect(() => assertMarketplaceRouteAccess(roles, 'GET')).not.toThrow();
   });
 
-  it('limits maker-profile POST updates to Maker authority', () => {
-    expect(() => assertMarketplaceRouteAccess(['provider', 'reviewer'], 'POST')).not.toThrow();
+  it('allows buyers to select a marketplace Maker without granting profile management', () => {
+    expect(() =>
+      assertMarketplaceRouteAccess(['buyer', 'editor', 'reviewer'], 'SELECT_MAKER'),
+    ).not.toThrow();
+    expect(() => assertMarketplaceRouteAccess(['provider', 'reviewer'], 'SELECT_MAKER')).toThrow(
+      'WORKSPACE_ROLE_REQUIRED',
+    );
+  });
+
+  it('limits Maker-profile management to Maker authority', () => {
+    expect(() =>
+      assertMarketplaceRouteAccess(['provider', 'reviewer'], 'MANAGE_PROFILE'),
+    ).not.toThrow();
     for (const roles of [
       ['buyer', 'editor', 'reviewer'],
       ['editor', 'reviewer'],
       ['reviewer'],
     ] as const) {
-      expect(() => assertMarketplaceRouteAccess(roles, 'POST')).toThrow('WORKSPACE_ROLE_REQUIRED');
+      expect(() => assertMarketplaceRouteAccess(roles, 'MANAGE_PROFILE')).toThrow(
+        'WORKSPACE_ROLE_REQUIRED',
+      );
     }
   });
 });

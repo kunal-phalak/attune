@@ -1,7 +1,9 @@
 import {
   databaseConfigured,
   ensureJudgeWorkspace,
+  grantShopifyMakerAuthority,
   JUDGE_WORKSPACE_ID,
+  listShopifyInstallations,
   listProjectsForUser,
 } from '@attune/database';
 import Link from 'next/link';
@@ -30,6 +32,17 @@ export default async function SettingsPage() {
   const user = await currentAttuneUser();
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
+  if (!user.judge) {
+    const installations = await listShopifyInstallations(user.principalId);
+    if (
+      installations.some(
+        ({ connectionStatus }) =>
+          connectionStatus === 'connected' || connectionStatus === 'needs_reauthorization',
+      )
+    ) {
+      await grantShopifyMakerAuthority(user.userId);
+    }
+  }
   const projects = user.judge ? [] : await listProjectsForUser(user.userId);
   const workspaceId = user.judge ? JUDGE_WORKSPACE_ID : projects[0]?.workspaceId;
   return <ProductSettings workspaceId={workspaceId} />;

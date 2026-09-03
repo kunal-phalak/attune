@@ -2,9 +2,11 @@ import {
   canCreateProjectsForUser,
   databaseConfigured,
   ensureJudgeWorkspace,
+  grantShopifyMakerAuthority,
   JUDGE_WORKSPACE_ID,
   listProjectsForLiveblocksRooms,
   listProjectsForUser,
+  listShopifyInstallations,
 } from '@attune/database';
 import {
   arcPoint,
@@ -186,6 +188,16 @@ export default async function DashboardPage({
   const user = await currentAttuneUser();
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
+  const ownedShopifyInstallations = user.judge
+    ? []
+    : await listShopifyInstallations(user.principalId);
+  const makerEnabled =
+    user.judge ||
+    ownedShopifyInstallations.some(
+      ({ connectionStatus }) =>
+        connectionStatus === 'connected' || connectionStatus === 'needs_reauthorization',
+    );
+  if (makerEnabled && !user.judge) await grantShopifyMakerAuthority(user.userId);
   const collaboration = liveblocksConfigured();
   const [membershipRows, hasProjectCreatePermission, accessibleRoomIds, judgeView] =
     await Promise.all([
@@ -210,7 +222,8 @@ export default async function DashboardPage({
       agentProjects={membershipRows.map(toAgentProject)}
       judgeFlow={judgeView ? judgeReviewFlow(judgeView) : undefined}
       showNotifications={collaboration}
-      operationalWorkspaceId={user.judge ? JUDGE_WORKSPACE_ID : undefined}
+      operationalWorkspaceId={user.judge ? JUDGE_WORKSPACE_ID : membershipRows[0]?.workspaceId}
+      makerEnabled={makerEnabled}
     />
   );
 }

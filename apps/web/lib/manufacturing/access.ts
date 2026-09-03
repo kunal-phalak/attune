@@ -23,10 +23,16 @@ export function manufacturingAccessForRoles(roles: readonly AttuneRole[]): Manuf
 
 export function assertMarketplaceRouteAccess(
   roles: readonly AttuneRole[],
-  method: 'GET' | 'POST',
+  operation: 'GET' | 'SELECT_MAKER' | 'MANAGE_PROFILE',
 ): ManufacturingAccess {
   const access = manufacturingAccessForRoles(roles);
-  if (method === 'GET' ? !access.browseMarketplace : !access.finalizeQuote) {
+  const allowed =
+    operation === 'GET'
+      ? access.browseMarketplace
+      : operation === 'SELECT_MAKER'
+        ? access.configureRequest
+        : access.finalizeQuote;
+  if (!allowed) {
     throw new Error('WORKSPACE_ROLE_REQUIRED');
   }
   return access;

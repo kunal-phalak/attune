@@ -715,12 +715,14 @@ function DashboardSidebar({
   onQueryChange,
   searchRef,
   operationalWorkspaceId,
+  makerEnabled,
 }: {
   readonly filter: LibraryFilter;
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
   readonly searchRef: React.RefObject<HTMLInputElement | null>;
   readonly operationalWorkspaceId?: string;
+  readonly makerEnabled: boolean;
 }) {
   const { isMobile, open, setOpen, setOpenMobile } = useSidebar();
   const sidebarRestoreStarted = useRef(false);
@@ -852,18 +854,38 @@ function DashboardSidebar({
               >
                 Orders
               </Sidebar.MenuButton>
-              <Sidebar.MenuButton
-                itemId="dashboard-requests"
-                href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_requests`}
-                tooltip="Requests"
-                size="base"
-                icon={AppIcons.Activity}
-              >
-                Requests
-              </Sidebar.MenuButton>
+              {makerEnabled ? (
+                <Sidebar.MenuButton
+                  itemId="dashboard-requests"
+                  href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_requests`}
+                  tooltip="Maker requests"
+                  size="base"
+                  icon={AppIcons.Activity}
+                >
+                  Maker requests
+                </Sidebar.MenuButton>
+              ) : null}
+              {makerEnabled ? (
+                <Sidebar.MenuButton
+                  itemId="dashboard-provider-profile"
+                  href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_profile`}
+                  tooltip="Maker profile"
+                  size="base"
+                  icon={AppIcons.MakerProfile}
+                >
+                  Maker profile
+                </Sidebar.MenuButton>
+              ) : null}
+            </Sidebar.Menu>
+          </Sidebar.Group>
+        ) : null}
+        {makerEnabled && !operationalWorkspaceId ? (
+          <Sidebar.Group>
+            <Sidebar.GroupLabel>Maker</Sidebar.GroupLabel>
+            <Sidebar.Menu>
               <Sidebar.MenuButton
                 itemId="dashboard-provider-profile"
-                href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_profile`}
+                href="/settings#integrations"
                 tooltip="Maker profile"
                 size="base"
                 icon={AppIcons.MakerProfile}
@@ -902,6 +924,7 @@ export function DashboardLibrary({
   agentProjects,
   judgeFlow,
   operationalWorkspaceId,
+  makerEnabled = false,
 }: {
   readonly files: readonly AttuneLibraryFile[];
   readonly collaboration: boolean;
@@ -912,6 +935,7 @@ export function DashboardLibrary({
   readonly agentProjects: readonly DashboardAgentProject[];
   readonly judgeFlow?: JudgeReviewFlow;
   readonly operationalWorkspaceId?: string;
+  readonly makerEnabled?: boolean;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -957,6 +981,7 @@ export function DashboardLibrary({
         onQueryChange={setQuery}
         searchRef={searchRef}
         operationalWorkspaceId={operationalWorkspaceId}
+        makerEnabled={makerEnabled}
       />
       <section className="dashboard-library" aria-label="Projects">
         <header>

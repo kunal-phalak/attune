@@ -486,7 +486,10 @@ function MarketplaceSurface({
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ installationId: selected.installationId }),
+            body: JSON.stringify({
+              action: 'select_maker',
+              installationId: selected.installationId,
+            }),
           },
         );
         const selectedMakerPayload: unknown = await selectionResponse.json();

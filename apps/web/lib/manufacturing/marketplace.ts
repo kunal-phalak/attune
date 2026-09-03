@@ -14,11 +14,26 @@ interface ConnectionCache {
 }
 
 export function isMarketplaceInstallationListed(
-  installation: Pick<ShopifyInstallation, 'marketplaceListed' | 'makerProfile'>,
+  installation: Pick<
+    ShopifyInstallation,
+    'connectionStatus' | 'marketplaceListed' | 'makerProfile'
+  >,
 ): boolean {
-  return (
-    installation.marketplaceListed ||
-    Boolean(installation.makerProfile && installation.makerProfile.marketplaceListed !== false)
+  if (installation.connectionStatus !== 'connected') return false;
+  if (!installation.makerProfile) return true;
+  return installation.marketplaceListed || installation.makerProfile.marketplaceListed !== false;
+}
+
+export function marketplaceInstallationsForViewer<
+  T extends Pick<
+    ShopifyInstallation,
+    'connectionStatus' | 'makerProfile' | 'marketplaceListed' | 'ownerPrincipalId'
+  >,
+>(installations: readonly T[], viewerPrincipalId: string, includeOwned: boolean): T[] {
+  return installations.filter(
+    (installation) =>
+      isMarketplaceInstallationListed(installation) &&
+      (includeOwned || installation.ownerPrincipalId !== viewerPrincipalId),
   );
 }
 

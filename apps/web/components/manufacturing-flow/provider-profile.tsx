@@ -38,7 +38,7 @@ export function ProviderProfileSurface({
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          body: JSON.stringify({ action: 'manage_profile', ...body }),
         },
       );
       const next: unknown = await response.json();

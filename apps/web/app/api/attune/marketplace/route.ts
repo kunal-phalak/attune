@@ -19,6 +19,7 @@ import { withGeocodedShopifyLocation } from '../../../../lib/manufacturing/geoco
 import {
   DEMO_MARKETPLACE_PROVIDERS,
   isMarketplaceInstallationListed,
+  marketplaceInstallationsForViewer,
   oauthShopifyProviderConnection,
   shopifyProviderConnection,
   shopifyProviderProfile,
@@ -31,6 +32,7 @@ import {
 export const dynamic = 'force-dynamic';
 
 interface MarketplaceUpdate {
+  readonly action?: 'select_maker' | 'manage_profile';
   readonly installationId?: string;
   readonly locationId?: string;
   readonly marketplaceListed?: boolean;
@@ -49,6 +51,10 @@ function marketplaceUpdate(value: unknown): MarketplaceUpdate {
   const installationId = Reflect.get(value, 'installationId');
   const locationId = Reflect.get(value, 'locationId');
   const marketplaceListed = Reflect.get(value, 'marketplaceListed');
+  const action = Reflect.get(value, 'action');
+  if (action !== 'select_maker' && action !== 'manage_profile') {
+    throw new TypeError('Choose a marketplace action.');
+  }
   if (
     installationId !== undefined &&
     (typeof installationId !== 'string' || !installationId.startsWith('shopify:'))
@@ -64,7 +70,14 @@ function marketplaceUpdate(value: unknown): MarketplaceUpdate {
   if (marketplaceListed !== undefined && typeof marketplaceListed !== 'boolean') {
     throw new TypeError('marketplaceListed must be a boolean.');
   }
+  if (action === 'select_maker' && typeof installationId !== 'string') {
+    throw new TypeError('Select a live Shopify Maker.');
+  }
+  if (action === 'select_maker' && (locationId !== undefined || marketplaceListed !== undefined)) {
+    throw new TypeError('Marketplace selection cannot change another Maker profile.');
+  }
   return {
+    action,
     ...(typeof installationId === 'string' ? { installationId } : {}),
     ...(typeof locationId === 'string' ? { locationId } : {}),
     ...(typeof marketplaceListed === 'boolean' ? { marketplaceListed } : {}),
@@ -137,8 +150,14 @@ async function marketplace(
   versionId?: string,
 ) {
   const identity = await workspaceIdentity(workspaceId);
-  const updateRole = Object.keys(update).length > 0 ? 'provider' : undefined;
-  assertMarketplaceRouteAccess(identity.roles, updateRole ? 'POST' : 'GET');
+  assertMarketplaceRouteAccess(
+    identity.roles,
+    update.action === 'select_maker'
+      ? 'SELECT_MAKER'
+      : update.action === 'manage_profile'
+        ? 'MANAGE_PROFILE'
+        : 'GET',
+  );
   const [bundle, connectedInstallations, ownerInstallations] = await Promise.all([
     readWorkspaceBundle(workspaceId),
     listConnectedShopifyInstallations(),
@@ -147,22 +166,38 @@ async function marketplace(
 
   let selectedInstallation: ShopifyInstallation | null = null;
   if (update.installationId) {
-    selectedInstallation = await shopifyInstallationForOwner(
-      identity.principalId,
-      update.installationId,
-    );
-    if (!selectedInstallation || selectedInstallation.connectionStatus !== 'connected') {
-      throw new Error('WORKSPACE_ROLE_REQUIRED');
+    if (update.action === 'manage_profile') {
+      selectedInstallation = await shopifyInstallationForOwner(
+        identity.principalId,
+        update.installationId,
+      );
+      if (!selectedInstallation || selectedInstallation.connectionStatus !== 'connected') {
+        throw new Error('WORKSPACE_ROLE_REQUIRED');
+      }
+    } else {
+      selectedInstallation =
+        connectedInstallations.find(
+          (installation) =>
+            installation.id === update.installationId &&
+            installation.ownerPrincipalId !== identity.principalId &&
+            isMarketplaceInstallationListed(installation),
+        ) ?? null;
+      if (!selectedInstallation) throw new TypeError('The selected Shopify Maker is unavailable.');
     }
   } else {
+    const ownedInstallation = ownerInstallations.find(
+      ({ connectionStatus }) => connectionStatus === 'connected',
+    );
+    const workspaceInstallation = connectedInstallations.find(
+      ({ shopDomain }) =>
+        shopDomain === bundle.workspace.providerCapabilityProfile.shopify?.shopDomain,
+    );
     selectedInstallation =
-      connectedInstallations.find(
-        ({ shopDomain }) =>
-          shopDomain === bundle.workspace.providerCapabilityProfile.shopify?.shopDomain,
-      ) ??
-      ownerInstallations.find(({ connectionStatus }) => connectionStatus === 'connected') ??
-      connectedInstallations.find(isMarketplaceInstallationListed) ??
-      null;
+      identity.userId === 'user:judge'
+        ? (workspaceInstallation ??
+          connectedInstallations.find(isMarketplaceInstallationListed) ??
+          null)
+        : (ownedInstallation ?? workspaceInstallation ?? null);
   }
 
   let active = selectedInstallation
@@ -192,7 +227,7 @@ async function marketplace(
     });
   }
 
-  if (updateRole) {
+  if (update.action === 'manage_profile') {
     if (active.installation) {
       if (
         update.locationId &&
@@ -229,21 +264,29 @@ async function marketplace(
       };
     }
     await synchronizeProviderProfile(workspaceId, active.profile);
+  } else if (update.action === 'select_maker') {
+    await synchronizeProviderProfile(workspaceId, active.profile);
   }
 
+  const visibleInstallations = marketplaceInstallationsForViewer(
+    connectedInstallations,
+    identity.principalId,
+    identity.userId === 'user:judge',
+  );
   const listed = (
     await Promise.all(
-      connectedInstallations
-        .filter(
-          (installation) =>
-            isMarketplaceInstallationListed(installation) && installation.makerProfile,
-        )
-        .map((installation) =>
-          inspectedInstallation(installation, installation.makerProfile!, refresh),
+      visibleInstallations.map((installation) =>
+        inspectedInstallation(
+          installation,
+          installation.makerProfile ?? bundle.workspace.providerCapabilityProfile,
+          refresh,
         ),
+      ),
     )
   ).filter((candidate): candidate is LiveMaker => candidate !== null);
   if (
+    (identity.userId === 'user:judge' ||
+      active.installation?.ownerPrincipalId !== identity.principalId) &&
     active.profile.marketplaceListed !== false &&
     !listed.some(({ profile }) => profile.providerId === active.profile.providerId)
   ) {

@@ -1,7 +1,10 @@
 import { createAt1042Workspace, transitionWorkspace } from '@attune/domain';
 import { describe, expect, it } from 'vitest';
 
-import { resolveManufacturingVersionSelection } from './version-selection';
+import {
+  defaultManufacturingVersionId,
+  resolveManufacturingVersionSelection,
+} from './version-selection';
 
 const configuration = {
   material: 'aluminium' as const,
@@ -23,6 +26,22 @@ function transition(
 }
 
 describe('manufacturing version selection', () => {
+  it('defaults commerce to the newest durable version for a shared R2 preview', () => {
+    const first = transition(
+      createAt1042Workspace(),
+      { type: 'save_design_version', name: 'Version one' },
+      'save-v1',
+    );
+    const second = transition(
+      first,
+      { type: 'save_design_version', name: 'Version two' },
+      'save-v2',
+    );
+
+    expect(defaultManufacturingVersionId(createAt1042Workspace())).toBe('current');
+    expect(defaultManufacturingVersionId(second)).toBe(second.savedVersions[1]?.versionId);
+  });
+
   it('projects current configuration onto the current draft', () => {
     const workspace = createAt1042Workspace();
     const selection = resolveManufacturingVersionSelection(workspace, 'current', {

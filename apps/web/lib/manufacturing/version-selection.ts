@@ -11,6 +11,14 @@ export interface ManufacturingVersionSelection {
   readonly configuration: ManufacturingConfiguration;
 }
 
+/** Prefer a durable artifact so commerce surfaces show the same R2 preview and exact geometry. */
+export function defaultManufacturingVersionId(workspace: AttuneWorkspace): string {
+  return (
+    workspace.savedVersions.toSorted((left, right) => right.versionNumber - left.versionNumber)[0]
+      ?.versionId ?? 'current'
+  );
+}
+
 export function resolveManufacturingVersionSelection(
   workspace: AttuneWorkspace,
   selectedVersionId: string,

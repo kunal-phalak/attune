@@ -1,6 +1,6 @@
 'use client';
 
-import type { PanelGeometry, ProviderCapabilityProfile } from '@attune/domain';
+import type { PanelGeometry, ProviderCapabilityProfile, SketchDocument } from '@attune/domain';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Combobox } from '@cloudflare/kumo/components/combobox';
 import { Input } from '@cloudflare/kumo/components/input';
@@ -20,6 +20,7 @@ import {
   WarningCircleIcon,
   XIcon,
 } from '@phosphor-icons/react';
+import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -35,13 +36,24 @@ import {
   validateProviderCapability,
   validateUniversalGeometry,
 } from '../lib/manufacturing/validation';
-import { resolveManufacturingVersionSelection } from '../lib/manufacturing/version-selection';
+import {
+  defaultManufacturingVersionId,
+  resolveManufacturingVersionSelection,
+} from '../lib/manufacturing/version-selection';
+import { projectSketchForCanvas } from '../lib/sketch/canvaskit-projection';
 import { attuneToastManager } from './attune-ui-provider';
 import { BuyerProfileDialog } from './manufacturing-flow/buyer-profile-dialog';
-import { MakerMap } from './manufacturing-flow/maker-map';
 import { ProviderProfileSurface } from './manufacturing-flow/provider-profile';
 import { isMarketplacePayload, type MarketplacePayload } from './manufacturing-flow/types';
 import { WorkflowCallout } from './manufacturing-flow/workflow-callout';
+
+const MakerMap = dynamic(
+  () => import('./manufacturing-flow/maker-map').then((module) => module.MakerMap),
+  {
+    ssr: false,
+    loading: () => <div className="maker-map maker-map-loading" aria-label="Loading maker map" />,
+  },
+);
 
 export type ManufacturingSurface =
   | 'design'
@@ -77,7 +89,6 @@ function DesignPreview({
   const preview = versionId
     ? view.versionPreviews.find((candidate) => candidate.versionId === versionId)
     : undefined;
-  const geometry: PanelGeometry = version?.geometry ?? view.workspace.geometry;
   if (preview?.status === 'STORED' && preview.url) {
     return (
       <img
@@ -89,8 +100,7 @@ function DesignPreview({
       />
     );
   }
-  const sx = 330 / Math.max(geometry.width, 1);
-  const sy = 188 / Math.max(geometry.height, 1);
+  const sketchDocument = version?.sketchDocument ?? view.workspace.sketchDocument;
   const storageMessage = versionId
     ? preview?.status === 'UNCONFIGURED'
       ? 'Private preview storage is not configured. Showing exact local geometry.'
@@ -119,41 +129,109 @@ function DesignPreview({
           fill="url(#manufacturing-grid)"
           className="manufacturing-preview-grid"
         />
-        <g
-          transform={`translate(15 15) scale(${sx} ${sy})`}
-          className="manufacturing-preview-geometry"
-        >
-          <rect width={geometry.width} height={geometry.height} rx={5 / Math.max(sx, sy)} />
-          {[...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts].map(
-            (feature) => (
-              <circle
-                key={feature.id}
-                cx={feature.center.x}
-                cy={feature.center.y}
-                r={feature.diameter / 2}
-                vectorEffect="non-scaling-stroke"
-              />
-            ),
-          )}
-          {[geometry.slot, ...geometry.rectangularCutouts, ...geometry.ventSlots].map((feature) => (
-            <rect
-              key={feature.id}
-              x={feature.center.x - feature.width / 2}
-              y={feature.center.y - feature.height / 2}
-              width={feature.width}
-              height={feature.height}
-              rx={
-                'cornerRadius' in feature && typeof feature.cornerRadius === 'number'
-                  ? feature.cornerRadius
-                  : 2
-              }
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
-        </g>
+        <SketchPreviewGeometry document={sketchDocument} />
       </svg>
       {storageMessage ? <figcaption>{storageMessage}</figcaption> : null}
     </figure>
+  );
+}
+
+function SketchPreviewGeometry({ document }: { readonly document: SketchDocument }) {
+  const primitives = projectSketchForCanvas(document);
+  const extents = primitives.flatMap((entity) => {
+    if (entity.kind === 'point') return [entity.position];
+    if (entity.kind === 'line') return [entity.start, entity.end];
+    if (entity.kind === 'bspline') return entity.points;
+    const radiusX = entity.kind === 'ellipse' ? entity.majorRadius : entity.radius;
+    const radiusY = entity.kind === 'ellipse' ? entity.minorRadius : entity.radius;
+    return [
+      { x: entity.center.x - radiusX, y: entity.center.y - radiusY },
+      { x: entity.center.x + radiusX, y: entity.center.y + radiusY },
+    ];
+  });
+  const minimumX = Math.min(...extents.map(({ x }) => x), 0);
+  const maximumX = Math.max(...extents.map(({ x }) => x), 1);
+  const minimumY = Math.min(...extents.map(({ y }) => y), 0);
+  const maximumY = Math.max(...extents.map(({ y }) => y), 1);
+  const span = Math.max(maximumX - minimumX, maximumY - minimumY, 1);
+  const scale = Math.min(
+    330 / Math.max(maximumX - minimumX, 1),
+    188 / Math.max(maximumY - minimumY, 1),
+  );
+  const translateX = 180 - ((minimumX + maximumX) / 2) * scale;
+  const translateY = 109 + ((minimumY + maximumY) / 2) * scale;
+  const pointRadius = Math.max(span / 120, 0.4);
+
+  return (
+    <g
+      transform={`translate(${translateX} ${translateY}) scale(${scale} ${-scale})`}
+      className="manufacturing-preview-geometry manufacturing-preview-sketch"
+    >
+      {primitives.map((entity) => {
+        if (entity.kind === 'point') {
+          return (
+            <circle key={entity.id} cx={entity.position.x} cy={entity.position.y} r={pointRadius} />
+          );
+        }
+        if (entity.kind === 'line') {
+          return (
+            <line
+              key={entity.id}
+              x1={entity.start.x}
+              y1={entity.start.y}
+              x2={entity.end.x}
+              y2={entity.end.y}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        }
+        if (entity.kind === 'circle') {
+          return (
+            <circle
+              key={entity.id}
+              cx={entity.center.x}
+              cy={entity.center.y}
+              r={entity.radius}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        }
+        if (entity.kind === 'ellipse') {
+          return (
+            <ellipse
+              key={entity.id}
+              cx={entity.center.x}
+              cy={entity.center.y}
+              rx={entity.majorRadius}
+              ry={entity.minorRadius}
+              transform={`rotate(${(entity.rotation * 180) / Math.PI} ${entity.center.x} ${entity.center.y})`}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        }
+        if (entity.kind === 'arc') {
+          const startX = entity.center.x + Math.cos(entity.startAngle) * entity.radius;
+          const startY = entity.center.y + Math.sin(entity.startAngle) * entity.radius;
+          const endAngle = entity.startAngle + entity.sweepAngle;
+          const endX = entity.center.x + Math.cos(endAngle) * entity.radius;
+          const endY = entity.center.y + Math.sin(endAngle) * entity.radius;
+          return (
+            <path
+              key={entity.id}
+              d={`M ${startX} ${startY} A ${entity.radius} ${entity.radius} 0 ${entity.sweepAngle > Math.PI ? 1 : 0} 1 ${endX} ${endY}`}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        }
+        return (
+          <polyline
+            key={entity.id}
+            points={entity.points.map(({ x, y }) => `${x},${y}`).join(' ')}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
+    </g>
   );
 }
 
@@ -355,7 +433,9 @@ function MarketplaceSurface({
   const [configuration, setConfiguration] = useState(initial);
   const [submitting, setSubmitting] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [selectedVersionId, setSelectedVersionId] = useState('current');
+  const [selectedVersionId, setSelectedVersionId] = useState(() =>
+    defaultManufacturingVersionId(view.workspace),
+  );
   const makerCardRefs = useRef(new Map<string, HTMLElement>());
   const versionOptions = useMemo(
     () => [

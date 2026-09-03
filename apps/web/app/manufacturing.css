@@ -1567,6 +1567,13 @@
     stroke-width: 1.35;
   }
 
+  .manufacturing-preview-sketch {
+    fill: none;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .order-record-main,
   .provider-request-meta,
   .quote-controls,

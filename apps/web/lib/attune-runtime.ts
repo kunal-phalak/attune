@@ -59,18 +59,6 @@ import {
 } from './agent-delegation';
 import { requireWorkspaceIdentity, workspaceIdentity } from './auth/session';
 import { attuneActivityNotification } from './liveblocks/notifications';
-import { buyerCommerceProfileComplete } from './manufacturing/buyer-commerce';
-import { workspaceForMakerReview } from './manufacturing/maker-review';
-import {
-  shopifyProviderConnection,
-  shopifyProviderProfile,
-} from './manufacturing/marketplace';
-import {
-  PreviewStorage,
-  PreviewStorageConfigurationError,
-  previewStorageConfigured,
-} from './manufacturing/preview-storage';
-import { renderVersionPreview } from './manufacturing/version-preview';
 import {
   getLiveblocks,
   liveblocksConfigured,
@@ -78,6 +66,15 @@ import {
   snapshotCollaborativeDraft,
   syncAuthoritativeWorkspace,
 } from './liveblocks/server';
+import { buyerCommerceProfileComplete } from './manufacturing/buyer-commerce';
+import { workspaceForMakerReview } from './manufacturing/maker-review';
+import { shopifyProviderConnection, shopifyProviderProfile } from './manufacturing/marketplace';
+import {
+  PreviewStorage,
+  PreviewStorageConfigurationError,
+  previewStorageConfigured,
+} from './manufacturing/preview-storage';
+import { renderVersionPreview } from './manufacturing/version-preview';
 import { measureServerPhase, type ServerTimingRecorder } from './server-timing';
 
 export interface CommandExecutionInput {
@@ -733,10 +730,7 @@ export function inspectForHuman(
   return inspectHuman(workspaceId, role, timing);
 }
 
-export async function inspectForCurrentHuman(
-  workspaceId: string,
-  timing?: ServerTimingRecorder,
-) {
+export async function inspectForCurrentHuman(workspaceId: string, timing?: ServerTimingRecorder) {
   const identity = await workspaceIdentity(workspaceId);
   const role: AttuneRole = identity.roles.includes('buyer')
     ? 'buyer'
@@ -1237,12 +1231,26 @@ export async function executeCommerceMaterialization(
     if (!reservedQuote || !reservedRequest) {
       throw new Error('Product materialization requires the exact quoted manufacturing request.');
     }
+    const exactVersion = reservedBundle.workspace.savedVersions.find(
+      ({ versionId }) => versionId === reservation.revision.versionId,
+    );
+    if (!exactVersion || exactVersion.preview.status !== 'STORED' || !exactVersion.preview.key) {
+      throw new ShopifyIntegrationError(
+        'MISSING_CONFIGURATION',
+        'Exact saved-version preview storage must be available before storefront publishing.',
+      );
+    }
+    const previewUrl = await new PreviewStorage().getSignedPreviewUrl(
+      exactVersion.preview.key,
+      600,
+    );
     const verification = await materializeRevision({
       commitmentId: reservedBundle.workspace.commitmentId,
       projectName: reservedBundle.projectName,
       revision: reservation.revision,
       request: reservedRequest,
       quote: reservedQuote,
+      previewUrl,
     });
     await executePersistedCommand({
       workspaceId,

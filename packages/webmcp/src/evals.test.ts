@@ -81,6 +81,7 @@ function envelope(bus: AttuneCommandBus, commandId: string, cursor?: number): Co
 }
 
 function verification(bus: AttuneCommandBus, storefrontUrl = 'https://shop.test/products/r7') {
+  const frozen = bus.inspect('provider').workspace.frozenRevisions[0];
   return {
     adminVerified: true,
     publicationVerified: true,
@@ -90,8 +91,8 @@ function verification(bus: AttuneCommandBus, storefrontUrl = 'https://shop.test/
     publicationId: 'gid://shopify/Publication/online-store',
     storefrontUrl,
     commitmentId: 'AT-1042',
-    revisionId: 'r7',
-    specHash: hashSpecification(bus.inspect('provider').workspace),
+    revisionId: frozen.revisionId,
+    specHash: frozen.specHash,
     title: 'Custom Control Faceplate — AT-1042 r7',
     sku: 'AT-1042-R7-LOT4',
     amountMinor: 240_000,

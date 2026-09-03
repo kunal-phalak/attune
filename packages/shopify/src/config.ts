@@ -25,6 +25,7 @@ export const CUSTOMER_LOOKUP_ADMIN_SCOPES = ['read_customers'] as const;
 export const CUSTOMER_WRITE_ADMIN_SCOPES = ['read_customers', 'write_customers'] as const;
 export const PRODUCT_ADMIN_SCOPES = [
   'write_products',
+  'write_files',
   'write_publications',
   'read_locations',
   'read_inventory',

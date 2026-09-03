@@ -2322,7 +2322,43 @@ export const WorkspaceCanvas = forwardRef<
     }
   };
 
+  const handleToolShortcutKey = (event: ReactKeyboardEvent<HTMLCanvasElement>): boolean => {
+    const target = event.target;
+    if (
+      target instanceof HTMLElement &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable)
+    ) {
+      return false;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return false;
+    const key = event.key;
+    if (key.length !== 1 || !/[a-z]/i.test(key)) return false;
+    const shortcut: Record<string, CanvasTool> = {
+      v: 'select',
+      l: 'line',
+      r: 'rectangle',
+      c: 'circle',
+      a: 'arc',
+      e: 'ellipse',
+      b: 'bspline',
+      t: 'trim',
+    };
+    const nextTool = shortcut[key.toLowerCase()];
+    if (!nextTool) return false;
+    if (nextTool === tool) return false;
+    event.preventDefault();
+    if (nextTool !== 'select') {
+      creationRef.current = null;
+    }
+    onToolChange?.(nextTool);
+    return true;
+  };
+
   const onKeyDown = (event: ReactKeyboardEvent<HTMLCanvasElement>) => {
+    if (handleToolShortcutKey(event)) return;
     if (event.key === 'Escape') {
       if (pointerRef.current) {
         const pointer = pointerRef.current;

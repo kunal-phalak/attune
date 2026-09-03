@@ -798,11 +798,11 @@ function DashboardSidebar({
               <Sidebar.MenuButton
                 itemId="dashboard-provider-profile"
                 href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_profile`}
-                tooltip="Provider profile"
+                tooltip="Maker profile"
                 size="base"
                 icon={AppIcons.Settings}
               >
-                Provider profile
+                Maker profile
               </Sidebar.MenuButton>
               <Sidebar.MenuButton
                 itemId="dashboard-notifications"
@@ -816,6 +816,20 @@ function DashboardSidebar({
             </Sidebar.Menu>
           </Sidebar.Group>
         ) : null}
+        <Sidebar.Group>
+          <Sidebar.GroupLabel>Account</Sidebar.GroupLabel>
+          <Sidebar.Menu>
+            <Sidebar.MenuButton
+              itemId="dashboard-settings"
+              href="/settings"
+              tooltip="Settings"
+              size="base"
+              icon={AppIcons.Settings}
+            >
+              Settings
+            </Sidebar.MenuButton>
+          </Sidebar.Menu>
+        </Sidebar.Group>
       </Sidebar.Content>
     </Sidebar>
   );

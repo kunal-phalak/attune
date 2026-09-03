@@ -1,18 +1,18 @@
 'use client';
 
 import type { PanelGeometry, ProviderCapabilityProfile } from '@attune/domain';
-import { Badge } from '@cloudflare/kumo/components/badge';
+import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Surface } from '@cloudflare/kumo/components/surface';
+import { Tabs } from '@cloudflare/kumo/components/tabs';
 import {
   ArrowRightIcon,
   BuildingsIcon,
   CheckCircleIcon,
   ClockIcon,
   CubeIcon,
-  FactoryIcon,
   PackageIcon,
   SealCheckIcon,
   ShoppingBagOpenIcon,
@@ -20,7 +20,7 @@ import {
   WarningCircleIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 
 import {
   attuneWorkspaceEndpoint,
@@ -1113,11 +1113,18 @@ export function ManufacturingFlow({
   return (
     <section className="manufacturing-flow t-panel-slide" data-open={open} aria-hidden={!open}>
       {view.product.agentToolsEnabled ? (
-        <div className="judge-mode-frame" data-perspective={perspective}>
-          <Badge variant="blue">Judge demo · {perspective === 'provider' ? 'Maker' : 'Buyer'} view</Badge>
-          {perspective === 'provider' ? (
-            <span>You&apos;re viewing the maker side with the same judge account. This is a demo convenience.</span>
-          ) : null}
+        <div className="judge-mode-frame">
+          <Banner
+            variant="default"
+            size="sm"
+            icon={<SealCheckIcon size={16} weight="fill" />}
+            title={`Judge demo · ${perspective === 'provider' ? 'Maker' : 'Buyer'} view`}
+            description={
+              perspective === 'provider'
+                ? "You're viewing the maker side with the same judge account. This is a demo convenience."
+                : undefined
+            }
+          />
         </div>
       ) : null}
       <header className="manufacturing-header">
@@ -1194,24 +1201,42 @@ export function ManufacturingFlow({
           {canMake ? <Select.Option value="provider_requests">Requests</Select.Option> : null}
           {canMake ? <Select.Option value="provider_profile">Maker profile</Select.Option> : null}
         </Select>
-        <div className="perspective-switch" aria-label="Workspace perspective">
-          <LinkButton
-            href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=${surface}`}
-            size="sm"
-            variant={perspective === 'buyer' ? 'primary' : 'ghost'}
-          >
-            Buyer
-          </LinkButton>
-          {canMake ? (
-            <LinkButton
-              href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=${surface === 'buyer_orders' ? 'provider_requests' : surface}`}
-              size="sm"
-              variant={perspective === 'provider' ? 'primary' : 'ghost'}
-            >
-              Maker
-            </LinkButton>
-          ) : null}
-        </div>
+        <Tabs
+          variant="segmented"
+          size="sm"
+          className="perspective-switch"
+          aria-label="Workspace perspective"
+          value={perspective}
+          tabs={[
+            {
+              value: 'buyer',
+              label: 'Buyer',
+              nativeButton: false,
+              render: (props: ComponentProps<'a'>) => (
+                <a {...props} href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=${surface}`}>
+                  Buyer
+                </a>
+              ),
+            },
+            ...(canMake
+              ? [
+                  {
+                    value: 'provider',
+                    label: 'Maker',
+                    nativeButton: false,
+                    render: (props: ComponentProps<'a'>) => (
+                      <a
+                        {...props}
+                        href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=${surface === 'buyer_orders' ? 'provider_requests' : surface}`}
+                      >
+                        Maker
+                      </a>
+                    ),
+                  },
+                ]
+              : []),
+          ]}
+        />
       </header>
       <WorkflowCallout
         workspaceId={workspaceId}
@@ -1290,7 +1315,8 @@ export function FindMakersButton({ onClick }: { readonly onClick: () => void }) 
       type="button"
       variant="primary"
       size="sm"
-      icon={<FactoryIcon size={16} />}
+      className="find-makers-button"
+      icon={<StorefrontIcon size={16} />}
       onClick={onClick}
     >
       Find makers

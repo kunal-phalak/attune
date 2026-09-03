@@ -34,3 +34,4 @@ export {
 } from './draft-orders';
 export { createAndVerifyDraftOrder } from './draft-order-service';
 export { materializeRevision } from './materialize';
+export { attachExactVersionPreview } from './product-media';

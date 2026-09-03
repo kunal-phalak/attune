@@ -1,9 +1,9 @@
 import type { BuyerCommerceProfile, ShopifyCustomerBinding } from '@attune/domain';
 import { describe, expect, it, vi } from 'vitest';
 
+import { synchronizeCustomerWithAdmin } from './customers';
 import { ShopifyIntegrationError } from './errors';
 import type { GraphqlClient } from './types';
-import { synchronizeCustomerWithAdmin } from './customers';
 
 const profile: BuyerCommerceProfile = {
   principalId: 'user:buyer-1',
@@ -40,7 +40,7 @@ const shopifyAddress = {
   phone: '+919876543210',
 };
 
-function customer(addresses: readonly typeof shopifyAddress[]) {
+function customer(addresses: readonly (typeof shopifyAddress)[]) {
   return {
     id: 'gid://shopify/Customer/1042',
     firstName: 'Asha',
@@ -52,10 +52,20 @@ function customer(addresses: readonly typeof shopifyAddress[]) {
   };
 }
 
+type GraphqlHandler = (query: string, variables: Record<string, unknown>) => Promise<unknown>;
+
+function graphqlTestClient(handler: GraphqlHandler): GraphqlClient {
+  return async <T>(query: string, variables: Record<string, unknown>) => {
+    const result = await handler(query, variables);
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Each test controls its GraphQL response shape.
+    return result as T;
+  };
+}
+
 describe('Shopify customer synchronization', () => {
   it('upserts once, creates a missing address, rereads, and returns a store binding', async () => {
     let rereads = 0;
-    const admin = vi.fn(async (query: string, variables: Record<string, unknown>) => {
+    const adminMock = vi.fn<GraphqlHandler>(async (query, variables) => {
       if (query.includes('currentAppInstallation')) {
         return {
           currentAppInstallation: {
@@ -86,7 +96,8 @@ describe('Shopify customer synchronization', () => {
         return { customer: customer(rereads === 1 ? [] : [shopifyAddress]) };
       }
       throw new Error('Unexpected operation');
-    }) as GraphqlClient;
+    });
+    const admin = graphqlTestClient(adminMock);
 
     const binding = await synchronizeCustomerWithAdmin(admin, {
       profile,
@@ -99,7 +110,7 @@ describe('Shopify customer synchronization', () => {
       customerId: 'gid://shopify/Customer/1042',
       defaultAddressId: shopifyAddress.id,
     });
-    expect(admin).toHaveBeenCalledTimes(5);
+    expect(adminMock).toHaveBeenCalledTimes(5);
   });
 
   it('reuses a store-specific binding and does not recreate a matching address', async () => {
@@ -110,7 +121,7 @@ describe('Shopify customer synchronization', () => {
       defaultAddressId: shopifyAddress.id,
       synchronizedAt: '2026-09-02T00:00:00.000Z',
     };
-    const admin = vi.fn(async (query: string, variables: Record<string, unknown>) => {
+    const adminMock = vi.fn<GraphqlHandler>(async (query, variables) => {
       if (query.includes('currentAppInstallation')) {
         return {
           currentAppInstallation: {
@@ -128,7 +139,8 @@ describe('Shopify customer synchronization', () => {
         return { customer: customer([shopifyAddress]) };
       }
       throw new Error('Unexpected operation');
-    }) as GraphqlClient;
+    });
+    const admin = graphqlTestClient(adminMock);
 
     const binding = await synchronizeCustomerWithAdmin(admin, {
       profile,
@@ -137,22 +149,25 @@ describe('Shopify customer synchronization', () => {
     });
 
     expect(binding.customerId).toBe(existingBinding.customerId);
-    expect(admin).toHaveBeenCalledTimes(3);
-    expect(admin.mock.calls.some(([query]) => String(query).includes('customerAddressCreate'))).toBe(
+    expect(adminMock).toHaveBeenCalledTimes(3);
+    expect(adminMock.mock.calls.some(([query]) => query.includes('customerAddressCreate'))).toBe(
       false,
     );
   });
 
   it('reports missing customer scopes as a configuration error', async () => {
-    const admin = vi.fn(async () => ({
+    const adminMock = vi.fn<GraphqlHandler>(async () => ({
       currentAppInstallation: { accessScopes: [{ handle: 'read_customers' }] },
-    })) as GraphqlClient;
+    }));
+    const admin = graphqlTestClient(adminMock);
 
     await expect(
       synchronizeCustomerWithAdmin(admin, {
         profile,
         shopDomain: 'attune-test.myshopify.com',
       }),
-    ).rejects.toMatchObject<Partial<ShopifyIntegrationError>>({ code: 'MISSING_ADMIN_SCOPES' });
+    ).rejects.toMatchObject({
+      code: 'MISSING_ADMIN_SCOPES',
+    } satisfies Partial<ShopifyIntegrationError>);
   });
 });

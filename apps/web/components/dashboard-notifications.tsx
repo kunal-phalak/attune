@@ -54,39 +54,27 @@ function NotificationRow({ notification }: { readonly notification: InboxNotific
     activity?.description ?? (notification.kind === 'thread' ? 'A comment was posted.' : '');
 
   return (
-    <div className="flex items-start justify-between gap-3" data-unread={unread ? '' : undefined}>
+    <div className={styles.row} data-unread={unread ? '' : undefined}>
       <a
         href={notificationRoute(notification)}
-        className="flex items-start gap-3"
+        className={styles.rowBody}
         onClick={(event) => {
           event.preventDefault();
           if (unread) markAsRead(notification.id);
           window.location.assign(notificationRoute(notification));
         }}
       >
-        <span
-          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-kumo-surface-2)] text-[var(--color-kumo-strong)]"
-          aria-hidden
-        >
+        <span className={styles.rowAvatar} aria-hidden>
           {notification.kind === 'thread' ? <ChatCircleIcon size={18} /> : <BellIcon size={18} />}
         </span>
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-sm font-medium text-[var(--color-kumo-strong)]">
-            {title}
-          </span>
-          {description ? (
-            <span className="line-clamp-2 text-xs text-[var(--color-kumo-subtle)]">
-              {description}
-            </span>
-          ) : null}
+        <span className={styles.rowText}>
+          <span className={styles.rowTitle}>{title}</span>
+          {description ? <span className={styles.rowDescription}>{description}</span> : null}
         </span>
       </a>
-      <span className="flex shrink-0 items-center gap-1">
+      <span className={styles.rowActions}>
         {unread ? (
-          <span
-            className="size-2 rounded-full bg-[var(--color-attune-conflict)]"
-            aria-label="Unread"
-          />
+          <span className={styles.rowUnread} aria-label="Unread" />
         ) : null}
         <Button
           type="button"

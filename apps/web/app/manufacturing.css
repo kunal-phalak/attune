@@ -22,7 +22,7 @@
   grid-template-rows: 0fr;
   transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
 }
-.t-acc[data-open="true"] .t-acc-panel {
+.t-acc[data-open='true'] .t-acc-panel {
   grid-template-rows: 1fr;
   transition: grid-template-rows var(--acc-expand) var(--acc-ease);
 }
@@ -34,7 +34,7 @@
     opacity var(--acc-collapse) var(--acc-ease),
     filter var(--acc-collapse) var(--acc-ease);
 }
-.t-acc[data-open="true"] .t-acc-panel-inner {
+.t-acc[data-open='true'] .t-acc-panel-inner {
   opacity: 1;
   filter: blur(0);
   transition:
@@ -54,13 +54,17 @@
   transform-origin: center;
   transition: transform var(--acc-chevron) var(--acc-ease);
 }
-.t-acc-chevron path { vector-effect: non-scaling-stroke; }
-.t-acc[data-open="true"] .t-acc-chevron {
+.t-acc-chevron path {
+  vector-effect: non-scaling-stroke;
+}
+.t-acc[data-open='true'] .t-acc-chevron {
   transform: scaleY(-1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .t-acc-panel, .t-acc-panel-inner, .t-acc-chevron {
+  .t-acc-panel,
+  .t-acc-panel-inner,
+  .t-acc-chevron {
     transition: none !important;
   }
 }
@@ -133,6 +137,179 @@
 }
 
 @layer components {
+  .product-settings {
+    width: min(1080px, calc(100% - 32px));
+    min-height: 100dvh;
+    margin: 0 auto;
+    padding: 48px 0 72px;
+  }
+
+  .product-settings-header,
+  .product-settings-card,
+  .product-settings-nav,
+  .settings-shop-identity,
+  .settings-healthy,
+  .settings-truth-state {
+    display: flex;
+    align-items: center;
+  }
+
+  .product-settings-header {
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+
+  .product-settings-header h1 {
+    margin: 4px 0;
+    font-size: clamp(30px, 4vw, 46px);
+    letter-spacing: -0.04em;
+  }
+
+  .product-settings-header p,
+  .product-settings-copy p {
+    margin: 0;
+    color: var(--color-kumo-subtle);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  .product-settings-nav {
+    position: sticky;
+    z-index: 2;
+    top: 12px;
+    gap: 6px;
+    width: max-content;
+    margin-bottom: 28px;
+    padding: 5px;
+    border: 1px solid var(--color-kumo-line);
+    border-radius: 12px;
+    background: color-mix(in oklch, var(--color-kumo-base) 92%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  .product-settings-nav a {
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 650;
+    text-decoration: none;
+    transition: background 160ms ease-out;
+  }
+
+  .product-settings-nav a:hover,
+  .product-settings-nav a:focus-visible {
+    background: var(--color-kumo-tint);
+  }
+
+  .product-settings-section {
+    scroll-margin-top: 80px;
+    margin-top: 18px;
+  }
+
+  .product-settings-card {
+    min-height: 150px;
+    gap: 16px;
+    padding: 22px;
+    border-radius: 16px;
+  }
+
+  .product-settings-card.is-stacked {
+    align-items: flex-start;
+  }
+
+  .product-settings-icon {
+    display: grid;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border-radius: 10px;
+    color: var(--manufacturing-ink);
+    background: var(--color-kumo-tint);
+  }
+
+  .product-settings-copy {
+    display: grid;
+    flex: 1;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .product-settings-copy h2 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: -0.025em;
+  }
+
+  .settings-truth-state {
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 720px;
+    padding: 11px 12px;
+    border-radius: 9px;
+    color: #73561c;
+    background: #fff6dc;
+  }
+
+  .settings-truth-state[data-error] {
+    color: #883b31;
+    background: #fff0ee;
+  }
+
+  .settings-shop-identity {
+    gap: 10px;
+  }
+
+  .settings-shop-identity > span {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border-radius: 9px;
+    color: #fff;
+    background: #1f2933;
+    font-size: 13px;
+    font-weight: 750;
+  }
+
+  .settings-shop-identity > div {
+    display: grid;
+    gap: 2px;
+  }
+
+  .settings-shop-identity small {
+    color: #276449;
+    font-size: 13px;
+  }
+
+  .settings-facts {
+    margin-top: 8px;
+  }
+
+  .settings-healthy {
+    gap: 5px;
+    color: #276449;
+  }
+
+  @media (max-width: 680px) {
+    .product-settings {
+      width: min(100% - 20px, 1080px);
+      padding-top: 24px;
+    }
+
+    .product-settings-header,
+    .product-settings-card {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+
+    .product-settings-nav {
+      width: 100%;
+      overflow-x: auto;
+    }
+  }
+
   .manufacturing-flow {
     --manufacturing-accent: #1f5eff;
     --manufacturing-ink: #17202d;
@@ -191,8 +368,7 @@
     line-height: 1.35;
   }
 
-  .manufacturing-nav,
-  .perspective-switch {
+  .manufacturing-nav {
     display: flex;
     align-items: center;
     gap: 2px;
@@ -205,10 +381,6 @@
 
   .perspective-switch {
     justify-self: end;
-    padding: 3px;
-    border-radius: 9px;
-    background: var(--color-kumo-tint);
-    box-shadow: inset 0 0 0 1px var(--color-kumo-line);
   }
 
   .manufacturing-content {
@@ -484,7 +656,7 @@
     border-radius: 7px;
     color: var(--manufacturing-muted);
     background: rgb(255 255 255 / 84%);
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .maker-map-caption {
@@ -792,7 +964,7 @@
   .connection-state {
     align-items: center;
     color: #276449;
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .provider-request-layout {
@@ -936,21 +1108,7 @@
     z-index: 4;
     right: 16px;
     bottom: 44px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
     max-width: min(560px, calc(100% - 32px));
-    padding: 7px 10px;
-    border-radius: 999px;
-    color: #1644b8;
-    background: rgb(238 244 255 / 94%);
-    box-shadow: 0 0 0 1px rgb(31 94 255 / 24%);
-    backdrop-filter: blur(12px);
-    font-size: 13px;
-  }
-
-  .judge-mode-frame[data-perspective='provider'] {
-    border-radius: 10px;
   }
 
   .manufacturing-flow:has(.judge-mode-frame) {
@@ -1142,9 +1300,6 @@
     }
     .buyer-profile-fields {
       grid-template-columns: 1fr;
-    }
-    .judge-mode-frame > span {
-      display: none;
     }
     .manufacturing-layout,
     .orders-surface,

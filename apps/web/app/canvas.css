@@ -79,6 +79,13 @@
     min-height: var(--editor-control-size);
   }
 
+  .workspace-header-right .find-makers-button {
+    width: auto;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+  }
+
   .workspace-project-icon {
     display: grid;
     width: var(--editor-control-size);
@@ -102,18 +109,47 @@
   }
 
   .workspace-draft-popover {
-    width: 276px;
+    display: flex;
+    width: 280px;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .workspace-draft-popover > .workspace-draft-popover-title {
+    margin: 0;
+    padding-top: 2px;
   }
 
   .workspace-agent-popover {
-    display: grid;
+    display: flex;
     width: 288px;
+    flex-direction: column;
     gap: 8px;
   }
 
+  .workspace-agent-popover > .workspace-agent-popover-title {
+    margin: 0;
+    padding-top: 2px;
+  }
+
   .workspace-agent-popover p {
+    margin: 0;
     color: var(--color-kumo-subtle);
     font-size: 0.875rem;
+    line-height: 1.4;
+  }
+
+  .workspace-agent-popover > .workspace-agent-popover-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--color-kumo-line);
+  }
+
+  .workspace-agent-popover > .workspace-agent-popover-footer > button {
+    justify-content: flex-start;
   }
 
   .workspace-share-dialog {
@@ -192,13 +228,13 @@
 
   .workspace-version-actions {
     display: grid;
-    gap: 4px;
-    margin-top: 8px;
-    padding-bottom: 8px;
+    gap: 8px;
+    padding: 0 0 12px;
     border-bottom: 1px solid var(--color-kumo-line);
   }
 
   .workspace-version-actions > button {
+    width: 100%;
     justify-content: flex-start;
     text-align: left;
   }
@@ -277,6 +313,7 @@
     width: 100%;
     min-height: var(--editor-control-size);
     min-width: 0;
+    border-left: 0 !important;
     border-radius: 7px !important;
     justify-content: flex-start !important;
     text-align: left !important;
@@ -347,11 +384,10 @@
   }
 
   .workspace-settings-popover {
+    display: flex;
     width: 220px;
-  }
-
-  .workspace-settings-popover > :last-child {
-    margin-top: 8px;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .workspace-sidebar-provider {
@@ -361,6 +397,7 @@
   .workspace-overlay-panel {
     position: absolute;
     z-index: var(--attune-layer-panels);
+    --sidebar-easing: var(--editor-motion-ease);
     top: calc(var(--editor-header-height) + var(--editor-viewport-gap));
     bottom: var(--editor-viewport-gap);
     display: flex;
@@ -377,9 +414,9 @@
     visibility: hidden;
     pointer-events: none;
     transition:
-      transform var(--editor-motion-duration) var(--editor-motion-ease),
       opacity var(--editor-motion-duration) var(--editor-motion-ease),
-      visibility 0s linear var(--editor-motion-duration);
+      width var(--editor-motion-duration) var(--editor-motion-ease)
+      !important;
     border-radius: var(--editor-panel-radius);
     backdrop-filter: blur(14px);
   }
@@ -387,21 +424,17 @@
   .workspace-overlay-panel.is-left {
     left: var(--editor-viewport-gap);
     width: var(--sidebar-width, var(--editor-left-panel-width));
-    transform: translateX(-12px);
   }
 
   .workspace-overlay-panel.is-right {
     right: var(--editor-viewport-gap);
     width: var(--sidebar-width, var(--editor-right-panel-width));
-    transform: translateX(12px);
   }
 
   .workspace-overlay-panel[data-open='true'] {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
-    transform: translateX(0);
-    transition-delay: 0s;
   }
 
   .workspace-overlay-panel [data-sidebar='header'] {
@@ -440,6 +473,8 @@
 
   .workspace-overlay-panel-content > [data-sidebar='viewport'] {
     padding: 6px !important;
+    mask-image: none !important;
+    -webkit-mask-image: none !important;
   }
 
   .workspace-overlay-panel-content > [data-sidebar='viewport'] > * {
@@ -461,182 +496,84 @@
     position: absolute;
     z-index: var(--attune-layer-controls);
 
-    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 4px);
+    top: calc(
+      var(--editor-header-height) +
+      var(--editor-viewport-gap) +
+      10px
+    );
 
-    width: fit-content;
     pointer-events: none;
 
-    transition: right var(--editor-motion-duration) var(--editor-motion-ease);
+    transition:
+      right var(--editor-motion-duration)
+      var(--editor-motion-ease);
   }
 
-  /*
-  * Paper reference:
-  * width: 25.65625px
-  * height: 28px
-  *
-  * Deliberately NOT responsive/scalable.
-  * This is a tiny pixel HUD.
-  */
   .sketch-orientation-gizmo {
-    position: relative;
-    display: block;
+    /*
+    * Single sizing control.
+    * Internal SVG coordinates are NOT pixels.
+    */
+    width: 64px;
+    height: auto;
 
-    width: 25.65625px;
-    height: 28px;
+    display: block;
+    overflow: visible;
 
     font-family: Geist, system-ui, sans-serif;
     font-synthesis: none;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Y axis — Paper: left 2, top 6, length 19 */
+  /*
+  * Filled geometry rather than strokes.
+  *
+  * This matters because the face edges and axes need
+  * to meet exactly, rather than overlap by half a stroke.
+  */
   .sketch-axis-y {
-    position: absolute;
-    top: 6px;
-    left: 2px;
-
-    width: 19px;
-    height: 1px;
-
-    background: #06bc6e;
-
-    transform: rotate(90deg);
-    transform-origin: top left;
+    fill: #06bc6e;
+    shape-rendering: crispEdges;
   }
 
-  /* X axis — Paper: left 2, top 25, width 19 */
   .sketch-axis-x {
-    position: absolute;
-    top: 25px;
-    left: 2px;
-
-    width: 19px;
-    height: 1px;
-
-    background: #ff3d54;
+    fill: #ff3d54;
+    shape-rendering: crispEdges;
   }
 
-  /* Paper origin dot: left 1, top 25, 1 × 1 */
   .sketch-axis-origin {
-    position: absolute;
-    top: 25px;
-    left: 1px;
-
-    width: 1px;
-    height: 1px;
-
-    background: #000;
+    fill: var(--color-kumo-contrast);
+    shape-rendering: crispEdges;
   }
 
-  /*
-  * Plane wrapper from Paper:
-  * left: 2px
-  * top: 8px
-  * width/height: 17px
-  */
-  .sketch-plane {
-    position: absolute;
-    top: 8px;
-    left: 2px;
-
-    width: 17px;
-    height: 17px;
-  }
-
-  /*
-  * Gray face:
-  * Paper wrapper-relative x/y = 2/2
-  * size = 13 × 13
-  */
   .sketch-plane-face {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-
-    display: grid;
-    place-items: center;
-
-    width: 13px;
-    height: 13px;
-
-    background: #e1e1e1;
-    color: #000;
+    fill: #e1e1e1;
+    shape-rendering: crispEdges;
   }
 
-  /* Exact Paper typography */
+  .sketch-face-edge {
+    fill: #fff;
+    shape-rendering: crispEdges;
+  }
+
   .sketch-plane-label {
+    fill: #000;
+
     font-size: 4px;
     font-weight: 500;
-    line-height: 6px;
-    white-space: nowrap;
   }
 
-  /*
-  * White 2px edge treatment used by Paper.
-  *
-  * Don't replace this with a normal border:
-  * the exported artwork is specifically four
-  * positioned 2px rectangles.
-  */
-  .sketch-plane-border {
-    position: absolute;
-    display: block;
-
-    width: 13px;
-    height: 2px;
-
-    background: #fff;
-  }
-
-  .sketch-plane-border.is-top {
-    top: 0;
-    left: 2px;
-  }
-
-  .sketch-plane-border.is-left {
-    top: 2px;
-    left: 2px;
-
-    transform: rotate(90deg);
-    transform-origin: top left;
-  }
-
-  .sketch-plane-border.is-bottom {
-    top: 15px;
-    left: 2px;
-  }
-
-  .sketch-plane-border.is-right {
-    top: 2px;
-    left: 17px;
-
-    transform: rotate(90deg);
-    transform-origin: top left;
-  }
-
-  /* Axis labels */
   .sketch-axis-label {
-    position: absolute;
-
     font-size: 5px;
     font-weight: 500;
-    line-height: 6px;
   }
 
-  /* Paper: left 0, top 0 */
-  .sketch-axis-label.is-y {
-    top: 0;
-    left: 0;
-
-    color: #06bc6e;
+  .sketch-axis-label-y {
+    fill: #06bc6e;
   }
 
-  /* Paper: left 22, top 23 */
-  .sketch-axis-label.is-x {
-    top: 23px;
-    left: 22px;
-
-    color: #ff3d54;
+  .sketch-axis-label-x {
+    fill: #ff3d54;
   }
 
   .sketch-tree-heading {
@@ -698,6 +635,10 @@
   .sketch-item-list li:hover,
   .sketch-version-list li:hover {
     background: var(--color-kumo-fill-hover);
+  }
+
+  .workspace-draft-popover .sketch-version-list {
+    margin-top: 0;
   }
 
   .sketch-version-list li {
@@ -808,8 +749,26 @@
     font-size: 0.7rem;
   }
 
-  .sketch-history-list time {
+  .sketch-history-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     margin-top: 3px;
+    color: var(--color-kumo-subtle);
+  }
+
+  .sketch-history-meta small {
+    font-size: 0.64rem;
+  }
+
+  .sketch-history-avatar {
+    width: 14px;
+    height: 14px;
+    font-size: 0.5rem;
+  }
+
+  .sketch-history-list time {
+    margin-top: 2px;
     color: var(--color-kumo-subtle);
     font-size: 0.64rem;
   }
@@ -964,6 +923,11 @@
 
   .dashboard-search-collapsed [data-sidebar='menu-button'] {
     min-height: var(--dashboard-search-height) !important;
+  }
+
+  .dashboard-sidebar [data-sidebar='menu-button'][data-active] svg {
+    opacity: 1 !important;
+    color: var(--color-kumo-strong);
   }
 
   .dashboard-search {
@@ -1171,6 +1135,23 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 8px;
+  }
+
+  .dashboard-template-option-wrap {
+    position: relative;
+  }
+
+  .dashboard-template-option-wrap .dashboard-template-option {
+    width: 100%;
+  }
+
+  .dashboard-template-loader {
+    position: absolute;
+    top: 50%;
+    left: 47px;
+    z-index: 2;
+    color: var(--color-kumo-contrast);
+    transform: translate(-50%, -50%);
   }
 
   .dashboard-template-option {
@@ -1737,10 +1718,51 @@
     list-style: none;
   }
 
+  .sketch-item-ungrouped li {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    padding: 2px 4px;
+    border-radius: 7px;
+  }
+
+  .sketch-item-ungrouped li > button {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-start;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .sketch-item-ungrouped li > button > span {
+    min-width: 0;
+    flex: 1;
+    text-align: left;
+  }
+
+  .sketch-item-ungrouped li:hover,
+  .sketch-item-ungrouped li[data-selected='true'] {
+    background: var(--color-kumo-fill-hover);
+  }
+
   .sketch-item-ungrouped strong,
   .sketch-item-ungrouped small {
     display: block;
     font-size: 0.875rem;
+  }
+
+  .sketch-item-ungrouped strong,
+  .sketch-item-ungrouped small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .sketch-item-ungrouped small {

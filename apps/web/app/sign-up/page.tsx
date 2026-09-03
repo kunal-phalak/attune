@@ -1,5 +1,8 @@
+import { Button } from '@cloudflare/kumo/components/button';
+import { Input } from '@cloudflare/kumo/components/input';
 import Link from 'next/link';
 
+import { MechanicalPreview } from '../../components/mechanical-preview';
 import { neonAuthConfigured } from '../../lib/auth/neon';
 import { signUp } from '../auth-actions';
 
@@ -13,25 +16,30 @@ export default async function SignUpPage({
   const error = (await searchParams).error;
   return (
     <main className="auth-page">
-      <Link className="wordmark" href="/">
-        ATTUNE
+      <Link className="landing-wordmark auth-wordmark" href="/">
+        Attune
       </Link>
       <section className="auth-card">
-        <p className="section-index">CREATE ACCOUNT</p>
-        <h1>Start a physical specification.</h1>
+        <p className="landing-kicker">Create an account</p>
+        <h1>Start with the design</h1>
+        <p className="auth-intro">
+          Build a shared specification, find a capable maker, and keep every order tied to the
+          revision you approved.
+        </p>
         {neonAuthConfigured() ? (
           <form action={signUp}>
-            <label>
+            <label htmlFor="sign-up-name">
               Name
-              <input name="name" type="text" autoComplete="name" required />
+              <Input id="sign-up-name" name="name" type="text" autoComplete="name" required />
             </label>
-            <label>
+            <label htmlFor="sign-up-email">
               Email
-              <input name="email" type="email" autoComplete="email" required />
+              <Input id="sign-up-email" name="email" type="email" autoComplete="email" required />
             </label>
-            <label>
+            <label htmlFor="sign-up-password">
               Password
-              <input
+              <Input
+                id="sign-up-password"
                 name="password"
                 type="password"
                 autoComplete="new-password"
@@ -42,7 +50,9 @@ export default async function SignUpPage({
             {error ? (
               <p className="form-error">Registration failed. Check the fields and retry.</p>
             ) : null}
-            <button type="submit">Create account</button>
+            <Button type="submit" variant="primary">
+              Create account
+            </Button>
           </form>
         ) : (
           <div className="setup-callout">
@@ -54,6 +64,9 @@ export default async function SignUpPage({
           Already a member? <Link href="/sign-in">Sign in</Link>
         </p>
       </section>
+      <aside className="auth-visual">
+        <MechanicalPreview compact />
+      </aside>
     </main>
   );
 }

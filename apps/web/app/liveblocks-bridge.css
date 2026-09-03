@@ -74,9 +74,13 @@
     max-width: calc(100vw - 24px);
   }
 
+  #attune-overlay-root .lb-dropdown,
+  body .lb-dropdown {
+    z-index: var(--attune-layer-dialogs) !important;
+  }
+
   #attune-overlay-root
     :where(
-      .lb-dropdown,
       .lb-tooltip,
       .lb-composer-suggestions,
       .lb-emoji-picker,
@@ -85,7 +89,7 @@
     z-index: var(--attune-layer-popups);
   }
 
-  body > div:has(> a[href='https://lblcks.io/badge']) {
+  /* body > div:has(> a[href='https://lblcks.io/badge']) {
     top: auto !important;
     right: 150px !important;
     bottom: 12px !important;
@@ -98,5 +102,5 @@
       right: 8px !important;
       bottom: 8px !important;
     }
-  }
+  } */
 }

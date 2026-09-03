@@ -93,6 +93,54 @@ export const PUBLISH_PRODUCT = `#graphql
   }
 `;
 
+export const FILE_CREATE = `#graphql
+  mutation CreateAttuneVersionPreview($files: [FileCreateInput!]!) {
+    fileCreate(files: $files) {
+      files {
+        id fileStatus alt
+        ... on MediaImage { image { url } }
+      }
+      userErrors { code field message }
+    }
+  }
+`;
+
+export const FILE_REREAD = `#graphql
+  query RereadAttuneVersionPreview($id: ID!) {
+    node(id: $id) {
+      ... on MediaImage { id fileStatus alt image { url } }
+    }
+  }
+`;
+
+export const PRODUCT_ADD_MEDIA = `#graphql
+  mutation AttachAttuneVersionPreview(
+    $product: ProductUpdateInput!
+    $media: [CreateMediaInput!]
+  ) {
+    productUpdate(product: $product, media: $media) {
+      product {
+        id
+        media(first: 25) {
+          nodes { id alt mediaContentType status }
+        }
+      }
+      userErrors { field message }
+    }
+  }
+`;
+
+export const PRODUCT_MEDIA_REREAD = `#graphql
+  query RereadAttuneProductMedia($id: ID!) {
+    product(id: $id) {
+      id
+      media(first: 25) {
+        nodes { id alt mediaContentType status }
+      }
+    }
+  }
+`;
+
 export const STOREFRONT_REREAD = `#graphql
   query VerifyAttuneProduct($handle: String!) {
     product(handle: $handle) {

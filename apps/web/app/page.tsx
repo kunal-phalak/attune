@@ -1,49 +1,34 @@
+import { LinkButton } from '@cloudflare/kumo/components/button';
 import Link from 'next/link';
+
+import { MechanicalPreview } from '../components/mechanical-preview';
+import { RevealText } from '../components/reveal-text';
 
 function Hero() {
   return (
-    <section className="hero" id="top">
-      <div className="hero-copy">
-        <p className="eyebrow">Agent-native physical specification</p>
-        <h1>
-          Make intent
-          <br />
-          executable.
+    <section className="landing-hero" id="top">
+      <RevealText className="landing-hero-copy">
+        <p className="landing-kicker t-stagger-line">Attune</p>
+        <h1 className="t-stagger-line t-stagger-line--2">
+          <span>Design it.</span>
+          <span>Find who can make it.</span>
+          <span>Make it real.</span>
         </h1>
-        <p className="lede">
-          Attune turns custom physical requirements into a shared, manufacturable specification—and
-          keeps authority bound to the exact revision people agreed to.
+        <p className="landing-lede t-stagger-line t-stagger-line--2">
+          A shared workspace for designing custom parts, matching them to capable makers, and
+          ordering the exact revision you approved.
         </p>
-        <div className="landing-actions">
-          <Link className="primary-link" href="/dashboard">
-            Open Attune
-          </Link>
-          <a className="text-link" href="#system">
-            See how it works <span aria-hidden="true">↓</span>
-          </a>
+        <div className="landing-actions t-stagger-line t-stagger-line--2">
+          <LinkButton href="/dashboard" variant="primary">
+            Start designing
+          </LinkButton>
+          <LinkButton href="/sign-in" variant="secondary">
+            Sign in
+          </LinkButton>
         </div>
-      </div>
-      <div className="panel-visual" aria-label="A constrained custom control-enclosure faceplate">
-        <span className="visually-hidden">
-          A precision mechanical sketch with editable analytic geometry, familiar control and
-          ventilation cutouts, and a connector slot checked against the provider's clearance
-          requirement.
-        </span>
-        <svg viewBox="0 0 640 420" aria-hidden="true">
-          <rect className="sheet" x="58" y="52" width="524" height="288" rx="8" />
-          <circle className="lock" cx="96" cy="90" r="12" />
-          <circle className="lock" cx="544" cy="90" r="12" />
-          <circle className="lock" cx="96" cy="302" r="12" />
-          <circle className="lock" cx="544" cy="302" r="12" />
-          <circle className="feature" cx="250" cy="196" r="15" />
-          <circle className="feature" cx="390" cy="196" r="15" />
-          <rect className="conflict" x="469" y="174" width="74" height="44" rx="18" />
-          <path className="dimension" d="M469 244v34m74-34v34M469 267h74" />
-          <text x="480" y="296">
-            8.1 / 12 mm
-          </text>
-        </svg>
-        <div className="scan-line" aria-hidden="true" />
+      </RevealText>
+      <div className="landing-hero-visual">
+        <MechanicalPreview />
       </div>
     </section>
   );
@@ -51,27 +36,22 @@ function Hero() {
 
 function ProductSystem() {
   return (
-    <section className="proof" id="system">
-      <p className="section-index">01 / ONE AUTHORITATIVE THREAD</p>
-      <div className="proof-heading">
-        <h2>
-          From need
-          <br />
-          to real execution.
-        </h2>
-        <p>
-          Humans and agents co-create through one semantic command path. Constraints predict
-          consequences, frozen revisions preserve commercial intent, and external actions must prove
-          the exact specification they executed.
-        </p>
-      </div>
-      <div className="landing-flow" aria-label="Attune product workflow">
-        <span>Co-create</span>
-        <span>Validate</span>
-        <span>Commit</span>
-        <span>Execute</span>
-        <span>Conform</span>
-      </div>
+    <section className="landing-proof" id="system">
+      <article>
+        <span>01</span>
+        <h2>Create together</h2>
+        <p>Shape a real design with people and agents in one shared workspace.</p>
+      </article>
+      <article>
+        <span>02</span>
+        <h2>Find a capable maker</h2>
+        <p>Compare the design directly with a maker’s declared process limits.</p>
+      </article>
+      <article>
+        <span>03</span>
+        <h2>Order the exact revision</h2>
+        <p>Carry the accepted revision and specification hash into checkout.</p>
+      </article>
     </section>
   );
 }
@@ -79,21 +59,20 @@ function ProductSystem() {
 export default function Home() {
   return (
     <main>
-      <header className="masthead">
-        <a className="wordmark" href="#top" aria-label="Attune home">
-          ATTUNE
+      <header className="landing-masthead">
+        <a className="landing-wordmark" href="#top" aria-label="Attune home">
+          Attune
         </a>
         <nav className="landing-nav" aria-label="Primary navigation">
-          <a href="#system">System</a>
-          <Link href="/judge">Judge access</Link>
+          <a href="#system">How it works</a>
           <Link href="/sign-in">Sign in</Link>
         </nav>
       </header>
       <Hero />
       <ProductSystem />
-      <footer>
-        <p>Constrained 2D fabrication is the first domain, not the product boundary.</p>
-        <p>ATTUNE / 2026</p>
+      <footer className="landing-footer">
+        <p>From design intent to a verified order.</p>
+        <p>Attune / 2026</p>
       </footer>
     </main>
   );

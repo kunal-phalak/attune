@@ -23,8 +23,10 @@ import {
   useHistoryVersionYjsData,
   useSyncStatus,
   useThreads,
+  useUser,
 } from '@liveblocks/react';
 import {
+  Avatar,
   AvatarStack,
   CommentPin,
   FloatingComposer,
@@ -39,6 +41,7 @@ import {
   sketchEntityDisplayName,
 } from '../lib/sketch/items-tree';
 import { sketchDocumentFromYjsVersion } from '../lib/sketch/versions';
+import { EDITOR_CHROME } from '../lib/sketch/editor-chrome';
 import { AppIcons } from './ui/app-icons';
 import type { CameraViewState, CanvasCommentPlacement } from './workspace-canvas';
 
@@ -50,6 +53,7 @@ function PanelShell({
   open,
   onClose,
   onWidthChange,
+  defaultWidth = EDITOR_CHROME.panelWidth,
   children,
 }: {
   readonly side: 'left' | 'right';
@@ -57,6 +61,7 @@ function PanelShell({
   readonly open: boolean;
   readonly onClose: () => void;
   readonly onWidthChange?: (width: number) => void;
+  readonly defaultWidth?: number;
   readonly children: ReactNode;
 }) {
   return (
@@ -66,10 +71,11 @@ function PanelShell({
       side={side}
       collapsible="offcanvas"
       resizable
-      defaultWidth={288}
+      defaultWidth={defaultWidth}
       minWidth={240}
       maxWidth={420}
       mobileBreakpoint={0}
+      animationDuration={EDITOR_CHROME.motionDuration}
       onWidthChange={onWidthChange}
       className="workspace-sidebar-provider"
     >
@@ -187,6 +193,7 @@ export function ItemsPanel({
   onCommand,
   onClose,
   onWidthChange,
+  defaultWidth,
 }: {
   readonly open: boolean;
   readonly document: SketchDocument | null;
@@ -195,6 +202,7 @@ export function ItemsPanel({
   readonly onCommand?: (command: SketchCommand) => Promise<SketchDocument>;
   readonly onClose: () => void;
   readonly onWidthChange?: (width: number) => void;
+  readonly defaultWidth?: number;
 }) {
   const treeRef = useRef<HTMLDivElement>(null);
   const [renamingGroupId, setRenamingGroupId] = useState<string | null>(null);
@@ -371,6 +379,7 @@ export function ItemsPanel({
       open={open}
       onClose={onClose}
       onWidthChange={onWidthChange}
+      defaultWidth={defaultWidth}
     >
       <TooltipProvider>
         <div className="sketch-tree-actions" aria-label="Item organization">
@@ -651,7 +660,13 @@ export interface SketchHistoryEvent {
   readonly id: string;
   readonly label: string;
   readonly actor: string;
+  readonly actorId: string;
   readonly createdAt: string;
+}
+
+function HistoryActorAvatar({ actorId, actor }: { readonly actorId: string; readonly actor: string }) {
+  const { user } = useUser(actorId);
+  return <Avatar src={user?.avatar} name={actor} className="sketch-history-avatar" />;
 }
 
 export function HistoryPanel({
@@ -659,11 +674,13 @@ export function HistoryPanel({
   events,
   onClose,
   onWidthChange,
+  defaultWidth,
 }: {
   readonly open: boolean;
   readonly events: readonly SketchHistoryEvent[];
   readonly onClose: () => void;
   readonly onWidthChange?: (width: number) => void;
+  readonly defaultWidth?: number;
 }) {
   return (
     <PanelShell
@@ -672,6 +689,7 @@ export function HistoryPanel({
       open={open}
       onClose={onClose}
       onWidthChange={onWidthChange}
+      defaultWidth={defaultWidth}
     >
       {events.length === 0 ? (
         <p className="sketch-panel-note">Sketch actions will appear here as they are recorded.</p>
@@ -681,8 +699,11 @@ export function HistoryPanel({
             <li key={event.id}>
               <span aria-hidden />
               <div>
-                <small>{event.actor}</small>
                 <strong>{event.label}</strong>
+                <span className="sketch-history-meta">
+                  <HistoryActorAvatar actorId={event.actorId} actor={event.actor} />
+                  <small>{event.actor}</small>
+                </span>
                 <time dateTime={event.createdAt}>
                   {new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(
                     new Date(event.createdAt),
@@ -818,7 +839,7 @@ export function DraftControl({
         positionMethod="fixed"
         className="workspace-draft-popover"
       >
-        <Popover.Title>Draft versions</Popover.Title>
+        <Popover.Title className="workspace-draft-popover-title">Draft versions</Popover.Title>
         <div className="workspace-version-actions">
           <Button
             type="button"
@@ -871,6 +892,7 @@ export function LiveCommentsRail({
   onPlaceComment,
   onClose,
   onWidthChange,
+  defaultWidth,
 }: {
   readonly open: boolean;
   readonly workspaceId: string;
@@ -879,6 +901,7 @@ export function LiveCommentsRail({
   readonly onPlaceComment: () => void;
   readonly onClose: () => void;
   readonly onWidthChange?: (width: number) => void;
+  readonly defaultWidth?: number;
 }) {
   const result = useThreads({ query: { metadata: { workspaceId } } });
   const threads = result.threads ?? [];
@@ -889,6 +912,7 @@ export function LiveCommentsRail({
       open={open}
       onClose={onClose}
       onWidthChange={onWidthChange}
+      defaultWidth={defaultWidth}
     >
       <div className={styles.placementGuide} data-active={placingComment || undefined}>
         <Button

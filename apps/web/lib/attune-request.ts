@@ -145,13 +145,25 @@ function parseManufacturingConfiguration(value: unknown) {
 }
 
 function parseRequestQuoteCommand(value: Record<string, unknown>): AttuneCommand {
-  assertExactKeys(value, ['type', 'configuration', 'versionId'], 'request_quote command');
+  assertExactKeys(
+    value,
+    ['type', 'configuration', 'versionId', 'shopDomain'],
+    'request_quote command',
+  );
+  const shopDomain =
+    value.shopDomain === undefined
+      ? undefined
+      : requiredText(value.shopDomain, 'shopDomain', 100).toLowerCase();
+  if (shopDomain && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(shopDomain)) {
+    throw new TypeError('shopDomain must be a valid myshopify.com address.');
+  }
   return {
     type: 'request_quote',
     ...(value.configuration
       ? { configuration: parseManufacturingConfiguration(value.configuration) }
       : {}),
     ...(value.versionId ? { versionId: requiredIdentifier(value.versionId, 'versionId') } : {}),
+    ...(shopDomain ? { shopDomain } : {}),
   };
 }
 

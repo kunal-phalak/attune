@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
+import type { AttuneApiView, CapabilityRole } from '../lib/attune-view';
 import { DASHBOARD_CHROME, dashboardChromeCssVariables } from '../lib/dashboard/dashboard-chrome';
 import type { JudgeReviewFlow } from '../lib/judge-review-flow';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
@@ -26,13 +27,25 @@ import {
   type SketchTemplate,
 } from '../lib/projects/library';
 import { attuneToastManager } from './attune-ui-provider';
+import { AttuneWebMcp } from './attune-webmcp';
 import { DashboardNotifications } from './dashboard-notifications';
 import { DashboardWebMcp, type DashboardAgentProject } from './dashboard-webmcp';
+import { ManufacturingFlow, type ManufacturingSurface } from './manufacturing-flow';
 import { AppIcons } from './ui/app-icons';
 import { AttuneBrandmark } from './ui/attune-brandmark';
 import { AttuneEmptyState } from './ui/attune-empty-state';
 
 export type AttuneLibraryFile = LibraryProject;
+
+function dashboardSurfaceDestination(
+  workspaceId: string,
+  surface: Exclude<ManufacturingSurface, 'design'>,
+  perspective: Extract<CapabilityRole, 'buyer' | 'provider'>,
+): string {
+  const parameters = new URLSearchParams({ workspace_id: workspaceId, surface });
+  if (perspective === 'provider') parameters.set('perspective', 'provider');
+  return `/dashboard?${parameters}`;
+}
 
 function commerceDestination(project: DashboardAgentProject): string {
   const provider = project.roles.includes('provider');
@@ -46,8 +59,11 @@ function commerceDestination(project: DashboardAgentProject): string {
         : provider
           ? 'provider_requests'
           : 'buyer_requests';
-  const perspective = surface.startsWith('provider_') ? '&perspective=provider' : '';
-  return `/workspace/${encodeURIComponent(project.workspaceId)}?surface=${surface}${perspective}`;
+  return dashboardSurfaceDestination(
+    project.workspaceId,
+    surface,
+    surface.startsWith('provider_') ? 'provider' : 'buyer',
+  );
 }
 
 function commerceLabel(project: DashboardAgentProject): string {
@@ -716,6 +732,7 @@ function DashboardSidebar({
   searchRef,
   operationalWorkspaceId,
   makerEnabled,
+  activeSurface,
 }: {
   readonly filter: LibraryFilter;
   readonly query: string;
@@ -723,6 +740,7 @@ function DashboardSidebar({
   readonly searchRef: React.RefObject<HTMLInputElement | null>;
   readonly operationalWorkspaceId?: string;
   readonly makerEnabled: boolean;
+  readonly activeSurface?: ManufacturingSurface;
 }) {
   const { isMobile, open, setOpen, setOpenMobile } = useSidebar();
   const sidebarRestoreStarted = useRef(false);
@@ -843,11 +861,36 @@ function DashboardSidebar({
         </Sidebar.Group>
         {operationalWorkspaceId ? (
           <Sidebar.Group>
-            <Sidebar.GroupLabel>Workspace</Sidebar.GroupLabel>
+            <Sidebar.GroupLabel>Commerce</Sidebar.GroupLabel>
             <Sidebar.Menu>
               <Sidebar.MenuButton
+                itemId="dashboard-find-makers"
+                href={dashboardSurfaceDestination(operationalWorkspaceId, 'marketplace', 'buyer')}
+                active={activeSurface === 'marketplace'}
+                tooltip="Find makers"
+                size="base"
+                icon={AppIcons.Search}
+              >
+                Find makers
+              </Sidebar.MenuButton>
+              <Sidebar.MenuButton
+                itemId="dashboard-buyer-requests"
+                href={dashboardSurfaceDestination(
+                  operationalWorkspaceId,
+                  'buyer_requests',
+                  'buyer',
+                )}
+                active={activeSurface === 'buyer_requests'}
+                tooltip="Buyer requests"
+                size="base"
+                icon={AppIcons.Activity}
+              >
+                Buyer requests
+              </Sidebar.MenuButton>
+              <Sidebar.MenuButton
                 itemId="dashboard-orders"
-                href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=buyer&surface=buyer_orders`}
+                href={dashboardSurfaceDestination(operationalWorkspaceId, 'buyer_orders', 'buyer')}
+                active={activeSurface === 'buyer_orders'}
                 tooltip="Orders"
                 size="base"
                 icon={AppIcons.Commerce}
@@ -857,7 +900,12 @@ function DashboardSidebar({
               {makerEnabled ? (
                 <Sidebar.MenuButton
                   itemId="dashboard-requests"
-                  href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_requests`}
+                  href={dashboardSurfaceDestination(
+                    operationalWorkspaceId,
+                    'provider_requests',
+                    'provider',
+                  )}
+                  active={activeSurface === 'provider_requests'}
                   tooltip="Maker requests"
                   size="base"
                   icon={AppIcons.Activity}
@@ -868,7 +916,12 @@ function DashboardSidebar({
               {makerEnabled ? (
                 <Sidebar.MenuButton
                   itemId="dashboard-provider-profile"
-                  href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_profile`}
+                  href={dashboardSurfaceDestination(
+                    operationalWorkspaceId,
+                    'provider_profile',
+                    'provider',
+                  )}
+                  active={activeSurface === 'provider_profile'}
                   tooltip="Maker profile"
                   size="base"
                   icon={AppIcons.MakerProfile}
@@ -885,7 +938,7 @@ function DashboardSidebar({
             <Sidebar.Menu>
               <Sidebar.MenuButton
                 itemId="dashboard-provider-profile"
-                href="/settings#integrations"
+                href="/settings#maker-profile"
                 tooltip="Maker profile"
                 size="base"
                 icon={AppIcons.MakerProfile}
@@ -925,6 +978,7 @@ export function DashboardLibrary({
   judgeFlow,
   operationalWorkspaceId,
   makerEnabled = false,
+  manufacturing,
 }: {
   readonly files: readonly AttuneLibraryFile[];
   readonly collaboration: boolean;
@@ -936,13 +990,31 @@ export function DashboardLibrary({
   readonly judgeFlow?: JudgeReviewFlow;
   readonly operationalWorkspaceId?: string;
   readonly makerEnabled?: boolean;
+  readonly manufacturing?: {
+    readonly workspaceId: string;
+    readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+    readonly surface: Exclude<ManufacturingSurface, 'design'>;
+    readonly view: AttuneApiView;
+  };
 }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [projects, setProjects] = useState(files);
+  const [manufacturingState, setManufacturingState] = useState(manufacturing);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => setProjects(files), [files]);
+  useEffect(() => setManufacturingState(manufacturing), [manufacturing]);
+  const updateManufacturingView = useCallback((view: AttuneApiView) => {
+    setManufacturingState((current) => (current ? { ...current, view } : current));
+  }, []);
+  const updateManufacturingSurface = useCallback((surface: ManufacturingSurface) => {
+    if (surface === 'design') {
+      setManufacturingState(undefined);
+      return;
+    }
+    setManufacturingState((current) => (current ? { ...current, surface } : current));
+  }, []);
 
   const visibleFiles = useMemo(
     () => filterLibraryProjects(projects, filter, query),
@@ -982,59 +1054,83 @@ export function DashboardLibrary({
         searchRef={searchRef}
         operationalWorkspaceId={operationalWorkspaceId}
         makerEnabled={makerEnabled}
+        activeSurface={manufacturingState?.surface}
       />
-      <section className="dashboard-library" aria-label="Projects">
-        <header>
-          <div className="dashboard-page-heading">
-            <Sidebar.Trigger className="dashboard-mobile-sidebar-trigger" />
-            <h1>{activeLabel}</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <DashboardWebMcp
-              projects={agentProjects}
-              canCreate={canCreate}
-              reviewFlow={judgeFlow}
+      {manufacturingState ? (
+        <section className="dashboard-library dashboard-workflow-surface" aria-label="Commerce">
+          <ManufacturingFlow
+            workspaceId={manufacturingState.workspaceId}
+            perspective={manufacturingState.perspective}
+            surface={manufacturingState.surface}
+            view={manufacturingState.view}
+            navigationContext="dashboard"
+            onSurface={updateManufacturingSurface}
+            onView={updateManufacturingView}
+          />
+          <div className="dashboard-workflow-agent">
+            <AttuneWebMcp
+              workspaceId={manufacturingState.workspaceId}
+              perspective={manufacturingState.perspective}
+              surface={manufacturingState.surface}
+              initialView={manufacturingState.view}
+              onView={updateManufacturingView}
             />
-            {showNotifications ? <DashboardNotifications /> : null}
-            <NewProjectDialog canCreate={canCreate} />
           </div>
-        </header>
-        <DashboardCommerceInbox projects={agentProjects} />
-        {visibleFiles.length > 0 ? (
-          <div className="dashboard-project-grid">
-            {visibleFiles.map((project) => (
-              <ProjectCard
-                key={project.workspaceId}
-                project={project}
-                collaboration={collaboration}
-                user={user}
-                onRenamed={(workspaceId, projectName) =>
-                  setProjects((current) =>
-                    current.map((item) =>
-                      item.workspaceId === workspaceId ? { ...item, projectName } : item,
-                    ),
-                  )
-                }
-                onDeleted={(workspaceId) =>
-                  setProjects((current) =>
-                    current.filter((item) => item.workspaceId !== workspaceId),
-                  )
-                }
+        </section>
+      ) : (
+        <section className="dashboard-library" aria-label="Projects">
+          <header>
+            <div className="dashboard-page-heading">
+              <Sidebar.Trigger className="dashboard-mobile-sidebar-trigger" />
+              <h1>{activeLabel}</h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <DashboardWebMcp
+                projects={agentProjects}
+                canCreate={canCreate}
+                reviewFlow={judgeFlow}
               />
-            ))}
-          </div>
-        ) : (
-          <div className="dashboard-empty-viewport">
-            <EmptyLibrary
-              filter={filter}
-              query={query}
-              hasProjects={projects.length > 0}
-              canCreate={canCreate}
-              onCreate={(template) => void createFromEmpty(template)}
-            />
-          </div>
-        )}
-      </section>
+              {showNotifications ? <DashboardNotifications /> : null}
+              <NewProjectDialog canCreate={canCreate} />
+            </div>
+          </header>
+          <DashboardCommerceInbox projects={agentProjects} />
+          {visibleFiles.length > 0 ? (
+            <div className="dashboard-project-grid">
+              {visibleFiles.map((project) => (
+                <ProjectCard
+                  key={project.workspaceId}
+                  project={project}
+                  collaboration={collaboration}
+                  user={user}
+                  onRenamed={(workspaceId, projectName) =>
+                    setProjects((current) =>
+                      current.map((item) =>
+                        item.workspaceId === workspaceId ? { ...item, projectName } : item,
+                      ),
+                    )
+                  }
+                  onDeleted={(workspaceId) =>
+                    setProjects((current) =>
+                      current.filter((item) => item.workspaceId !== workspaceId),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="dashboard-empty-viewport">
+              <EmptyLibrary
+                filter={filter}
+                query={query}
+                hasProjects={projects.length > 0}
+                canCreate={canCreate}
+                onCreate={(template) => void createFromEmpty(template)}
+              />
+            </div>
+          )}
+        </section>
+      )}
     </Sidebar.Provider>
   );
 }

@@ -194,7 +194,7 @@ export function DashboardWebMcp({
         name: 'open_project',
         title: 'Open an Attune project',
         description:
-          'Use when the user asks to open one accessible project on its design, Buyer, or Maker workflow surface. Navigation never changes workspace authority.',
+          'Use when the user asks to open one accessible project on its design, Buyer, or Maker workflow surface. Commerce stays in the dashboard; only design opens the workspace.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -203,6 +203,7 @@ export function DashboardWebMcp({
               type: 'string',
               enum: [
                 'design',
+                'marketplace',
                 'buyer_requests',
                 'buyer_orders',
                 'provider_requests',
@@ -235,10 +236,13 @@ export function DashboardWebMcp({
           if (buyerSurface && !project.roles.includes('buyer')) {
             throw new Error('Buyer access is unavailable for this project.');
           }
-          const parameters = new URLSearchParams();
+          const parameters = new URLSearchParams({ workspace_id: project.workspaceId });
           if (providerSurface) parameters.set('perspective', 'provider');
           if (value.surface !== 'design') parameters.set('surface', value.surface);
-          const target = `/workspace/${encodeURIComponent(project.workspaceId)}${parameters.size ? `?${parameters}` : ''}`;
+          const target =
+            value.surface === 'design'
+              ? `/workspace/${encodeURIComponent(project.workspaceId)}`
+              : `/dashboard?${parameters}`;
           window.location.assign(target);
           return { status: 'NAVIGATION_INITIATED', workspaceId: project.workspaceId, target };
         },

@@ -374,6 +374,18 @@ describe('native model-context registration contract', () => {
     ).resolves.toEqual(expect.objectContaining({ status: 'CONFIGURATION_READY' }));
     await expect(
       manage?.execute({
+        operation: 'submit',
+        configuration: {
+          material: 'aluminium',
+          thickness_mm: 3,
+          finish: 'Mill finish',
+          quantity: 4,
+          tolerance_mm: 0.2,
+        },
+      }),
+    ).rejects.toThrow(/shop_domain is required/);
+    await expect(
+      manage?.execute({
         operation: 'accept_quote',
         revision_id: 'r6',
         quote_id: 'quote:6',

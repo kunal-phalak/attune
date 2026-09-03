@@ -509,10 +509,13 @@ export function createToolRuntime(input: {
           authorityUnchanged: true,
         };
       }
-      const parameters = new URLSearchParams();
+      const parameters = new URLSearchParams({ workspace_id: input.workspaceId });
       if (requiredPerspective === 'provider') parameters.set('perspective', 'provider');
       if (pageSurface !== 'design') parameters.set('surface', pageSurface);
-      const url = `/workspace/${encodeURIComponent(input.workspaceId)}${parameters.size ? `?${parameters}` : ''}`;
+      const url =
+        pageSurface === 'design'
+          ? `/workspace/${encodeURIComponent(input.workspaceId)}`
+          : `/dashboard?${parameters}`;
       window.location.assign(url);
       input.report({ execution: 'completed', lastAction: action });
       return {

@@ -1,4 +1,5 @@
 import {
+  buyerCommerceProfile,
   listConnectedShopifyInstallations,
   listShopifyInstallations,
   readWorkspaceBundle,
@@ -15,7 +16,10 @@ import { attuneErrorResponse, noStoreJson } from '../../../../lib/attune-respons
 import { inspectForCurrentHuman, synchronizeProviderProfile } from '../../../../lib/attune-runtime';
 import { workspaceIdentity } from '../../../../lib/auth/session';
 import { assertMarketplaceRouteAccess } from '../../../../lib/manufacturing/access';
-import { withGeocodedShopifyLocation } from '../../../../lib/manufacturing/geocoding';
+import {
+  geocodeBuyerAddress,
+  withGeocodedShopifyLocation,
+} from '../../../../lib/manufacturing/geocoding';
 import {
   DEMO_MARKETPLACE_PROVIDERS,
   isMarketplaceInstallationListed,
@@ -28,6 +32,7 @@ import {
   validateProviderCapability,
   validateUniversalGeometry,
 } from '../../../../lib/manufacturing/validation';
+import { shopifyStoreLogoUrl } from '../../../../lib/shopify/store-branding';
 
 export const dynamic = 'force-dynamic';
 
@@ -122,7 +127,7 @@ async function marketplaceProvider(
     locationName: profile.shopify?.locationName,
     address: profile.shopify?.address,
     logoUrl: profile.shopify?.primaryDomain
-      ? `https://${profile.shopify.primaryDomain}/favicon.ico`
+      ? shopifyStoreLogoUrl(profile.shopify.primaryDomain)
       : undefined,
     latitude: profile.shopify?.latitude,
     longitude: profile.shopify?.longitude,
@@ -163,6 +168,11 @@ async function marketplace(
     listConnectedShopifyInstallations(),
     listShopifyInstallations(identity.principalId),
   ]);
+
+  const buyerProfile = await buyerCommerceProfile(identity.principalId).catch((): null => null);
+  const buyerLocation = buyerProfile?.shippingAddress
+    ? await geocodeBuyerAddress(buyerProfile.shippingAddress)
+    : null;
 
   let selectedInstallation: ShopifyInstallation | null = null;
   if (update.installationId) {
@@ -223,6 +233,7 @@ async function marketplace(
       })),
       connection: null,
       providerProfile: bundle.workspace.providerCapabilityProfile,
+      buyerLocation,
       providers: DEMO_MARKETPLACE_PROVIDERS,
     });
   }
@@ -315,6 +326,7 @@ async function marketplace(
       locations: active.connection.locations,
       capabilities: active.connection.capabilities,
     },
+    buyerLocation,
     providerProfile: active.profile,
     providers: [
       ...(await Promise.all(

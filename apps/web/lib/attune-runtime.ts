@@ -15,6 +15,7 @@ import {
   finishExternalMaterialization,
   issueAgentDelegation,
   JUDGE_WORKSPACE_ID,
+  listProjectsForUser,
   liveblocksRoomIdForWorkspace,
   readWorkspaceBundle,
   refreshAgentDelegation,
@@ -23,6 +24,7 @@ import {
   saveShopifyCustomerBinding,
   shopifyInstallationForDomain,
   shopifyCustomerBinding,
+  userIdForPrincipalId,
   workspaceMemberUserIds,
   type WorkspaceBundle,
   type WorkspaceIdentity,
@@ -75,7 +77,6 @@ import { buyerCommerceProfileComplete } from './manufacturing/buyer-commerce';
 import { workspaceForMakerReview } from './manufacturing/maker-review';
 import {
   oauthShopifyProviderConnection,
-  shopifyProviderConnection,
   shopifyProviderProfile,
 } from './manufacturing/marketplace';
 import {
@@ -319,6 +320,39 @@ async function notifyWorkspace(input: {
       ),
     ),
   );
+}
+
+async function notifyMakerForRequest(
+  shopDomain: string,
+  input: {
+    readonly title: string;
+    readonly description: string;
+    readonly subjectId: string;
+  },
+): Promise<void> {
+  if (!liveblocksConfigured()) return;
+  try {
+    const installation = await shopifyInstallationForDomain(shopDomain);
+    if (!installation) return;
+    const maker = await userIdForPrincipalId(installation.ownerPrincipalId);
+    if (!maker) return;
+    const projects = await listProjectsForUser(maker.userId);
+    const operational = projects.find(({ roles }) => roles.includes('provider')) ?? projects[0];
+    if (!operational) return;
+    await getLiveblocks().triggerInboxNotification(
+      attuneActivityNotification({
+        userId: maker.userId,
+        roomId: operational.liveblocksRoomId,
+        workspaceId: operational.workspaceId,
+        subjectId: input.subjectId,
+        title: input.title,
+        description: input.description,
+        route: `/dashboard?workspace_id=${encodeURIComponent(operational.workspaceId)}&perspective=provider&surface=provider_requests`,
+      }),
+    );
+  } catch {
+    // Best-effort delivery to the maker; never block the request flow.
+  }
 }
 
 async function ensureVersionPreview(
@@ -841,26 +875,31 @@ async function persistProviderProfile(
   return readWorkspaceBundle(workspaceId);
 }
 
-async function synchronizeLiveMakerForRequest(workspaceId: string): Promise<WorkspaceBundle> {
+async function synchronizeLiveMakerForRequest(
+  workspaceId: string,
+  targetShopDomain?: string,
+): Promise<WorkspaceBundle> {
   const bundle = await readWorkspaceBundle(workspaceId);
   const existing = bundle.workspace.providerCapabilityProfile;
-  const knownInstallation = existing.shopify
-    ? await shopifyInstallationForDomain(existing.shopify.shopDomain)
-    : null;
-  if (knownInstallation && knownInstallation.connectionStatus !== 'connected') {
+  const targetDomain = targetShopDomain?.trim().toLowerCase() || undefined;
+  if (!targetDomain) {
+    throw new ShopifyIntegrationError(
+      'MAKER_NOT_SELECTED',
+      'Select a Maker store before sending a request.',
+    );
+  }
+  const installation = await shopifyInstallationForDomain(targetDomain);
+  if (!installation || installation.connectionStatus !== 'connected') {
     throw new ShopifyIntegrationError(
       'ADMIN_AUTH_FAILED',
       'The selected Maker store must reconnect Shopify before receiving a request.',
     );
   }
-  const installation = knownInstallation;
-  const connection = installation
-    ? await oauthShopifyProviderConnection(installation)
-    : await shopifyProviderConnection();
+  const connection = await oauthShopifyProviderConnection(installation);
   const profile = shopifyProviderProfile(
     connection,
-    installation?.selectedLocationId ?? existing.shopify?.locationId,
-    installation?.makerProfile ?? existing,
+    installation.selectedLocationId ?? existing.shopify?.locationId,
+    installation.makerProfile ?? existing,
   );
   return persistProviderProfile(workspaceId, profile);
 }
@@ -890,7 +929,10 @@ export async function executeAgentCommand(
   const context = await trustedDelegatedContext(workspaceId, perspective, input.command.type);
   let preparedInput = input;
   if (input.command.type === 'request_quote') {
-    preparedInput = rebaseInputToBundle(input, await synchronizeLiveMakerForRequest(workspaceId));
+    preparedInput = rebaseInputToBundle(
+      input,
+      await synchronizeLiveMakerForRequest(workspaceId, input.command.shopDomain),
+    );
     await requireProfileForLiveRequest(workspaceId, context.principalId);
   }
   const executionInput: CommandExecutionInput =
@@ -904,13 +946,22 @@ export async function executeAgentCommand(
   const version = versionForCommand(result.workspace, input.command);
   if (version) await ensureVersionPreview(workspaceId, version);
   if (input.command.type === 'request_quote') {
+    const request = result.workspace.manufacturingRequests.at(-1);
+    const subjectId = `request:${request?.requestId ?? input.envelope.commandId}`;
     await notifyWorkspace({
       workspaceId,
       title: 'Request received',
       description: 'A manufacturing request is ready for maker review.',
-      subjectId: `request:${result.workspace.manufacturingRequests.at(-1)?.requestId ?? input.envelope.commandId}`,
-      route: `/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_requests`,
+      subjectId,
+      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=provider_requests`,
     }).catch(() => undefined);
+    if (request?.provider.shopDomain) {
+      await notifyMakerForRequest(request.provider.shopDomain, {
+        title: 'New request received',
+        description: 'A buyer sent you a manufacturing request ready for review.',
+        subjectId,
+      });
+    }
   }
   if (input.command.type === 'accept_revision') {
     await notifyWorkspace({
@@ -918,7 +969,7 @@ export async function executeAgentCommand(
       title: 'Checkout ready',
       description: 'The exact quoted revision was accepted and can continue to Shopify.',
       subjectId: `acceptance:${input.command.quoteId}`,
-      route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
+      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&surface=buyer_orders`,
     }).catch(() => undefined);
   }
   return version ? inspectForDelegatedAgent(workspaceId, perspective) : result;
@@ -1088,7 +1139,10 @@ export async function executeHumanCommand(
   const context = await trustedHumanContext(workspaceId, role);
   let preparedInput = input;
   if (input.command.type === 'request_quote') {
-    preparedInput = rebaseInputToBundle(input, await synchronizeLiveMakerForRequest(workspaceId));
+    preparedInput = rebaseInputToBundle(
+      input,
+      await synchronizeLiveMakerForRequest(workspaceId, input.command.shopDomain),
+    );
     await requireProfileForLiveRequest(workspaceId, context.principalId);
   }
   const executionInput: CommandExecutionInput =
@@ -1102,13 +1156,22 @@ export async function executeHumanCommand(
   const version = versionForCommand(result.workspace, input.command);
   if (version) await ensureVersionPreview(workspaceId, version);
   if (input.command.type === 'request_quote') {
+    const request = result.workspace.manufacturingRequests.at(-1);
+    const subjectId = `request:${request?.requestId ?? input.envelope.commandId}`;
     await notifyWorkspace({
       workspaceId,
       title: 'Request received',
       description: 'A manufacturing request is ready for maker review.',
-      subjectId: `request:${result.workspace.manufacturingRequests.at(-1)?.requestId ?? input.envelope.commandId}`,
-      route: `/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_requests`,
+      subjectId,
+      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=provider_requests`,
     }).catch(() => undefined);
+    if (request?.provider.shopDomain) {
+      await notifyMakerForRequest(request.provider.shopDomain, {
+        title: 'New request received',
+        description: 'A buyer sent you a manufacturing request ready for review.',
+        subjectId,
+      });
+    }
   }
   if (input.command.type === 'accept_revision') {
     await notifyWorkspace({
@@ -1116,7 +1179,7 @@ export async function executeHumanCommand(
       title: 'Checkout ready',
       description: 'The exact quoted revision was accepted and can continue to Shopify.',
       subjectId: `acceptance:${input.command.quoteId}`,
-      route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
+      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&surface=buyer_orders`,
     }).catch(() => undefined);
   }
   return version ? inspectHuman(workspaceId, role) : result;
@@ -1169,9 +1232,40 @@ async function finalizeProviderQuoteWithContext(
   if (input.command.type !== 'freeze_and_quote_revision') {
     throw new TypeError('Provider quote finalization requires quote terms.');
   }
-  let stage = 'quote persistence';
+  let stage = 'Shopify currency resolution';
   try {
-    const quotedView = await executeProviderCommandWithContext(workspaceId, input, context);
+    const currentBeforeQuote = await readWorkspaceBundle(workspaceId);
+    const activeRequest = currentBeforeQuote.workspace.manufacturingRequests.findLast((candidate) =>
+      ['REQUESTED', 'UNDER_REVIEW', 'PROVIDER_REVIEW_REQUESTED', 'CHANGES_REQUESTED'].includes(
+        candidate.status,
+      ),
+    );
+    if (!activeRequest?.shopDomain) {
+      throw new ShopifyIntegrationError(
+        'MAKER_NOT_SELECTED',
+        'A connected Shopify Maker store must be selected before finalizing a quote.',
+      );
+    }
+    const quoteInstallation = await connectedShopifyInstallationForDomain(activeRequest.shopDomain);
+    if (!quoteInstallation) {
+      throw new ShopifyIntegrationError(
+        'ADMIN_AUTH_FAILED',
+        'The selected Maker store must reconnect Shopify before a quote can be finalized.',
+      );
+    }
+    const resolvedCurrency = quoteInstallation.currencyCode.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(resolvedCurrency)) {
+      throw new ShopifyIntegrationError(
+        'CONFORMANCE_FAILED',
+        'The connected Maker store did not provide a valid three-letter currency code.',
+      );
+    }
+    const resolvedInput: CommandExecutionInput = {
+      ...input,
+      command: { ...input.command, currency: resolvedCurrency },
+    };
+    stage = 'quote persistence';
+    const quotedView = await executeProviderCommandWithContext(workspaceId, resolvedInput, context);
     const quote = quotedView.workspace.quotes.at(-1);
     const request = quote
       ? quotedView.workspace.manufacturingRequests.find(
@@ -1215,6 +1309,13 @@ async function finalizeProviderQuoteWithContext(
         throw new ShopifyIntegrationError(
           'ADMIN_AUTH_FAILED',
           'The selected Maker store must reconnect Shopify before receiving commerce.',
+        );
+      }
+      const shopCurrency = installation?.currencyCode?.trim().toUpperCase();
+      if (!shopCurrency || shopCurrency !== quote.currency) {
+        throw new ShopifyIntegrationError(
+          'CONFORMANCE_FAILED',
+          `The quote currency ${quote.currency} does not match the Maker store currency ${shopCurrency ?? 'unknown'}.`,
         );
       }
       const admin = installation ? await adminForShopifyInstallation(installation) : null;
@@ -1265,7 +1366,7 @@ async function finalizeProviderQuoteWithContext(
       title: 'Quote ready',
       description: `${new Intl.NumberFormat('en-IN', { style: 'currency', currency: quote.currency }).format(quote.amountMinor / 100)} · ${quote.leadTimeDays ?? '—'} day lead time`,
       subjectId: `quote:${quote.quoteId}`,
-      route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
+      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&surface=buyer_orders`,
     }).catch(() => undefined);
     return context.path === 'webmcp'
       ? inspectForDelegatedAgent(
@@ -1279,7 +1380,7 @@ async function finalizeProviderQuoteWithContext(
     if (error instanceof ShopifyIntegrationError) throw error;
     throw new ShopifyIntegrationError(
       'CONFORMANCE_FAILED',
-      `Provider quote failed during ${stage}.`,
+      `Provider quote failed during ${stage}: ${detail}`,
     );
   }
 }

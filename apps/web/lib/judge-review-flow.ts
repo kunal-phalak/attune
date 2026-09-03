@@ -24,6 +24,7 @@ export interface JudgeReviewFlow {
 
 export function judgeReviewFlow(view: AttuneApiView): JudgeReviewFlow {
   const workspaceHref = `/workspace/${encodeURIComponent(view.product.workspaceId)}`;
+  const dashboardHref = `/dashboard?workspace_id=${encodeURIComponent(view.product.workspaceId)}`;
   const request = view.workspace.manufacturingRequests.findLast(
     ({ status }) => status !== 'SUPERSEDED' && status !== 'STALE',
   );
@@ -73,7 +74,7 @@ export function judgeReviewFlow(view: AttuneApiView): JudgeReviewFlow {
         id: 'buyer_requests',
         label: 'Buyer request',
         state: request ? 'seeded' : view.validation.valid ? 'available' : 'locked',
-        href: `${workspaceHref}?perspective=buyer&surface=buyer_requests`,
+        href: `${dashboardHref}&surface=buyer_requests`,
         when: request
           ? `Version ${request.versionNumber} was submitted.`
           : view.validation.valid
@@ -85,7 +86,7 @@ export function judgeReviewFlow(view: AttuneApiView): JudgeReviewFlow {
         id: 'maker_requests',
         label: 'Maker review',
         state: quote ? 'seeded' : request ? 'available' : 'locked',
-        href: `${workspaceHref}?perspective=provider&surface=provider_requests`,
+        href: `${dashboardHref}&perspective=provider&surface=provider_requests`,
         when: quote
           ? 'The Maker has prepared a quote.'
           : request
@@ -97,7 +98,7 @@ export function judgeReviewFlow(view: AttuneApiView): JudgeReviewFlow {
         id: 'buyer_orders',
         label: 'Buyer order',
         state: acceptance ? 'seeded' : quote?.status === 'READY' ? 'available' : 'locked',
-        href: `${workspaceHref}?perspective=buyer&surface=buyer_orders`,
+        href: `${dashboardHref}&surface=buyer_orders`,
         when: acceptance
           ? 'The Buyer accepted the exact quote.'
           : quote?.status === 'READY'
@@ -109,7 +110,7 @@ export function judgeReviewFlow(view: AttuneApiView): JudgeReviewFlow {
         id: 'maker_jobs',
         label: 'Maker job & Shopify',
         state: commerce ? 'seeded' : acceptance ? 'available' : 'locked',
-        href: `${workspaceHref}?perspective=provider&surface=provider_jobs`,
+        href: `${dashboardHref}&perspective=provider&surface=provider_jobs`,
         when: commerce
           ? 'The accepted revision has been materialized.'
           : acceptance

@@ -40,6 +40,15 @@ describe('trusted Attune HTTP command boundary', () => {
     });
   });
 
+  it('normalizes the explicitly selected Shopify Maker destination', () => {
+    expect(
+      parseCommandExecutionInput(
+        request({ type: 'request_quote', shopDomain: '  TRUE-FORM.myshopify.com ' }),
+        ['request_quote'],
+      ).command,
+    ).toEqual({ type: 'request_quote', shopDomain: 'true-form.myshopify.com' });
+  });
+
   it('rejects forged provenance, external verification, and unknown boundary fields', () => {
     for (const forged of [
       { ...request({ type: 'request_quote' }), actor: 'human' },

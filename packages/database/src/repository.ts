@@ -1266,23 +1266,28 @@ export async function resetJudgeWorkspace(): Promise<void> {
   const now = new Date().toISOString();
 
   await database.transaction(async (transaction) => {
-    const rows = await transaction
+    await transaction
       .select({ workspace: workspaces.currentSpecification })
       .from(workspaces)
       .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
       .for('update')
       .limit(1);
-    const current = rows[0]?.workspace;
     const seed = createAt1042Workspace();
-    const initial = current
-      ? {
-          ...seed,
-          providerCapabilityProfile:
-            current.providerCapabilityProfile ?? seed.providerCapabilityProfile,
-          authorityEpoch: (current.authorityEpoch ?? 0) + 1,
-        }
-      : seed;
+    const initial = {
+      ...seed,
+      authorityEpoch: 0,
+    };
+    const providerProfile = createJudgeProviderCapabilityProfile();
     await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
+    await transaction
+      .delete(agentDelegations)
+      .where(eq(agentDelegations.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(workspaceFiles)
+      .where(eq(workspaceFiles.workspaceId, JUDGE_WORKSPACE_ID));
+    await transaction
+      .delete(providerCapabilityProfiles)
+      .where(eq(providerCapabilityProfiles.providerId, providerProfile.providerId));
     await transaction
       .update(workspaces)
       .set({
@@ -1290,10 +1295,33 @@ export async function resetJudgeWorkspace(): Promise<void> {
         workspaceSeq: initial.workspaceSeq,
         draftVersion: initial.draftVersion,
         capabilityEpoch: initial.capabilityEpoch,
+        liveblocksRoomId: `attune:workspace:at-1042:${crypto.randomUUID()}`,
         needStartedAt: now,
         updatedAt: now,
       })
       .where(eq(workspaces.id, JUDGE_WORKSPACE_ID));
+    await transaction
+      .insert(workspaceFiles)
+      .values({
+        id: 'file:at-1042-panel',
+        workspaceId: JUDGE_WORKSPACE_ID,
+        name: 'Straight-spoke wheel.attune',
+        kind: 'executable-specification',
+      })
+      .onConflictDoUpdate({
+        target: workspaceFiles.id,
+        set: { name: 'Straight-spoke wheel.attune' },
+      });
+    await transaction
+      .insert(providerCapabilityProfiles)
+      .values({
+        profileId: providerProfile.profileId,
+        providerId: providerProfile.providerId,
+        version: providerProfile.version,
+        profile: providerProfile,
+        effectiveAt: providerProfile.effectiveAt,
+      })
+      .onConflictDoNothing();
     await transaction.insert(workspaceSnapshots).values({
       id: `${JUDGE_WORKSPACE_ID}:snapshot:0`,
       workspaceId: JUDGE_WORKSPACE_ID,
@@ -1402,6 +1430,24 @@ export async function attuneUserForSharing(
     .where(or(eq(users.id, identifier), eq(users.email, identifier.toLowerCase())))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function userIdForPrincipalId(
+  principalId: string,
+): Promise<{ readonly userId: string; readonly displayName: string } | null> {
+  if (principalId.startsWith('judge:')) {
+    return { userId: JUDGE_USER_ID, displayName: 'Challenge Judge' };
+  }
+  const authUserId = principalId.startsWith('user:')
+    ? principalId.slice('user:'.length)
+    : principalId;
+  const rows = await getDatabase()
+    .select({ userId: users.id, displayName: users.displayName })
+    .from(users)
+    .where(eq(users.authUserId, authUserId))
+    .limit(1);
+  if (rows[0]) return rows[0];
+  return null;
 }
 
 export async function liveblocksRoomIdForWorkspace(workspaceId: string): Promise<string> {

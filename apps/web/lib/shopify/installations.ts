@@ -20,6 +20,7 @@ import {
   SHOPIFY_OPTIONAL_SCOPES,
   shopifyOAuthConfiguration,
 } from './oauth';
+import { shopifyStoreLogoUrl } from './store-branding';
 
 const REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 
@@ -37,6 +38,7 @@ export function publicShopifyInstallation(installation: ShopifyInstallation) {
     shopDomain: installation.shopDomain,
     shopName: installation.shopName,
     primaryDomain: installation.primaryDomain,
+    logoUrl: shopifyStoreLogoUrl(installation.primaryDomain),
     currencyCode: installation.currencyCode,
     grantedScopes: installation.grantedScopes,
     missingCoreScopes,

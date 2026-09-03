@@ -834,6 +834,12 @@ function manufacturingTools(
             additionalProperties: false,
           },
           version_id: { type: 'string' },
+          shop_domain: {
+            type: 'string',
+            minLength: 16,
+            maxLength: 80,
+            description: 'Selected Maker’s myshopify.com domain from find_makers.',
+          },
           request_id: { type: 'string' },
           note: { type: 'string', maxLength: 500 },
           amount_minor: { type: 'integer', minimum: 1 },
@@ -904,17 +910,28 @@ function manufacturingTools(
         }
 
         if (operation === 'submit') {
-          exact(value, ['operation', 'configuration', 'version_id'], 'submit input');
+          exact(value, ['operation', 'configuration', 'version_id', 'shop_domain'], 'submit input');
           requireCapability(capabilityIds, 'request_quote');
           const versionId =
             value.version_id === undefined
               ? 'current_draft'
               : string(value.version_id, 'version_id');
+          const shopDomain =
+            value.shop_domain === undefined
+              ? undefined
+              : string(value.shop_domain, 'shop_domain').trim().toLowerCase();
+          if (!shopDomain) {
+            throw new TypeError('shop_domain is required from the selected live Maker result.');
+          }
+          if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(shopDomain)) {
+            throw new TypeError('shop_domain must be a valid myshopify.com address.');
+          }
           const result = await runtime.execute(
             {
               type: 'request_quote',
               configuration: manufacturingConfiguration(value.configuration),
               ...(versionId === 'current_draft' ? {} : { versionId }),
+              shopDomain,
             },
             execution?.signal,
           );

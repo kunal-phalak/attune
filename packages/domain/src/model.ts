@@ -443,6 +443,8 @@ export type AttuneCommand =
       readonly configuration?: ManufacturingConfiguration;
       readonly buyerPrincipalId?: string;
       readonly versionId?: string;
+      readonly providerId?: string;
+      readonly shopDomain?: string;
     }
   | { readonly type: 'save_design_version'; readonly name?: string }
   | {

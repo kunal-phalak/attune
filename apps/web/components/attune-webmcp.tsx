@@ -38,12 +38,14 @@ export function AttuneWebMcp({
   surface,
   initialView,
   onStatus,
+  onView,
 }: {
   readonly workspaceId: string;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly surface: WorkspaceToolSurface;
   readonly initialView?: AttuneApiView;
   readonly onStatus?: (status: AttuneWebMcpStatus) => void;
+  readonly onView?: (view: AttuneApiView) => void;
 }) {
   const [registration, setRegistration] = useState<RegistrationState>('checking');
   const [execution, setExecution] = useState<RuntimeStatus>({
@@ -54,10 +56,17 @@ export function AttuneWebMcp({
   const viewRef = useRef<AttuneApiView | null>(initialView ?? null);
   const perspectiveRef = useRef(perspective);
   perspectiveRef.current = perspective;
-  const updateView = useCallback((next: AttuneApiView) => {
-    viewRef.current = next;
-    setView(next);
-  }, []);
+  const updateView = useCallback(
+    (next: AttuneApiView) => {
+      viewRef.current = next;
+      setView(next);
+      onView?.(next);
+    },
+    [onView],
+  );
+  useEffect(() => {
+    if (initialView) updateView(initialView);
+  }, [initialView, updateView]);
   const refresh = useCallback(async () => {
     const next = await requestAttuneView(
       attuneWorkspaceEndpoint('/api/attune/webmcp', workspaceId, { perspective }),

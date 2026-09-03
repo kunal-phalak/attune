@@ -14,11 +14,13 @@ export function WorkflowCallout({
   perspective,
   view,
   onSurface,
+  navigationContext = 'workspace',
 }: {
   readonly workspaceId: string;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly view: AttuneApiView;
   readonly onSurface: (surface: ManufacturingSurface) => void;
+  readonly navigationContext?: 'workspace' | 'dashboard';
 }) {
   const state = useMemo(() => {
     const request = view.workspace.manufacturingRequests.findLast(
@@ -106,7 +108,11 @@ export function WorkflowCallout({
             <div className="workflow-callout-actions">
               {state.kind === 'maker' ? (
                 <LinkButton
-                  href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=buyer_requests`}
+                  href={
+                    navigationContext === 'dashboard'
+                      ? `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&surface=buyer_requests`
+                      : `/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=buyer_requests`
+                  }
                   size="sm"
                   variant="primary"
                 >

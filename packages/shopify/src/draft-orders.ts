@@ -119,6 +119,7 @@ export function prepareDraftOrderInput(input: DraftOrderPreparation) {
 
   return {
     purchasingEntity: { customerId: input.customerId },
+    presentmentCurrencyCode: quote.currency,
     email: input.buyerProfile.email,
     shippingAddress: mailingAddressInput(input.buyerProfile.shippingAddress),
     billingAddress: mailingAddressInput(

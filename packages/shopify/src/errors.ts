@@ -6,7 +6,8 @@ export type ShopifyIntegrationErrorCode =
   | 'PROTECTED_CUSTOMER_DATA_UNAVAILABLE'
   | 'GRAPHQL_FAILED'
   | 'CONFORMANCE_FAILED'
-  | 'STOREFRONT_TIMEOUT';
+  | 'STOREFRONT_TIMEOUT'
+  | 'MAKER_NOT_SELECTED';
 
 export class ShopifyIntegrationError extends Error {
   constructor(

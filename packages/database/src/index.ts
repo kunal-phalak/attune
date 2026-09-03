@@ -48,6 +48,7 @@ export {
   markShopifyInstallationUninstalled,
   updateShopifyInstallationCredentials,
   userCanManageLiveblocksRoom,
+  userIdForPrincipalId,
   workspaceMembersForLiveblocksRoom,
   workspaceMemberUserIds,
   workspaceRoles,

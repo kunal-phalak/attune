@@ -327,10 +327,14 @@ function freezeAndQuote(
     workspace.manufacturingRequests.find(({ requestId }) => requestId === request.id)
       ?.configuration ?? manufacturingConfiguration(workspace);
   const amountMinor = command.amountMinor ?? 240_000;
-  const currency =
-    command.currency ?? workspace.providerCapabilityProfile.shopify?.currency ?? 'INR';
+  const currency = command.currency?.trim().toUpperCase();
   if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
     throw new Error('A provider quote requires a positive amount in minor currency units.');
+  }
+  if (!currency || !/^[A-Z]{3}$/.test(currency)) {
+    throw new Error(
+      'A connected Shopify Maker currency is required before a provider can finalize a quote.',
+    );
   }
 
   return advance(workspace, {
@@ -626,6 +630,12 @@ export function transitionWorkspace(
       }
       const specRevision = `r${version.sourceDraftVersion}`;
       const provider = providerBinding(workspace);
+      if (command.shopDomain && provider.shopDomain !== command.shopDomain) {
+        throw new Error('The selected Maker store does not match the synchronized provider.');
+      }
+      if (command.providerId && provider.providerId !== command.providerId) {
+        throw new Error('The selected Maker does not match the synchronized provider.');
+      }
       const specHash = hashCanonical({
         versionId: version.versionId,
         versionSpecHash: version.specHash,

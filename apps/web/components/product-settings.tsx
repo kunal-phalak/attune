@@ -42,6 +42,7 @@ export interface ShopifyInstallationView {
   readonly shopDomain: string;
   readonly shopName: string;
   readonly primaryDomain: string;
+  readonly logoUrl?: string;
   readonly connectionStatus: 'connected' | 'needs_reauthorization' | 'disconnected' | 'uninstalled';
   readonly missingCoreScopes: readonly string[];
   readonly locations: readonly InstallationLocation[];
@@ -392,12 +393,28 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
                   return (
                     <div className="shopify-installation" key={installation.id}>
                       <div className="settings-shop-identity">
-                        <img src="https://cdn.shopify.com/static/shopify-favicon.png" alt="" />
+                        <img
+                          src={
+                            installation.logoUrl ??
+                            'https://cdn.shopify.com/static/shopify-favicon.png'
+                          }
+                          alt=""
+                          onError={(event) => {
+                            const fallback = 'https://cdn.shopify.com/static/shopify-favicon.png';
+                            if (event.currentTarget.src !== fallback) {
+                              event.currentTarget.src = fallback;
+                            }
+                          }}
+                        />
                         <div>
                           <strong>{installation.shopName}</strong>
                           <small>{installation.primaryDomain}</small>
                         </div>
-                        <Badge variant={status.variant} appearance="dot">
+                        <Badge
+                          variant={status.variant}
+                          className={'shopify-health-status'}
+                          appearance="dot"
+                        >
                           {status.label}
                         </Badge>
                       </div>
@@ -472,7 +489,7 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
                         </Button>
                         {workspaceId ? (
                           <LinkButton
-                            href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile&installation=${encodeURIComponent(installation.id)}`}
+                            href={`/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=provider_profile&installation=${encodeURIComponent(installation.id)}`}
                             variant="secondary"
                           >
                             Manage
@@ -612,7 +629,7 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
           </div>
           {workspaceId && activeInstallations.length > 0 ? (
             <LinkButton
-              href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile`}
+              href={`/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=provider_profile`}
               variant="secondary"
             >
               Manage Maker profiles

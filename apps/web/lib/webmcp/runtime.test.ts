@@ -155,7 +155,7 @@ describe('one-request WebMCP semantic mutation runtime', () => {
           : requestTarget?.url;
     expect(requestedUrl).toContain('perspective=provider');
     expect(assign).toHaveBeenCalledWith(
-      '/workspace/workspace%3Aat-1042?perspective=provider&surface=provider_requests',
+      '/dashboard?workspace_id=workspace%3Aat-1042&perspective=provider&surface=provider_requests',
     );
     expect(reports).toEqual(['executing', 'completed']);
   });

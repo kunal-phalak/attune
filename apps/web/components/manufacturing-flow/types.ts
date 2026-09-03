@@ -53,6 +53,11 @@ export interface MarketplacePayload {
       readonly storefront: boolean;
     };
   } | null;
+  readonly buyerLocation?: {
+    readonly latitude: number;
+    readonly longitude: number;
+    readonly address: string;
+  } | null;
   readonly providers: readonly MarketplaceProvider[];
 }
 

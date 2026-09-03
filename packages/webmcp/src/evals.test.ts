@@ -109,7 +109,11 @@ function runToAcceptance(bus: AttuneCommandBus) {
     buyerAgent,
   );
   bus.execute({ type: 'request_quote' }, envelope(bus, 'eval-request'), buyer);
-  bus.execute({ type: 'freeze_and_quote_revision' }, envelope(bus, 'eval-quote'), provider);
+  bus.execute(
+    { type: 'freeze_and_quote_revision', amountMinor: 240_000, currency: 'INR' },
+    envelope(bus, 'eval-quote'),
+    provider,
+  );
   const quote = bus.inspect('buyer').workspace.quotes[0];
   bus.execute(
     { type: 'accept_revision', revisionId: quote.revisionId, quoteId: quote.quoteId },

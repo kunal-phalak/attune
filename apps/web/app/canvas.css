@@ -942,6 +942,19 @@
     padding: 22px clamp(24px, 4vw, var(--dashboard-content-inset)) 48px;
   }
 
+  .dashboard-workflow-surface {
+    position: relative;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .dashboard-workflow-agent {
+    position: absolute;
+    z-index: calc(var(--attune-layer-controls) + 22);
+    top: 14px;
+    right: 20px;
+  }
+
   .dashboard-library > header {
     display: flex;
     width: min(100%, var(--dashboard-content-max));
@@ -1368,6 +1381,15 @@
   .dashboard-library {
     height: 100dvh;
     padding: 14px 16px 32px;
+  }
+
+  .dashboard-workflow-surface {
+    padding: 0;
+  }
+
+  .dashboard-workflow-agent {
+    top: 12px;
+    right: 10px;
   }
 
   .dashboard-mobile-sidebar-trigger {

@@ -22,6 +22,7 @@ import { redirect } from 'next/navigation';
 
 import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashboard-library';
 import type { DashboardAgentProject } from '../../components/dashboard-webmcp';
+import type { ManufacturingSurface } from '../../components/manufacturing-flow';
 import { inspectForHuman } from '../../lib/attune-runtime';
 import { currentAttuneUser } from '../../lib/auth/session';
 import { judgeReviewFlow } from '../../lib/judge-review-flow';
@@ -37,6 +38,22 @@ export const dynamic = 'force-dynamic';
 type LibraryRow =
   | Awaited<ReturnType<typeof listProjectsForUser>>[number]
   | Awaited<ReturnType<typeof listProjectsForLiveblocksRooms>>[number];
+
+function dashboardManufacturingSurface(
+  value: string | undefined,
+): Exclude<ManufacturingSurface, 'design'> | undefined {
+  if (
+    value === 'marketplace' ||
+    value === 'buyer_requests' ||
+    value === 'buyer_orders' ||
+    value === 'provider_requests' ||
+    value === 'provider_jobs' ||
+    value === 'provider_profile'
+  ) {
+    return value;
+  }
+  return undefined;
+}
 
 function toLibraryFile(row: LibraryRow): AttuneLibraryFile {
   return {
@@ -182,7 +199,12 @@ function SetupRequired() {
 export default async function DashboardPage({
   searchParams,
 }: {
-  readonly searchParams: Promise<{ readonly view?: string }>;
+  readonly searchParams: Promise<{
+    readonly view?: string;
+    readonly surface?: string;
+    readonly perspective?: string;
+    readonly workspace_id?: string;
+  }>;
 }) {
   if (!databaseConfigured()) return <SetupRequired />;
   const user = await currentAttuneUser();
@@ -210,7 +232,36 @@ export default async function DashboardPage({
   const ownedFiles = membershipRows.filter((row) => row.access === 'owned').map(toLibraryFile);
   const liveblocksFiles = roomRows.map(toLibraryFile);
   const files = mergeLibraryProjects(ownedFiles, liveblocksFiles);
-  const filter = parseLibraryFilter((await searchParams).view);
+  const parameters = await searchParams;
+  const filter = parseLibraryFilter(parameters.view);
+  const requestedSurface = dashboardManufacturingSurface(parameters.surface);
+  const requiredPerspective: 'buyer' | 'provider' = requestedSurface?.startsWith('provider_')
+    ? 'provider'
+    : 'buyer';
+  const requestedWorkspace = membershipRows.find(
+    ({ workspaceId }) => workspaceId === parameters.workspace_id,
+  );
+  const operationalProject =
+    requestedWorkspace ??
+    membershipRows.find(({ roles }) => roles.includes(requiredPerspective)) ??
+    membershipRows[0];
+  const operationalWorkspaceId = user.judge ? JUDGE_WORKSPACE_ID : operationalProject?.workspaceId;
+  const canOpenRequestedSurface =
+    requestedSurface &&
+    operationalWorkspaceId &&
+    (user.judge || operationalProject?.roles.includes(requiredPerspective));
+  const manufacturing = canOpenRequestedSurface
+    ? {
+        workspaceId: operationalWorkspaceId,
+        perspective: requiredPerspective,
+        surface: requestedSurface,
+        view:
+          requiredPerspective === 'buyer' &&
+          judgeView?.product.workspaceId === operationalWorkspaceId
+            ? judgeView
+            : await inspectForHuman(operationalWorkspaceId, requiredPerspective),
+      }
+    : undefined;
 
   return (
     <DashboardLibrary
@@ -222,8 +273,9 @@ export default async function DashboardPage({
       agentProjects={membershipRows.map(toAgentProject)}
       judgeFlow={judgeView ? judgeReviewFlow(judgeView) : undefined}
       showNotifications={collaboration}
-      operationalWorkspaceId={user.judge ? JUDGE_WORKSPACE_ID : membershipRows[0]?.workspaceId}
+      operationalWorkspaceId={operationalWorkspaceId}
       makerEnabled={makerEnabled}
+      manufacturing={manufacturing}
     />
   );
 }

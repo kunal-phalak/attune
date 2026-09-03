@@ -509,6 +509,9 @@ function MarketplaceSurface({
               type: 'request_quote',
               configuration: selection.configuration,
               ...(selection.version ? { versionId: selection.version.versionId } : {}),
+              ...(selected?.profile?.shopify?.shopDomain
+                ? { shopDomain: selected.profile.shopify.shopDomain }
+                : {}),
             },
             'human-request',
             requestView.workspace.workspaceSeq,
@@ -597,6 +600,7 @@ function MarketplaceSurface({
         <MakerMap
           providers={payload.providers}
           selectedId={selected?.id ?? ''}
+          buyerLocation={payload.buyerLocation}
           onSelect={(id) => {
             onSelectedId(id);
             requestAnimationFrame(() =>
@@ -1256,6 +1260,7 @@ export function ManufacturingFlow({
   perspective,
   surface,
   view,
+  navigationContext = 'workspace',
   onSurface,
   onView,
 }: {
@@ -1263,6 +1268,7 @@ export function ManufacturingFlow({
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly surface: ManufacturingSurface;
   readonly view: AttuneApiView;
+  readonly navigationContext?: 'workspace' | 'dashboard';
   readonly onSurface: (surface: ManufacturingSurface) => void;
   readonly onView: (view: AttuneApiView) => void;
 }) {
@@ -1319,8 +1325,13 @@ export function ManufacturingFlow({
     destinationPerspective?: Extract<CapabilityRole, 'buyer' | 'provider'>,
   ) => {
     if (destinationPerspective && destinationPerspective !== perspective) {
+      const parameters = new URLSearchParams({ surface: next });
+      if (destinationPerspective === 'provider') parameters.set('perspective', 'provider');
+      if (navigationContext === 'dashboard') parameters.set('workspace_id', workspaceId);
       window.location.assign(
-        `/workspace/${encodeURIComponent(workspaceId)}?perspective=${destinationPerspective}&surface=${next}`,
+        navigationContext === 'dashboard'
+          ? `/dashboard?${parameters}`
+          : `/workspace/${encodeURIComponent(workspaceId)}?${parameters}`,
       );
       return;
     }
@@ -1349,7 +1360,11 @@ export function ManufacturingFlow({
             </Text>
           </span>
           <LinkButton
-            href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=${perspective === 'provider' ? 'buyer&surface=buyer_requests' : 'provider&surface=provider_requests'}`}
+            href={
+              navigationContext === 'dashboard'
+                ? `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=${perspective === 'provider' ? 'buyer&surface=buyer_requests' : 'provider&surface=provider_requests'}`
+                : `/workspace/${encodeURIComponent(workspaceId)}?perspective=${perspective === 'provider' ? 'buyer&surface=buyer_requests' : 'provider&surface=provider_requests'}`
+            }
             size="sm"
             variant="secondary"
           >
@@ -1478,6 +1493,7 @@ export function ManufacturingFlow({
         perspective={perspective}
         view={view}
         onSurface={setSurface}
+        navigationContext={navigationContext}
       />
       <div className="manufacturing-content" aria-live="polite" aria-busy={loading}>
         {loading ? (

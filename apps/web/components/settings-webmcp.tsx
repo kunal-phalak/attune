@@ -397,9 +397,9 @@ export function SettingsWebMcp({
     if (workspaceId && activeInstallations.length) {
       available.push({
         name: 'open_maker_workspace',
-        title: 'Open the Maker workspace',
+        title: 'Open Maker tools',
         description:
-          'Use when the merchant asks to manage the connected Maker profile, incoming requests, or accepted jobs in Attune.',
+          'Use when the merchant asks to manage the connected Maker profile, incoming requests, or accepted jobs in the Attune dashboard.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -428,7 +428,7 @@ export function SettingsWebMcp({
           ) {
             throw new TypeError('Choose a supported Maker surface.');
           }
-          const target = `/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=${encodeURIComponent(String(value.surface))}`;
+          const target = `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=${encodeURIComponent(String(value.surface))}`;
           window.location.assign(target);
           return { status: 'NAVIGATION_INITIATED', target };
         },

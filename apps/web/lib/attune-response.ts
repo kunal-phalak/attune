@@ -7,6 +7,8 @@ const SHOPIFY_ERROR_CODES = new Set([
   'MISSING_CONFIGURATION',
   'ADMIN_AUTH_FAILED',
   'MISSING_ADMIN_SCOPES',
+  'BUYER_COMMERCE_PROFILE_REQUIRED',
+  'PROTECTED_CUSTOMER_DATA_UNAVAILABLE',
   'GRAPHQL_FAILED',
   'CONFORMANCE_FAILED',
   'STOREFRONT_TIMEOUT',
@@ -77,7 +79,14 @@ export function attuneErrorResponse(error: unknown): NextResponse {
           retryable: integrationError.retryable,
         },
       },
-      { status: integrationError.retryable ? 503 : 424 },
+      {
+        status:
+          integrationError.code === 'BUYER_COMMERCE_PROFILE_REQUIRED'
+            ? 422
+            : integrationError.retryable
+              ? 503
+              : 424,
+      },
     );
   }
 

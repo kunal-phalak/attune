@@ -13,7 +13,7 @@ function requireRole(context: CompilerContext, roles: readonly AttuneRole[]) {
 }
 
 export function editBlockers(context: CompilerContext) {
-  return requireRole(context, ['buyer']);
+  return requireRole(context, ['buyer', 'editor']);
 }
 
 export function conflictBlockers(context: CompilerContext) {
@@ -26,13 +26,21 @@ export function conflictBlockers(context: CompilerContext) {
 }
 
 export function requestBlockers(context: CompilerContext) {
-  const { authority, valid } = context;
+  const { valid, workspace } = context;
+  const currentRequest = workspace.manufacturingRequests.some((request) => {
+    const version = workspace.savedVersions.find(({ versionId }) => versionId === request.versionId);
+    return (
+      version?.sourceDraftVersion === workspace.draftVersion &&
+      request.status !== 'STALE' &&
+      request.status !== 'SUPERSEDED'
+    );
+  });
   return [
     ...requireRole(context, ['buyer']),
     ...(!valid
       ? [blocker('SPECIFICATION_INVALID', 'Resolve every hard conflict before requesting a quote.')]
       : []),
-    ...(authority.request
+    ...(currentRequest
       ? [
           blocker(
             'QUOTE_ALREADY_REQUESTED',
@@ -40,20 +48,26 @@ export function requestBlockers(context: CompilerContext) {
           ),
         ]
       : []),
-    ...(authority.quote
-      ? [blocker('QUOTE_ALREADY_EXISTS', 'This exact specification is already quoted.')]
-      : []),
   ];
 }
 
 export function quoteBlockers(context: CompilerContext) {
-  const { authority } = context;
+  const { authority, workspace } = context;
+  const activeRequest = workspace.manufacturingRequests.findLast(({ status }) =>
+    ['REQUESTED', 'UNDER_REVIEW', 'PROVIDER_REVIEW_REQUESTED', 'CHANGES_REQUESTED'].includes(status),
+  );
+  const activeQuote = activeRequest
+    ? workspace.quotes.some(
+        ({ requestId, status }) =>
+          requestId === activeRequest.requestId && status !== 'STALE' && status !== 'SUPERSEDED',
+      )
+    : false;
   return [
     ...requireRole(context, ['provider']),
-    ...(!authority.request
+    ...(!activeRequest || !authority.request
       ? [blocker('QUOTE_REQUEST_MISSING', 'The current specification has no buyer quote request.')]
       : []),
-    ...(authority.quote
+    ...(activeQuote
       ? [blocker('QUOTE_ALREADY_EXISTS', 'The current specification is already frozen and quoted.')]
       : []),
   ];

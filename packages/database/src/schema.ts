@@ -9,6 +9,7 @@ import type {
   Acceptance,
   AttuneRole,
   AttuneWorkspace,
+  BuyerCommerceProfile,
   CommerceLink,
   ExternalCommerceRecord,
   FrozenRevision,
@@ -16,6 +17,7 @@ import type {
   ProviderCapabilityProfile,
   Quote,
   QuoteRequest,
+  ShopifyCustomerBinding,
 } from '@attune/domain';
 import {
   boolean,
@@ -52,6 +54,33 @@ export const users = pgTable(
     createdAt,
   },
   (table) => [uniqueIndex('attune_users_auth_user_id_unique').on(table.authUserId)],
+);
+
+export const buyerCommerceProfiles = pgTable('buyer_commerce_profiles', {
+  principalId: text('principal_id').primaryKey(),
+  profile: jsonb('profile').$type<BuyerCommerceProfile>().notNull(),
+  createdAt,
+  updatedAt,
+});
+
+export const shopifyCustomerBindings = pgTable(
+  'shopify_customer_bindings',
+  {
+    buyerPrincipalId: text('buyer_principal_id').notNull(),
+    shopDomain: text('shop_domain').notNull(),
+    customerId: text('customer_id').notNull(),
+    defaultAddressId: text('default_address_id'),
+    binding: jsonb('binding').$type<ShopifyCustomerBinding>().notNull(),
+    createdAt,
+    updatedAt,
+  },
+  (table) => [
+    primaryKey({ columns: [table.buyerPrincipalId, table.shopDomain] }),
+    uniqueIndex('shopify_customer_bindings_customer_unique').on(
+      table.shopDomain,
+      table.customerId,
+    ),
+  ],
 );
 
 export const organizationMemberships = pgTable(

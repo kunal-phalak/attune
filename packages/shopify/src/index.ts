@@ -4,11 +4,19 @@ export {
   coreConfigurationFromEnvironment,
   CORE_REQUIRED_ENVIRONMENT,
   CUSTOMER_LOOKUP_ADMIN_SCOPES,
+  CUSTOMER_WRITE_ADMIN_SCOPES,
   DRAFT_ORDER_ADMIN_SCOPES,
   PRODUCT_ADMIN_SCOPES,
   PRODUCT_REQUIRED_ENVIRONMENT,
   PROVIDER_IDENTITY_SCOPES,
 } from './config';
+export {
+  CUSTOMER_ADDRESS_CREATE,
+  CUSTOMER_REREAD,
+  CUSTOMER_SET,
+  synchronizeCustomerWithAdmin,
+  synchronizeShopifyCustomer,
+} from './customers';
 export { inspectShopifyProvider } from './provider';
 export type {
   ShopifyCoreConfiguration,

@@ -43,7 +43,9 @@ function isCommandType(value: string): value is AttuneCommandType {
     [
       'apply_deterministic_repair',
       'move_slot',
+      'save_design_version',
       'request_quote',
+      'request_changes',
       'freeze_and_quote_revision',
       'accept_revision',
       'materialize_for_commerce',
@@ -143,9 +145,36 @@ function parseManufacturingConfiguration(value: unknown) {
 }
 
 function parseRequestQuoteCommand(value: Record<string, unknown>): AttuneCommand {
-  assertExactKeys(value, ['type', 'configuration'], 'request_quote command');
+  assertExactKeys(value, ['type', 'configuration', 'versionId'], 'request_quote command');
   return {
     type: 'request_quote',
+    ...(value.configuration
+      ? { configuration: parseManufacturingConfiguration(value.configuration) }
+      : {}),
+    ...(value.versionId
+      ? { versionId: requiredIdentifier(value.versionId, 'versionId') }
+      : {}),
+  };
+}
+
+function parseSaveVersionCommand(value: Record<string, unknown>): AttuneCommand {
+  assertExactKeys(value, ['type', 'name'], 'save_design_version command');
+  return {
+    type: 'save_design_version',
+    ...(value.name ? { name: requiredText(value.name, 'name', 80) } : {}),
+  };
+}
+
+function parseRequestChangesCommand(value: Record<string, unknown>): AttuneCommand {
+  assertExactKeys(
+    value,
+    ['type', 'requestId', 'note', 'configuration'],
+    'request_changes command',
+  );
+  return {
+    type: 'request_changes',
+    requestId: requiredIdentifier(value.requestId, 'requestId'),
+    ...(value.note ? { note: requiredText(value.note, 'note', 500) } : {}),
     ...(value.configuration
       ? { configuration: parseManufacturingConfiguration(value.configuration) }
       : {}),
@@ -192,8 +221,12 @@ function parseCommand(value: unknown, allowedTypes: ReadonlySet<AttuneCommandTyp
       return parseRepairCommand(value);
     case 'move_slot':
       return parseMoveCommand(value);
+    case 'save_design_version':
+      return parseSaveVersionCommand(value);
     case 'request_quote':
       return parseRequestQuoteCommand(value);
+    case 'request_changes':
+      return parseRequestChangesCommand(value);
     case 'freeze_and_quote_revision':
       return parseFinalizeQuoteCommand(value);
     case 'accept_revision':

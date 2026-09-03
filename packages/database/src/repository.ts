@@ -23,6 +23,8 @@ import {
   type AttuneCommand,
   type AttuneRole,
   type AttuneWorkspace,
+  type BuyerCommerceProfile,
+  type ShopifyCustomerBinding,
   type SketchDocument,
 } from '@attune/domain';
 import { getPlaneGcsSolver } from '@attune/domain/planegcs';
@@ -32,6 +34,7 @@ import { getDatabase } from './client';
 import {
   acceptances,
   agentInterventionObservations,
+  buyerCommerceProfiles,
   capabilityTransitions,
   changeReceipts,
   commandIdempotencyRecords,
@@ -48,6 +51,7 @@ import {
   providerCapabilityProfiles,
   quoteRequests,
   quotes,
+  shopifyCustomerBindings,
   users,
   workspaceFiles,
   workspaceMemberships,
@@ -85,6 +89,76 @@ export interface WorkspaceBundle {
   readonly rejections: readonly CommandRejection[];
   readonly observation: InterventionSummary;
   readonly humanInterventionsDetected: number;
+}
+
+export async function buyerCommerceProfile(
+  principalId: string,
+): Promise<BuyerCommerceProfile | null> {
+  const rows = await getDatabase()
+    .select({ profile: buyerCommerceProfiles.profile })
+    .from(buyerCommerceProfiles)
+    .where(eq(buyerCommerceProfiles.principalId, principalId))
+    .limit(1);
+  return rows[0]?.profile ?? null;
+}
+
+export async function saveBuyerCommerceProfile(
+  profile: BuyerCommerceProfile,
+): Promise<BuyerCommerceProfile> {
+  await getDatabase()
+    .insert(buyerCommerceProfiles)
+    .values({
+      principalId: profile.principalId,
+      profile,
+      updatedAt: profile.updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: buyerCommerceProfiles.principalId,
+      set: { profile, updatedAt: profile.updatedAt },
+    });
+  return profile;
+}
+
+export async function shopifyCustomerBinding(
+  buyerPrincipalId: string,
+  shopDomain: string,
+): Promise<ShopifyCustomerBinding | null> {
+  const rows = await getDatabase()
+    .select({ binding: shopifyCustomerBindings.binding })
+    .from(shopifyCustomerBindings)
+    .where(
+      and(
+        eq(shopifyCustomerBindings.buyerPrincipalId, buyerPrincipalId),
+        eq(shopifyCustomerBindings.shopDomain, shopDomain),
+      ),
+    )
+    .limit(1);
+  return rows[0]?.binding ?? null;
+}
+
+export async function saveShopifyCustomerBinding(
+  binding: ShopifyCustomerBinding,
+): Promise<ShopifyCustomerBinding> {
+  await getDatabase()
+    .insert(shopifyCustomerBindings)
+    .values({
+      buyerPrincipalId: binding.buyerPrincipalId,
+      shopDomain: binding.shopDomain,
+      customerId: binding.customerId,
+      defaultAddressId: binding.defaultAddressId,
+      binding,
+      updatedAt: binding.synchronizedAt,
+    })
+    .onConflictDoUpdate({
+      target: [shopifyCustomerBindings.buyerPrincipalId, shopifyCustomerBindings.shopDomain],
+      set: {
+        customerId: binding.customerId,
+        defaultAddressId: binding.defaultAddressId,
+        binding,
+        updatedAt: binding.synchronizedAt,
+      },
+    });
+  return binding;
 }
 
 export interface CreateSketchProjectRecordInput {
@@ -209,10 +283,12 @@ function sketchDocumentWithCurrentContract(workspace: AttuneWorkspace): SketchDo
 function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspace {
   const storedManufacturingRequests = Reflect.get(workspace, 'manufacturingRequests');
   const storedExternalCommerceRecords = Reflect.get(workspace, 'externalCommerceRecords');
+  const storedSavedVersions = Reflect.get(workspace, 'savedVersions');
+  const storedChangeRequests = Reflect.get(workspace, 'changeRequests');
   const storedGeometry = workspace.geometry;
   const current = {
     ...workspace,
-    scenarioVersion: 3 as const,
+    scenarioVersion: 4,
     authorityEpoch: workspace.authorityEpoch ?? 0,
     providerCapabilityProfile:
       workspace.providerCapabilityProfile ?? createJudgeProviderCapabilityProfile(),
@@ -237,35 +313,131 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       : createSpokeSeedDocument(),
   };
   const provider = providerBinding(current);
+  const savedVersions = Array.isArray(storedSavedVersions)
+    ? storedSavedVersions
+    : current.frozenRevisions.map((revision, index) => ({
+        versionId: `version:legacy:${revision.revisionId}`,
+        versionNumber: index + 1,
+        name: `Version ${index + 1}`,
+        sourceDraftVersion: revision.draftVersion,
+        specHash: revision.specHash,
+        geometry: revision.geometry,
+        sketchDocument: Reflect.get(revision, 'sketchDocument') ?? current.sketchDocument,
+        preview: { status: 'PENDING' as const },
+        savedAt: revision.frozenAt,
+      }));
+  const versionFor = (revisionId: string, specHash: string) =>
+    savedVersions.find(
+      (version) =>
+        version.specHash === specHash || `r${version.sourceDraftVersion}` === revisionId,
+    );
+  const manufacturingRequests = Array.isArray(storedManufacturingRequests)
+    ? storedManufacturingRequests.map((request, index) => {
+        const version = versionFor(request.specRevision, request.specHash);
+        return {
+          ...request,
+          versionId: Reflect.get(request, 'versionId') ?? version?.versionId ?? `version:legacy:${request.specRevision}`,
+          versionNumber: Reflect.get(request, 'versionNumber') ?? version?.versionNumber ?? index + 1,
+          requestRevision: Reflect.get(request, 'requestRevision') ?? 1,
+        };
+      })
+    : [];
   return {
     ...current,
+    savedVersions,
     quoteRequests: current.quoteRequests.map((request) => ({
       ...request,
       specRevision: Reflect.get(request, 'specRevision') ?? `r${request.draftVersion}`,
       provider: Reflect.get(request, 'provider') ?? provider,
+      versionId:
+        Reflect.get(request, 'versionId') ??
+        versionFor(
+          Reflect.get(request, 'specRevision') ?? `r${request.draftVersion}`,
+          request.specHash,
+        )?.versionId ??
+        `version:legacy:r${request.draftVersion}`,
+      versionNumber:
+        Reflect.get(request, 'versionNumber') ??
+        versionFor(
+          Reflect.get(request, 'specRevision') ?? `r${request.draftVersion}`,
+          request.specHash,
+        )?.versionNumber ??
+        1,
     })),
     frozenRevisions: current.frozenRevisions.map((revision) => ({
       ...revision,
       provider: Reflect.get(revision, 'provider') ?? provider,
       sketchDocument: Reflect.get(revision, 'sketchDocument') ?? current.sketchDocument,
+      versionId:
+        Reflect.get(revision, 'versionId') ??
+        versionFor(revision.revisionId, revision.specHash)?.versionId ??
+        `version:legacy:${revision.revisionId}`,
+      versionNumber:
+        Reflect.get(revision, 'versionNumber') ??
+        versionFor(revision.revisionId, revision.specHash)?.versionNumber ??
+        1,
     })),
     quotes: current.quotes.map((quote) => ({
       ...quote,
       provider: Reflect.get(quote, 'provider') ?? provider,
+      requestId:
+        Reflect.get(quote, 'requestId') ??
+        manufacturingRequests.find(
+          (request) =>
+            request.specRevision === quote.revisionId && request.specHash === quote.specHash,
+        )?.requestId ??
+        `quote-request:legacy:${quote.quoteId}`,
+      versionId:
+        Reflect.get(quote, 'versionId') ??
+        versionFor(quote.revisionId, quote.specHash)?.versionId ??
+        `version:legacy:${quote.revisionId}`,
+      versionNumber:
+        Reflect.get(quote, 'versionNumber') ??
+        versionFor(quote.revisionId, quote.specHash)?.versionNumber ??
+        1,
+      status:
+        Reflect.get(quote, 'status') ??
+        (current.acceptances.some(({ quoteId }) => quoteId === quote.quoteId)
+          ? ('ACCEPTED' as const)
+          : ('READY' as const)),
     })),
     acceptances: current.acceptances.map((acceptance) => ({
       acceptanceId: acceptance.acceptanceId,
       quoteId: acceptance.quoteId,
+      requestId:
+        Reflect.get(acceptance, 'requestId') ??
+        manufacturingRequests.find(
+          (request) =>
+            request.specRevision === acceptance.revisionId &&
+            request.specHash === acceptance.specHash,
+        )?.requestId ??
+        `quote-request:legacy:${acceptance.quoteId}`,
+      versionId:
+        Reflect.get(acceptance, 'versionId') ??
+        versionFor(acceptance.revisionId, acceptance.specHash)?.versionId ??
+        `version:legacy:${acceptance.revisionId}`,
+      versionNumber:
+        Reflect.get(acceptance, 'versionNumber') ??
+        versionFor(acceptance.revisionId, acceptance.specHash)?.versionNumber ??
+        1,
       revisionId: acceptance.revisionId,
       specHash: acceptance.specHash,
       provider: Reflect.get(acceptance, 'provider') ?? provider,
       acceptedAt: acceptance.acceptedAt,
     })),
-    manufacturingRequests: Array.isArray(storedManufacturingRequests)
-      ? storedManufacturingRequests
-      : [],
+    manufacturingRequests,
+    changeRequests: Array.isArray(storedChangeRequests) ? storedChangeRequests : [],
     externalCommerceRecords: Array.isArray(storedExternalCommerceRecords)
-      ? storedExternalCommerceRecords
+      ? storedExternalCommerceRecords.map((record) => {
+          const request = manufacturingRequests.find(
+            ({ requestId }) => requestId === record.requestId,
+          );
+          return {
+            ...record,
+            versionId: Reflect.get(record, 'versionId') ?? request?.versionId ?? `version:legacy:${record.specRevision}`,
+            versionNumber: Reflect.get(record, 'versionNumber') ?? request?.versionNumber ?? 1,
+          };
+        })
       : [],
   };
 }
@@ -511,7 +683,8 @@ async function initializeJudgeWorkspace(): Promise<void> {
   const current = currentRows[0]?.workspace;
   if (
     current &&
-    Reflect.get(current, 'scenarioVersion') === 3 &&
+    typeof Reflect.get(current, 'scenarioVersion') === 'number' &&
+    Number(Reflect.get(current, 'scenarioVersion')) >= 3 &&
     current.providerCapabilityProfile
   ) {
     await database.transaction(async (transaction) => {
@@ -637,7 +810,11 @@ async function initializeJudgeWorkspace(): Promise<void> {
       .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
       .limit(1);
     const stored = existing[0]?.workspace;
-    if (stored && Reflect.get(stored, 'scenarioVersion') !== 3) {
+    if (
+      stored &&
+      (typeof Reflect.get(stored, 'scenarioVersion') !== 'number' ||
+        Number(Reflect.get(stored, 'scenarioVersion')) < 3)
+    ) {
       await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
       await transaction
         .update(workspaces)
@@ -1758,4 +1935,24 @@ export async function workspaceRoles(workspaceId: string, userId: string) {
     )
     .limit(1);
   return rows[0]?.roles ?? [];
+}
+
+export async function userCanManageLiveblocksRoom(
+  roomId: string,
+  userId: string,
+): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ organizationId: organizationMemberships.organizationId })
+    .from(workspaces)
+    .innerJoin(projects, eq(projects.id, workspaces.projectId))
+    .innerJoin(
+      organizationMemberships,
+      and(
+        eq(organizationMemberships.organizationId, projects.organizationId),
+        eq(organizationMemberships.userId, userId),
+      ),
+    )
+    .where(eq(workspaces.liveblocksRoomId, roomId))
+    .limit(1);
+  return rows.length > 0;
 }

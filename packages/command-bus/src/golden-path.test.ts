@@ -76,6 +76,7 @@ const shopifyWebhook: TrustedExecutionContext = {
 };
 
 function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
+  const frozen = bus.inspect('provider').workspace.frozenRevisions[0];
   return {
     adminVerified: true,
     publicationVerified: true,
@@ -86,7 +87,7 @@ function commerceVerification(bus: AttuneCommandBus): CommerceVerification {
     storefrontUrl: 'https://attune-demo.myshopify.com/products/at-1042-r7',
     commitmentId: 'AT-1042',
     revisionId: 'r7',
-    specHash: hashSpecification(bus.inspect('provider').workspace),
+    specHash: frozen.specHash,
     title: 'Custom Control Faceplate — AT-1042 r7',
     sku: 'AT-1042-R7-LOT4',
     amountMinor: 240_000,
@@ -356,6 +357,8 @@ describe('manufacturing request and Shopify synchronization contract', () => {
       kind: 'SHOPIFY_DRAFT_ORDER' as const,
       status: 'OPEN',
       requestId: request.requestId,
+      versionId: request.versionId,
+      versionNumber: request.versionNumber,
       specRevision: request.specRevision,
       specHash: request.specHash,
       provider: request.provider,
@@ -399,6 +402,8 @@ describe('manufacturing request and Shopify synchronization contract', () => {
             kind: 'SHOPIFY_DRAFT_ORDER',
             status: 'OPEN',
             requestId: 'quote-request:forged',
+            versionId: 'version:forged',
+            versionNumber: 1,
             specRevision: 'r7',
             specHash: hashSpecification(bus.inspect('buyer').workspace),
             provider: providerBinding(bus.inspect('buyer').workspace),
@@ -415,8 +420,8 @@ describe('manufacturing request and Shopify synchronization contract', () => {
   });
 });
 
-describe('AT-1042 r7 to r8 authority path', () => {
-  it('freezes, accepts and materializes exact r7, then revokes current commerce authority at r8', () => {
+describe('AT-1042 exact-version authority path', () => {
+  it('preserves accepted Version 1 commerce while requiring a new lifecycle for the changed draft', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
     expect(compiledIds(bus, 'buyer')).toContain('apply_deterministic_repair');
 
@@ -458,7 +463,7 @@ describe('AT-1042 r7 to r8 authority path', () => {
     expect(r8.commerceLinks[0].revisionId).toBe('r7');
     expect(r8.quotes.some((quote) => quote.revisionId === 'r8')).toBe(false);
     expect(r8Capabilities).not.toContain('materialize_for_commerce');
-    expect(r8Capabilities).not.toContain('navigate_to_storefront');
+    expect(r8Capabilities).toContain('navigate_to_storefront');
     expect(() =>
       bus.execute(
         {

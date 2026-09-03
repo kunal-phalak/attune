@@ -22,6 +22,7 @@ export const REQUIRED_ENVIRONMENT = [
 export const PROVIDER_IDENTITY_SCOPES = ['read_locations'] as const;
 export const DRAFT_ORDER_ADMIN_SCOPES = ['write_draft_orders'] as const;
 export const CUSTOMER_LOOKUP_ADMIN_SCOPES = ['read_customers'] as const;
+export const CUSTOMER_WRITE_ADMIN_SCOPES = ['read_customers', 'write_customers'] as const;
 export const PRODUCT_ADMIN_SCOPES = [
   'write_products',
   'write_publications',
@@ -34,6 +35,7 @@ export const TARGET_ADMIN_SCOPES = [
   ...REQUIRED_ADMIN_SCOPES,
   'write_draft_orders',
   'read_customers',
+  'write_customers',
   'read_orders',
 ] as const;
 

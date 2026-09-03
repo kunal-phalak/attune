@@ -6,6 +6,23 @@ import { REQUIRED_ADMIN_SCOPES, TARGET_ADMIN_SCOPES } from './config';
 import { prepareDraftOrderInput } from './draft-orders';
 
 const NOW = '2026-08-31T00:00:00.000Z';
+const BUYER_PROFILE = {
+  principalId: 'user:buyer',
+  firstName: 'Asha',
+  lastName: 'Rao',
+  email: 'asha@example.test',
+  shippingAddress: {
+    firstName: 'Asha',
+    lastName: 'Rao',
+    address1: '12 Workshop Road',
+    city: 'Pune',
+    provinceCode: 'MH',
+    countryCode: 'IN',
+    postalCode: '411001',
+  },
+  billingSameAsShipping: true,
+  updatedAt: NOW,
+} as const;
 
 function quotedRequest() {
   const initial = createAt1042Workspace();
@@ -48,20 +65,24 @@ function quotedRequest() {
 }
 
 describe('Shopify Draft Order preparation', () => {
-  it('keeps unimplemented Draft Order permissions out of the live product preflight', () => {
+  it('keeps private Draft Order and customer scopes separate from public product materialization', () => {
     expect(REQUIRED_ADMIN_SCOPES).not.toContain('write_draft_orders');
     expect(TARGET_ADMIN_SCOPES).toEqual(
-      expect.arrayContaining(['write_draft_orders', 'read_customers', 'read_orders']),
+      expect.arrayContaining([
+        'write_draft_orders',
+        'read_customers',
+        'write_customers',
+        'read_orders',
+      ]),
     );
-    expect(TARGET_ADMIN_SCOPES).not.toEqual(
-      expect.arrayContaining(['write_orders', 'write_customers', 'write_inventory']),
-    );
+    expect(TARGET_ADMIN_SCOPES).not.toEqual(expect.arrayContaining(['write_orders']));
   });
 
   it('binds one custom line item to the exact request, revision, configuration, provider, and customer', () => {
     const workspace = quotedRequest();
     const prepared = prepareDraftOrderInput({
       customerId: 'gid://shopify/Customer/1042',
+      buyerProfile: BUYER_PROFILE,
       workspaceId: 'workspace:test-design',
       projectName: 'Test design',
       request: workspace.manufacturingRequests[0],
@@ -69,6 +90,13 @@ describe('Shopify Draft Order preparation', () => {
     });
 
     expect(prepared.purchasingEntity).toEqual({ customerId: 'gid://shopify/Customer/1042' });
+    expect(prepared.email).toBe('asha@example.test');
+    expect(prepared.shippingAddress).toMatchObject({
+      address1: '12 Workshop Road',
+      city: 'Pune',
+      countryCode: 'IN',
+      zip: '411001',
+    });
     expect(prepared.lineItems).toEqual([
       expect.objectContaining({ quantity: 1, originalUnitPrice: '8750.00' }),
     ]);
@@ -92,6 +120,7 @@ describe('Shopify Draft Order preparation', () => {
     expect(() =>
       prepareDraftOrderInput({
         customerId: 'gid://shopify/Customer/1042',
+        buyerProfile: BUYER_PROFILE,
         request: workspace.manufacturingRequests[0],
         quote: { ...workspace.quotes[0], specHash: 'drifted' },
       }),

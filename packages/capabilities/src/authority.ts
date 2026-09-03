@@ -32,29 +32,38 @@ function providerMatches(
 }
 
 export function deriveCurrentAuthority(workspace: AttuneWorkspace): CapabilityAuthority {
-  const specHash = hashSpecification(workspace);
-  const revisionId = `r${workspace.draftVersion}`;
-  const request = workspace.quoteRequests.find(
-    (candidate) =>
-      candidate.draftVersion === workspace.draftVersion &&
-      candidate.specHash === specHash &&
-      providerMatches(candidate, workspace),
+  const activeManufacturingRequest = workspace.manufacturingRequests.findLast(
+    ({ status }) => status !== 'SUPERSEDED' && status !== 'STALE',
   );
+  const request = activeManufacturingRequest
+    ? workspace.quoteRequests.find(
+        (candidate) =>
+          candidate.id === activeManufacturingRequest.requestId &&
+          providerMatches(candidate, workspace),
+      )
+    : undefined;
+  const specHash = request?.specHash ?? hashSpecification(workspace);
+  const revisionId = request?.specRevision ?? `r${workspace.draftVersion}`;
   const revision = workspace.frozenRevisions.find(
     (candidate) =>
-      candidate.revisionId === revisionId &&
+      (!activeManufacturingRequest ||
+        candidate.versionId === activeManufacturingRequest.versionId) &&
       candidate.specHash === specHash &&
       providerMatches(candidate, workspace),
   );
   const quote = workspace.quotes.find(
     (candidate) =>
-      candidate.revisionId === revisionId &&
+      (!activeManufacturingRequest ||
+        candidate.requestId === activeManufacturingRequest.requestId) &&
       candidate.specHash === specHash &&
+      candidate.status !== 'STALE' &&
+      candidate.status !== 'SUPERSEDED' &&
       providerMatches(candidate, workspace),
   );
   const externalDrift = workspace.externalCommerceRecords.some(
     (candidate) =>
-      candidate.specRevision === revisionId &&
+      (!activeManufacturingRequest ||
+        candidate.requestId === activeManufacturingRequest.requestId) &&
       candidate.specHash === specHash &&
       candidate.syncState === 'EXTERNAL_DRIFT',
   );
@@ -62,7 +71,7 @@ export function deriveCurrentAuthority(workspace: AttuneWorkspace): CapabilityAu
     ? undefined
     : workspace.acceptances.find(
         (candidate) =>
-          candidate.revisionId === revisionId &&
+          (!quote || candidate.quoteId === quote.quoteId) &&
           candidate.specHash === specHash &&
           providerMatches(candidate, workspace),
       );

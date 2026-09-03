@@ -129,27 +129,34 @@ export async function requireWorkspaceIdentity(
   workspaceId: string,
   role: AttuneRole,
 ): Promise<WorkspaceIdentity> {
+  const identity = await workspaceIdentity(workspaceId);
+  if (
+    !identity.roles.includes(role) &&
+    !(role === 'editor' && identity.roles.includes('buyer'))
+  ) {
+    throw new Error('WORKSPACE_ROLE_REQUIRED');
+  }
+  return identity;
+}
+
+export async function workspaceIdentity(workspaceId: string): Promise<WorkspaceIdentity> {
   const user = await currentAttuneUser();
   if (!user) throw new Error('AUTHENTICATION_REQUIRED');
   const identity = await identityForWorkspace(workspaceId, user.userId, user.principalId);
   if (!liveblocksConfigured()) {
-    if (!identity || !identity.roles.includes(role)) throw new Error('WORKSPACE_ROLE_REQUIRED');
+    if (!identity) throw new Error('WORKSPACE_ROLE_REQUIRED');
     return identity;
   }
   const roomId = await liveblocksRoomIdForWorkspace(workspaceId);
   const permission = await liveblocksRoomPermission(roomId, user.userId);
-  const roles: readonly AttuneRole[] = permission.write
-    ? identity?.roles.length
-      ? identity.roles
-      : ['buyer']
-    : permission.read
-      ? ['reviewer']
-      : [];
-  if (!roles.includes(role)) throw new Error('WORKSPACE_ROLE_REQUIRED');
+  if (!permission.read) throw new Error('WORKSPACE_ROLE_REQUIRED');
+  const roles = new Set<AttuneRole>(identity?.roles ?? []);
+  roles.add('reviewer');
+  if (permission.write) roles.add('editor');
   return {
     userId: user.userId,
     principalId: user.principalId,
     displayName: identity?.displayName ?? user.displayName,
-    roles,
+    roles: [...roles],
   };
 }

@@ -1,6 +1,7 @@
 export { databaseConfigured, getDatabase } from './client';
 export {
   agentDelegationForWorkspace,
+  buyerCommerceProfile,
   attuneUserForSharing,
   attuneUsersByIds,
   bumpWorkspaceAuthorityEpochForRoom,
@@ -26,9 +27,13 @@ export {
   readWorkspaceBundle,
   refreshAgentDelegation,
   resetJudgeWorkspace,
+  saveBuyerCommerceProfile,
+  saveShopifyCustomerBinding,
   reserveExternalMaterialization,
   revokeAgentDelegation,
   usersForLiveblocksRoom,
+  shopifyCustomerBinding,
+  userCanManageLiveblocksRoom,
   workspaceMembersForLiveblocksRoom,
   workspaceMemberUserIds,
   workspaceRoles,

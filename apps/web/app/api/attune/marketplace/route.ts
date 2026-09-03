@@ -1,10 +1,13 @@
-import { JUDGE_WORKSPACE_ID, readWorkspaceBundle } from '@attune/database';
-import { NextResponse } from 'next/server';
+import { readWorkspaceBundle } from '@attune/database';
 
 import { parseWorkspaceId } from '../../../../lib/attune-request';
 import { attuneErrorResponse, noStoreJson } from '../../../../lib/attune-response';
-import { inspectForHuman, synchronizeProviderProfile } from '../../../../lib/attune-runtime';
-import { requireWorkspaceIdentity } from '../../../../lib/auth/session';
+import {
+  inspectForCurrentHuman,
+  synchronizeProviderProfile,
+} from '../../../../lib/attune-runtime';
+import { requireWorkspaceIdentity, workspaceIdentity } from '../../../../lib/auth/session';
+import { manufacturingAccessForRoles } from '../../../../lib/manufacturing/access';
 import {
   DEMO_MARKETPLACE_PROVIDERS,
   shopifyProviderConnection,
@@ -22,19 +25,17 @@ function selectedLocation(value: unknown): string | undefined {
   return locationId;
 }
 
-async function marketplace(workspaceId: string, locationId?: string, refresh = false) {
-  await requireWorkspaceIdentity(workspaceId, 'buyer');
-  if (workspaceId !== JUDGE_WORKSPACE_ID) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'JUDGE_WORKSPACE_REQUIRED',
-          message: 'The live Shopify marketplace is enabled for the designated judge workspace.',
-        },
-      },
-      { status: 403 },
-    );
-  }
+async function marketplace(
+  workspaceId: string,
+  locationId?: string,
+  refresh = false,
+  updateSelection = false,
+) {
+  const identity = updateSelection
+    ? await requireWorkspaceIdentity(workspaceId, 'buyer')
+    : await workspaceIdentity(workspaceId);
+  const access = manufacturingAccessForRoles(identity.roles);
+  if (!access.browseMarketplace) throw new Error('WORKSPACE_ROLE_REQUIRED');
   const [connection, bundle] = await Promise.all([
     shopifyProviderConnection(refresh),
     readWorkspaceBundle(workspaceId),
@@ -44,8 +45,8 @@ async function marketplace(workspaceId: string, locationId?: string, refresh = f
     locationId ?? bundle.workspace.providerCapabilityProfile.shopify?.locationId,
     bundle.workspace.providerCapabilityProfile,
   );
-  await synchronizeProviderProfile(workspaceId, profile);
-  const view = await inspectForHuman(workspaceId);
+  if (access.configureRequest) await synchronizeProviderProfile(workspaceId, profile);
+  const view = await inspectForCurrentHuman(workspaceId);
   return noStoreJson({
     view,
     connection: {
@@ -59,7 +60,7 @@ async function marketplace(workspaceId: string, locationId?: string, refresh = f
       {
         id: profile.providerId,
         name: profile.providerName,
-        label: 'Live provider',
+        label: 'Live maker',
         connectionLabel: 'Shopify connected',
         locationName: profile.shopify?.locationName,
         address: profile.shopify?.address,
@@ -67,8 +68,8 @@ async function marketplace(workspaceId: string, locationId?: string, refresh = f
         longitude: profile.shopify?.longitude,
         fit: view.validation.valid ? 'Compatible' : 'Needs review',
         reason: view.validation.valid
-          ? 'The exact design satisfies this provider profile.'
-          : (view.validation.issues[0]?.message ?? 'Provider review is required.'),
+          ? 'The exact design satisfies this maker profile.'
+          : (view.validation.issues[0]?.message ?? 'Maker review is required.'),
       },
       ...DEMO_MARKETPLACE_PROVIDERS,
     ],
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const workspaceId = parseWorkspaceId(new URL(request.url).searchParams.get('workspace_id'));
-    return marketplace(workspaceId, selectedLocation(await request.json()), true);
+    return marketplace(workspaceId, selectedLocation(await request.json()), true, true);
   } catch (error) {
     return attuneErrorResponse(error);
   }

@@ -1,12 +1,11 @@
 import type { ForecastConsequence } from '@attune/command-bus';
 import {
   type AttuneWorkspace,
-  type PanelGeometry,
   type SelectionContext,
   type SketchDocument,
 } from '@attune/domain';
 
-export type CapabilityRole = 'buyer' | 'provider' | 'reviewer';
+export type CapabilityRole = 'buyer' | 'provider' | 'editor' | 'reviewer';
 
 export interface CapabilityView {
   readonly id: string;
@@ -38,125 +37,13 @@ export interface AttuneApiView {
     readonly liveblocksRoomId: string;
   };
   readonly specHash: string;
-  readonly workspace: {
-    readonly commitmentId: string;
-    readonly workspaceSeq: number;
-    readonly draftVersion: number;
-    readonly capabilityEpoch: number;
-    readonly authorityEpoch: number;
-    readonly fabricationQuantity: number;
-    readonly manufacturingConfiguration?: {
-      readonly material: 'acrylic' | 'aluminium';
-      readonly thicknessMm: number;
-      readonly finish: string;
-      readonly quantity: number;
-      readonly toleranceMm: number;
-    };
-    readonly providerCapabilityProfile: {
-      readonly profileId: string;
-      readonly providerId: string;
-      readonly providerName: string;
-      readonly version: string;
-      readonly source?: 'SHOPIFY_AND_ATTUNE' | 'DEMO';
-      readonly shopify?: {
-        readonly shopId: string;
-        readonly shopDomain: string;
-        readonly primaryDomain: string;
-        readonly locationId: string;
-        readonly locationName: string;
-        readonly address: string;
-        readonly city?: string;
-        readonly province?: string;
-        readonly country?: string;
-        readonly latitude?: number;
-        readonly longitude?: number;
-        readonly currency: string;
-        readonly verifiedAt: string;
-      };
-    };
-    readonly geometry: PanelGeometry;
-    readonly sketchDocument: SketchDocument;
-    readonly quoteRequests: readonly {
-      readonly id: string;
-      readonly draftVersion: number;
-      readonly specHash: string;
-      readonly specRevision: string;
-    }[];
-    readonly frozenRevisions: readonly {
-      readonly revisionId: string;
-      readonly specHash: string;
-      readonly provider: {
-        readonly providerId: string;
-        readonly profileId: string;
-        readonly profileVersion: string;
-      };
-      readonly frozenAt: string;
-    }[];
-    readonly quotes: readonly {
-      readonly quoteId: string;
-      readonly revisionId: string;
-      readonly specHash: string;
-      readonly amountMinor: number;
-      readonly currency: string;
-      readonly panelCount: number;
-      readonly commerceLotQuantity: number;
-      readonly leadTimeDays?: number;
-      readonly validUntil?: string;
-    }[];
-    readonly acceptances: readonly {
-      readonly acceptanceId: string;
-      readonly quoteId: string;
-      readonly revisionId: string;
-      readonly specHash: string;
-    }[];
-    readonly manufacturingRequests: readonly {
-      readonly requestId: string;
-      readonly specRevision: string;
-      readonly specHash: string;
-      readonly provider: {
-        readonly providerId: string;
-        readonly profileId: string;
-        readonly profileVersion: string;
-      };
-      readonly visibility: 'PRIVATE' | 'DISCOVERABLE';
-      readonly status:
-        | 'REQUESTED'
-        | 'UNDER_REVIEW'
-        | 'QUOTE_READY'
-        | 'QUOTE_CHANGED'
-        | 'CHECKOUT_READY'
-        | 'ORDERED'
-        | 'PROVIDER_REVIEW_REQUESTED'
-        | 'QUOTED'
-        | 'ACCEPTED'
-        | 'COMMERCE_READY'
-        | 'EXTERNAL_DRIFT';
-      readonly requestedAt: string;
-      readonly updatedAt: string;
-      readonly configuration?: {
-        readonly material: 'acrylic' | 'aluminium';
-        readonly thicknessMm: number;
-        readonly finish: string;
-        readonly quantity: number;
-        readonly toleranceMm: number;
-      };
-      readonly shopDomain?: string;
-      readonly shopifyLocationId?: string;
-    }[];
-    readonly externalCommerceRecords: readonly {
-      readonly externalId: string;
-      readonly kind: 'SHOPIFY_DRAFT_ORDER';
-      readonly status: string;
-      readonly requestId: string;
-      readonly specRevision: string;
-      readonly specHash: string;
-      readonly syncState: 'IN_SYNC' | 'EXTERNAL_DRIFT';
-      readonly synchronizedAt: string;
-      readonly name?: string;
-      readonly invoiceUrl?: string;
-    }[];
-    readonly commerceLinks: readonly CommerceLinkView[];
-  };
+  readonly workspace: AttuneWorkspace;
+  readonly versionPreviews: readonly {
+    readonly versionId: string;
+    readonly status: 'PENDING' | 'STORED' | 'UNCONFIGURED' | 'FAILED';
+    readonly url?: string;
+    readonly errorCode?: string;
+  }[];
   readonly validation: {
     readonly valid: boolean;
     readonly issues: readonly {

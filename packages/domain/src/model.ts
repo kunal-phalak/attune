@@ -8,7 +8,40 @@ export type CommandOrigin =
   | 'shopify_webhook'
   | 'shopify_reconciliation';
 
-export type AttuneRole = 'buyer' | 'provider' | 'reviewer';
+export type AttuneRole = 'buyer' | 'provider' | 'editor' | 'reviewer';
+
+export interface CommerceAddress {
+  readonly firstName: string;
+  readonly lastName: string;
+  readonly company?: string;
+  readonly address1: string;
+  readonly address2?: string;
+  readonly city: string;
+  readonly provinceCode?: string;
+  readonly countryCode: string;
+  readonly postalCode: string;
+  readonly phone?: string;
+}
+
+export interface BuyerCommerceProfile {
+  readonly principalId: string;
+  readonly firstName: string;
+  readonly lastName: string;
+  readonly email: string;
+  readonly phone?: string;
+  readonly shippingAddress: CommerceAddress;
+  readonly billingSameAsShipping: boolean;
+  readonly billingAddress?: CommerceAddress;
+  readonly updatedAt: string;
+}
+
+export interface ShopifyCustomerBinding {
+  readonly buyerPrincipalId: string;
+  readonly shopDomain: string;
+  readonly customerId: string;
+  readonly defaultAddressId?: string;
+  readonly synchronizedAt: string;
+}
 
 export type CapabilityLimit = number | 'ANY' | 'UNSPECIFIED';
 
@@ -191,6 +224,8 @@ export interface ValidationResult {
 
 export interface QuoteRequest {
   readonly id: string;
+  readonly versionId: string;
+  readonly versionNumber: number;
   readonly draftVersion: number;
   readonly specHash: string;
   readonly specRevision: string;
@@ -198,8 +233,29 @@ export interface QuoteRequest {
   readonly requestedAt: string;
 }
 
+export type VersionPreviewStatus = 'PENDING' | 'STORED' | 'UNCONFIGURED' | 'FAILED';
+
+export interface SavedDesignVersion {
+  readonly versionId: string;
+  readonly versionNumber: number;
+  readonly name: string;
+  readonly sourceDraftVersion: number;
+  readonly specHash: string;
+  readonly geometry: PanelGeometry;
+  readonly sketchDocument: SketchDocument;
+  readonly preview: {
+    readonly key?: string;
+    readonly status: VersionPreviewStatus;
+    readonly storedAt?: string;
+    readonly errorCode?: string;
+  };
+  readonly savedAt: string;
+}
+
 export interface FrozenRevision {
   readonly revisionId: string;
+  readonly versionId: string;
+  readonly versionNumber: number;
   readonly draftVersion: number;
   readonly specHash: string;
   readonly provider: ProviderBinding;
@@ -210,6 +266,9 @@ export interface FrozenRevision {
 
 export interface Quote {
   readonly quoteId: string;
+  readonly requestId: string;
+  readonly versionId: string;
+  readonly versionNumber: number;
   readonly revisionId: string;
   readonly specHash: string;
   readonly provider: ProviderBinding;
@@ -219,11 +278,15 @@ export interface Quote {
   readonly commerceLotQuantity: number;
   readonly leadTimeDays?: number;
   readonly validUntil?: string;
+  readonly status: 'READY' | 'STALE' | 'SUPERSEDED' | 'ACCEPTED';
   readonly quotedAt: string;
 }
 
 export interface Acceptance {
   readonly acceptanceId: string;
+  readonly requestId: string;
+  readonly versionId: string;
+  readonly versionNumber: number;
   readonly quoteId: string;
   readonly revisionId: string;
   readonly specHash: string;
@@ -244,10 +307,17 @@ export type ManufacturingRequestStatus =
   | 'QUOTED'
   | 'ACCEPTED'
   | 'COMMERCE_READY'
-  | 'EXTERNAL_DRIFT';
+  | 'EXTERNAL_DRIFT'
+  | 'CHANGES_REQUESTED'
+  | 'STALE'
+  | 'SUPERSEDED';
 
 export interface ManufacturingRequest {
   readonly requestId: string;
+  readonly versionId: string;
+  readonly versionNumber: number;
+  readonly requestRevision: number;
+  readonly supersedesRequestId?: string;
   readonly specRevision: string;
   readonly specHash: string;
   readonly provider: ProviderBinding;
@@ -262,11 +332,23 @@ export interface ManufacturingRequest {
   readonly updatedAt: string;
 }
 
+export interface ChangeRequest {
+  readonly changeRequestId: string;
+  readonly requestId: string;
+  readonly fromVersionId: string;
+  readonly status: 'OPEN' | 'RESOLVED';
+  readonly requestedBy: 'buyer' | 'provider';
+  readonly note?: string;
+  readonly createdAt: string;
+}
+
 export interface ExternalCommerceSnapshot {
   readonly externalId: string;
   readonly kind: 'SHOPIFY_DRAFT_ORDER';
   readonly status: string;
   readonly requestId: string;
+  readonly versionId: string;
+  readonly versionNumber: number;
   readonly specRevision: string;
   readonly specHash: string;
   readonly provider: ProviderBinding;
@@ -323,11 +405,13 @@ export interface AttuneWorkspace {
   readonly providerCapabilityProfile: ProviderCapabilityProfile;
   readonly geometry: PanelGeometry;
   readonly sketchDocument: SketchDocument;
+  readonly savedVersions: readonly SavedDesignVersion[];
   readonly quoteRequests: readonly QuoteRequest[];
   readonly frozenRevisions: readonly FrozenRevision[];
   readonly quotes: readonly Quote[];
   readonly acceptances: readonly Acceptance[];
   readonly manufacturingRequests: readonly ManufacturingRequest[];
+  readonly changeRequests: readonly ChangeRequest[];
   readonly externalCommerceRecords: readonly ExternalCommerceRecord[];
   readonly commerceLinks: readonly CommerceLink[];
 }
@@ -350,6 +434,22 @@ export type AttuneCommand =
       readonly type: 'request_quote';
       readonly configuration?: ManufacturingConfiguration;
       readonly buyerPrincipalId?: string;
+      readonly versionId?: string;
+    }
+  | { readonly type: 'save_design_version'; readonly name?: string }
+  | {
+      readonly type: 'set_version_preview';
+      readonly versionId: string;
+      readonly status: VersionPreviewStatus;
+      readonly key?: string;
+      readonly storedAt?: string;
+      readonly errorCode?: string;
+    }
+  | {
+      readonly type: 'request_changes';
+      readonly requestId: string;
+      readonly note?: string;
+      readonly configuration?: ManufacturingConfiguration;
     }
   | {
       readonly type: 'freeze_and_quote_revision';

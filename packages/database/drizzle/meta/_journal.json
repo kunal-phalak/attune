@@ -36,6 +36,13 @@
       "when": 1788380639318,
       "tag": "0004_agent_delegation_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788435048477,
+      "tag": "0005_quick_tarot",
+      "breakpoints": true
     }
   ]
 }

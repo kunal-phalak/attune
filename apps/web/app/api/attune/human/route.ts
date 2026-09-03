@@ -3,7 +3,7 @@ import { attuneErrorResponse, noStoreJson } from '../../../../lib/attune-respons
 import {
   executeHumanCommand,
   executeHumanSemanticCommand,
-  inspectForHuman,
+  inspectForCurrentHuman,
 } from '../../../../lib/attune-runtime';
 import { ServerTimingTrace } from '../../../../lib/server-timing';
 
@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const timing = new ServerTimingTrace();
   try {
     const workspaceId = parseWorkspaceId(new URL(request.url).searchParams.get('workspace_id'));
-    return timing.apply(noStoreJson(await inspectForHuman(workspaceId, 'buyer', timing.record)));
+    return timing.apply(noStoreJson(await inspectForCurrentHuman(workspaceId, timing.record)));
   } catch (error) {
     return timing.apply(attuneErrorResponse(error));
   }
@@ -30,7 +30,9 @@ export async function POST(request: Request) {
       'set_tangent',
       'apply_deterministic_repair',
       'move_slot',
+      'save_design_version',
       'request_quote',
+      'request_changes',
       'accept_revision',
       'create_geometry',
       'edit_geometry',
@@ -51,8 +53,12 @@ export async function POST(request: Request) {
     return timing.apply(
       noStoreJson(
         isSketchCommand(input.command)
-          ? await executeHumanSemanticCommand(workspaceId, input, 'buyer', timing.record)
-          : await executeHumanCommand(workspaceId, input),
+          ? await executeHumanSemanticCommand(workspaceId, input, 'editor', timing.record)
+          : await executeHumanCommand(
+              workspaceId,
+              input,
+              input.command.type === 'save_design_version' ? 'editor' : 'buyer',
+            ),
       ),
     );
   } catch (error) {

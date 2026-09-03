@@ -1,10 +1,7 @@
 import {
   databaseConfigured,
   ensureJudgeWorkspace,
-  identityForWorkspace,
-  liveblocksRoomIdForWorkspace,
   readWorkspaceBundle,
-  type WorkspaceIdentity,
 } from '@attune/database';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
@@ -12,8 +9,8 @@ import { notFound, redirect } from 'next/navigation';
 import type { ManufacturingSurface } from '../../../components/manufacturing-flow';
 import { WorkspaceProduct } from '../../../components/workspace-product';
 import { viewForTrustedBundle } from '../../../lib/attune-runtime';
-import { currentAttuneUser } from '../../../lib/auth/session';
-import { liveblocksConfigured, liveblocksRoomPermission } from '../../../lib/liveblocks/server';
+import { currentAttuneUser, workspaceIdentity } from '../../../lib/auth/session';
+import { liveblocksConfigured } from '../../../lib/liveblocks/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,32 +57,32 @@ export default async function WorkspacePage({
   if (user.judge) await ensureJudgeWorkspace();
   const { workspaceId: encodedWorkspaceId } = await params;
   const workspaceId = decodeURIComponent(encodedWorkspaceId);
-  const membership = await identityForWorkspace(workspaceId, user.userId, user.principalId);
-  let identity: WorkspaceIdentity | null = membership;
-  if (liveblocksConfigured()) {
-    const roomId = await liveblocksRoomIdForWorkspace(workspaceId).catch(() => null);
-    if (!roomId) notFound();
-    const permission = await liveblocksRoomPermission(roomId, user.userId);
-    if (!permission.read) notFound();
-    identity = {
-      userId: user.userId,
-      principalId: user.principalId,
-      displayName: membership?.displayName ?? user.displayName,
-      roles: permission.write
-        ? membership?.roles.length
-          ? membership.roles
-          : ['buyer']
-        : ['reviewer'],
-    };
-  }
+  const identity = await workspaceIdentity(workspaceId).catch(() => null);
   if (!identity) notFound();
   const parameters = await searchParams;
   const requestedPerspective = parameters.perspective;
-  const perspective = requestedPerspective === 'provider' ? 'provider' : 'buyer';
-  if (requestedPerspective === 'provider' && !identity.roles.includes('provider')) notFound();
+  const role =
+    requestedPerspective === 'provider' && identity.roles.includes('provider')
+      ? 'provider'
+      : identity.roles.includes('buyer')
+        ? 'buyer'
+        : identity.roles.includes('editor')
+          ? 'editor'
+          : 'reviewer';
+  const perspective = role === 'provider' ? 'provider' : 'buyer';
   const bundle = await readWorkspaceBundle(workspaceId);
-  const initialView = await viewForTrustedBundle(bundle, perspective, identity);
-  const initialSurface = manufacturingSurface(parameters.surface);
+  const initialView = await viewForTrustedBundle(bundle, role, identity);
+  const requestedSurface = manufacturingSurface(parameters.surface);
+  const initialSurface =
+    role === 'buyer'
+      ? requestedSurface === 'provider_requests' || requestedSurface === 'provider_profile'
+        ? 'design'
+        : requestedSurface
+      : role === 'provider'
+        ? requestedSurface === 'marketplace' || requestedSurface === 'buyer_orders'
+          ? 'design'
+          : requestedSurface
+        : 'design';
   return (
     <WorkspaceProduct
       workspaceId={workspaceId}
@@ -98,7 +95,7 @@ export default async function WorkspacePage({
       actor={{
         id: user.userId,
         name: user.displayName,
-        role: perspective,
+        role,
       }}
     />
   );

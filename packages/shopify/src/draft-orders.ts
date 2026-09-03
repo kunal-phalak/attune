@@ -1,4 +1,4 @@
-import type { ManufacturingRequest, Quote } from '@attune/domain';
+import type { BuyerCommerceProfile, CommerceAddress, ManufacturingRequest, Quote } from '@attune/domain';
 
 import { ShopifyIntegrationError } from './errors';
 
@@ -8,6 +8,9 @@ export const DRAFT_ORDER_CREATE = `#graphql
       draftOrder {
         id name status invoiceUrl updatedAt
         customer { id }
+        email
+        shippingAddress { address1 city countryCodeV2 zip }
+        billingAddress { address1 city countryCodeV2 zip }
         customAttributes { key value }
         lineItems(first: 10) {
           nodes { id title quantity originalUnitPriceSet { shopMoney { amount currencyCode } } }
@@ -32,6 +35,9 @@ export const DRAFT_ORDER_REREAD = `#graphql
     draftOrder(id: $id) {
       id name status invoiceUrl updatedAt
       customer { id }
+      email
+      shippingAddress { address1 city countryCodeV2 zip }
+      billingAddress { address1 city countryCodeV2 zip }
       customAttributes { key value }
       lineItems(first: 10) {
         nodes { id title quantity originalUnitPriceSet { shopMoney { amount currencyCode } } }
@@ -48,11 +54,27 @@ export const DRAFT_ORDER_WEBHOOK_TOPICS = [
 ] as const;
 
 export interface DraftOrderPreparation {
-  readonly customerId?: string;
+  readonly customerId: string;
+  readonly buyerProfile: BuyerCommerceProfile;
   readonly workspaceId?: string;
   readonly projectName?: string;
   readonly request: ManufacturingRequest;
   readonly quote: Quote;
+}
+
+function mailingAddressInput(address: CommerceAddress) {
+  return {
+    firstName: address.firstName,
+    lastName: address.lastName,
+    ...(address.company ? { company: address.company } : {}),
+    address1: address.address1,
+    ...(address.address2 ? { address2: address.address2 } : {}),
+    city: address.city,
+    ...(address.provinceCode ? { provinceCode: address.provinceCode } : {}),
+    countryCode: address.countryCode.toUpperCase(),
+    zip: address.postalCode,
+    ...(address.phone ? { phone: address.phone } : {}),
+  };
 }
 
 function attributes(input: DraftOrderPreparation) {
@@ -62,6 +84,8 @@ function attributes(input: DraftOrderPreparation) {
   return [
     { key: 'attune_workspace_id', value: input.workspaceId ?? 'legacy-fixture' },
     { key: 'attune_request_id', value: requestId },
+    { key: 'attune_version_id', value: request.versionId },
+    { key: 'attune_version_number', value: String(request.versionNumber) },
     { key: 'attune_revision', value: specRevision },
     { key: 'attune_spec_hash', value: specHash },
     { key: 'attune_provider_id', value: provider.providerId },
@@ -89,13 +113,20 @@ export function prepareDraftOrderInput(input: DraftOrderPreparation) {
   }
 
   return {
-    ...(input.customerId ? { purchasingEntity: { customerId: input.customerId } } : {}),
-    note: `Attune ${request.requestId} · ${request.specRevision}`,
-    tags: ['attune', 'custom-manufacturing', request.specRevision],
+    purchasingEntity: { customerId: input.customerId },
+    email: input.buyerProfile.email,
+    shippingAddress: mailingAddressInput(input.buyerProfile.shippingAddress),
+    billingAddress: mailingAddressInput(
+      input.buyerProfile.billingSameAsShipping
+        ? input.buyerProfile.shippingAddress
+        : (input.buyerProfile.billingAddress ?? input.buyerProfile.shippingAddress),
+    ),
+    note: `Attune ${request.requestId} · Version ${request.versionNumber}`,
+    tags: ['attune', 'custom-manufacturing', `version-${request.versionNumber}`],
     customAttributes: attributes(input),
     lineItems: [
       {
-        title: `Custom fabrication — ${input.projectName ?? 'Attune design'} — ${request.specRevision}`,
+        title: `Custom fabrication — ${input.projectName ?? 'Attune design'} — Version ${request.versionNumber}`,
         quantity: 1,
         originalUnitPrice: (quote.amountMinor / 100).toFixed(2),
         customAttributes: attributes(input),

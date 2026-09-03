@@ -8,6 +8,7 @@ import {
 import {
   agentDelegationForWorkspace,
   advanceDelegationObservation,
+  buyerCommerceProfile,
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
@@ -18,6 +19,8 @@ import {
   refreshAgentDelegation,
   reserveExternalMaterialization,
   revokeAgentDelegation,
+  saveShopifyCustomerBinding,
+  shopifyCustomerBinding,
   workspaceMemberUserIds,
   type WorkspaceBundle,
   type WorkspaceIdentity,
@@ -30,7 +33,9 @@ import {
   rankConstraintCandidates,
   type AttuneCommand,
   type AttuneRole,
+  type AttuneWorkspace,
   type ProviderCapabilityProfile,
+  type SavedDesignVersion,
   type SelectionContextRequest,
 } from '@attune/domain';
 import { getPlaneGcsSolver } from '@attune/domain/planegcs';
@@ -38,6 +43,7 @@ import {
   createAndVerifyDraftOrder,
   materializeRevision,
   ShopifyIntegrationError,
+  synchronizeShopifyCustomer,
 } from '@attune/shopify';
 import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp';
 
@@ -51,8 +57,15 @@ import {
   delegationStatus,
   type AgentDelegationStatus,
 } from './agent-delegation';
-import { requireWorkspaceIdentity } from './auth/session';
+import { requireWorkspaceIdentity, workspaceIdentity } from './auth/session';
 import { attuneActivityNotification } from './liveblocks/notifications';
+import { buyerCommerceProfileComplete } from './manufacturing/buyer-commerce';
+import {
+  PreviewStorage,
+  PreviewStorageConfigurationError,
+  previewStorageConfigured,
+} from './manufacturing/preview-storage';
+import { renderVersionPreview } from './manufacturing/version-preview';
 import {
   getLiveblocks,
   liveblocksConfigured,
@@ -296,6 +309,65 @@ async function notifyWorkspace(input: {
   );
 }
 
+async function ensureVersionPreview(
+  workspaceId: string,
+  version: SavedDesignVersion | undefined,
+): Promise<void> {
+  if (!version || version.preview.status === 'STORED') return;
+  let command: Extract<AttuneCommand, { type: 'set_version_preview' }>;
+  try {
+    const body = await renderVersionPreview(version);
+    const key = await new PreviewStorage().putVersionPreview({ workspaceId, version, body });
+    command = {
+      type: 'set_version_preview',
+      versionId: version.versionId,
+      status: 'STORED',
+      key,
+      storedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    command = {
+      type: 'set_version_preview',
+      versionId: version.versionId,
+      status: error instanceof PreviewStorageConfigurationError ? 'UNCONFIGURED' : 'FAILED',
+      errorCode:
+        error instanceof PreviewStorageConfigurationError
+          ? error.code
+          : 'PREVIEW_STORAGE_WRITE_FAILED',
+    };
+  }
+  const current = await readWorkspaceBundle(workspaceId);
+  await executePersistedCommand({
+    workspaceId,
+    command,
+    envelope: {
+      commandId: `version-preview-${crypto.randomUUID()}`,
+      expectedWorkspaceSeq: current.workspace.workspaceSeq,
+      expectedCapabilityEpoch: current.workspace.capabilityEpoch,
+      expectedAuthorityEpoch: current.workspace.authorityEpoch,
+      expectedSpecHash: hashSpecification(current.workspace),
+    },
+    context: trustedSystemContext(workspaceId),
+  });
+}
+
+function versionForCommand(
+  workspace: AttuneWorkspace,
+  command: AttuneCommand,
+): SavedDesignVersion | undefined {
+  if (command.type === 'request_quote' && command.versionId) {
+    return workspace.savedVersions.find(({ versionId }) => versionId === command.versionId);
+  }
+  if (
+    command.type === 'save_design_version' ||
+    command.type === 'request_quote' ||
+    command.type === 'request_changes'
+  ) {
+    return workspace.savedVersions.at(-1);
+  }
+  return undefined;
+}
+
 function impactMetrics(bundle: WorkspaceBundle) {
   const buildableReceipt = bundle.receipts.find(
     ({ validationBefore, validationAfter }) => !validationBefore.valid && validationAfter.valid,
@@ -356,15 +428,60 @@ async function viewForBundle(
   const selection = createSelectionContext(solve.document);
   const bus = new AttuneCommandBus(bundle.workspace, undefined, solver, {}, timing);
   const inspection = bus.inspect(role);
-  const delegatedCapabilities = delegation
-    ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
-    : inspection.capabilities;
   const authorityCapabilityIds = availableCapabilityIdsForWorkspaceAuthority(
     bundle.workspace,
     authorityRoles,
   );
+  const authorityCapabilityIdSet = new Set(authorityCapabilityIds);
+  const authorizedCapabilities = inspection.capabilities.filter(({ id }) =>
+    authorityCapabilityIdSet.has(id),
+  );
+  const delegatedCapabilities = delegation
+    ? authorizedCapabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
+    : authorizedCapabilities;
+  const businessAuthority = authorityRoles.some(
+    (candidate) => candidate === 'buyer' || candidate === 'provider',
+  );
+  const visibleWorkspace = businessAuthority
+    ? bundle.workspace
+    : {
+        ...bundle.workspace,
+        quoteRequests: [],
+        frozenRevisions: [],
+        quotes: [],
+        acceptances: [],
+        manufacturingRequests: [],
+        changeRequests: [],
+        externalCommerceRecords: [],
+        commerceLinks: [],
+      };
+  const previewStorage = new PreviewStorage();
+  const versionPreviews = await Promise.all(
+    visibleWorkspace.savedVersions.map(async (version) => {
+      if (!previewStorageConfigured()) {
+        return {
+          versionId: version.versionId,
+          status: 'UNCONFIGURED' as const,
+          errorCode: 'PREVIEW_STORAGE_UNCONFIGURED',
+        };
+      }
+      if (version.preview.status !== 'STORED' || !version.preview.key) {
+        return {
+          versionId: version.versionId,
+          status: version.preview.status,
+          ...(version.preview.errorCode ? { errorCode: version.preview.errorCode } : {}),
+        };
+      }
+      return {
+        versionId: version.versionId,
+        status: 'STORED' as const,
+        url: await previewStorage.getSignedPreviewUrl(version.preview.key),
+      };
+    }),
+  );
   const view = {
     ...inspection,
+    workspace: visibleWorkspace,
     capabilities: delegatedCapabilities,
     perspective: role,
     authority: {
@@ -384,9 +501,11 @@ async function viewForBundle(
       fileName: bundle.fileName,
       liveblocksRoomId: bundle.liveblocksRoomId,
     },
+    versionPreviews,
     frontiers: {
       buyer: bus.inspect('buyer').frontier,
       provider: bus.inspect('provider').frontier,
+      editor: bus.inspect('editor').frontier,
       reviewer: bus.inspect('reviewer').frontier,
     },
     repairs: compareValidChanges(bundle.workspace),
@@ -601,6 +720,22 @@ export function inspectForHuman(
   return inspectHuman(workspaceId, role, timing);
 }
 
+export async function inspectForCurrentHuman(
+  workspaceId: string,
+  timing?: ServerTimingRecorder,
+) {
+  const identity = await workspaceIdentity(workspaceId);
+  const role: AttuneRole = identity.roles.includes('buyer')
+    ? 'buyer'
+    : identity.roles.includes('provider')
+      ? 'provider'
+      : identity.roles.includes('editor')
+        ? 'editor'
+        : 'reviewer';
+  const bundle = await readWorkspaceBundle(workspaceId, undefined, undefined, timing);
+  return viewForTrustedBundle(bundle, role, identity);
+}
+
 export function inspectForProvider(workspaceId: string) {
   return inspectHuman(workspaceId, 'provider');
 }
@@ -632,12 +767,29 @@ async function executeWithContext(
   );
 }
 
+async function requireProfileForLiveRequest(workspaceId: string, principalId: string) {
+  const bundle = await readWorkspaceBundle(workspaceId);
+  const profile = bundle.workspace.providerCapabilityProfile;
+  if (profile.source !== 'SHOPIFY_AND_ATTUNE' || !profile.shopify) return null;
+  const buyer = await buyerCommerceProfile(principalId);
+  if (!buyerCommerceProfileComplete(buyer)) {
+    throw new ShopifyIntegrationError(
+      'BUYER_COMMERCE_PROFILE_REQUIRED',
+      'Complete buyer details before sending this request to a live Shopify maker.',
+    );
+  }
+  return buyer;
+}
+
 export async function executeAgentCommand(
   workspaceId: string,
   perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   input: CommandExecutionInput,
 ) {
   const context = await trustedDelegatedContext(workspaceId, perspective, input.command.type);
+  if (input.command.type === 'request_quote') {
+    await requireProfileForLiveRequest(workspaceId, context.principalId);
+  }
   const result = await executeWithContext(
     workspaceId,
     input.command.type === 'request_quote'
@@ -645,6 +797,8 @@ export async function executeAgentCommand(
       : input,
     context,
   );
+  const version = versionForCommand(result.workspace, input.command);
+  if (version) await ensureVersionPreview(workspaceId, version);
   if (input.command.type === 'request_quote') {
     await notifyWorkspace({
       workspaceId,
@@ -663,7 +817,7 @@ export async function executeAgentCommand(
       route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
     }).catch(() => undefined);
   }
-  return result;
+  return version ? inspectForDelegatedAgent(workspaceId, perspective) : result;
 }
 
 export async function executeSemanticCommand(
@@ -819,6 +973,9 @@ export async function executeHumanCommand(
   role: AttuneRole = 'buyer',
 ) {
   const context = await trustedHumanContext(workspaceId, role);
+  if (input.command.type === 'request_quote') {
+    await requireProfileForLiveRequest(workspaceId, context.principalId);
+  }
   const result = await executeWithContext(
     workspaceId,
     input.command.type === 'request_quote'
@@ -826,6 +983,8 @@ export async function executeHumanCommand(
       : input,
     context,
   );
+  const version = versionForCommand(result.workspace, input.command);
+  if (version) await ensureVersionPreview(workspaceId, version);
   if (input.command.type === 'request_quote') {
     await notifyWorkspace({
       workspaceId,
@@ -844,7 +1003,7 @@ export async function executeHumanCommand(
       route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
     }).catch(() => undefined);
   }
-  return result;
+  return version ? inspectHuman(workspaceId, role) : result;
 }
 
 export async function synchronizeProviderProfile(
@@ -921,27 +1080,61 @@ export async function finalizeProviderQuote(workspaceId: string, input: CommandE
         )
       : undefined;
     if (!quote || !request) throw new Error('The finalized quote is not bound to a request.');
-    stage = 'Shopify Draft Order creation and reread';
-    const snapshot = await createAndVerifyDraftOrder({
+    await ensureVersionPreview(
       workspaceId,
-      projectName: quotedView.product.projectName,
-      request,
-      quote,
-    });
-    stage = 'Draft Order reconciliation';
-    const current = await readWorkspaceBundle(workspaceId);
-    await executePersistedCommand({
-      workspaceId,
-      command: { type: 'synchronize_shopify_draft_order', snapshot },
-      envelope: {
-        commandId: `shopify-draft-order-${crypto.randomUUID()}`,
-        expectedWorkspaceSeq: current.workspace.workspaceSeq,
-        expectedCapabilityEpoch: current.workspace.capabilityEpoch,
-        expectedAuthorityEpoch: current.workspace.authorityEpoch,
-        expectedSpecHash: hashSpecification(current.workspace),
-      },
-      context: trustedShopifyReconciliationContext(workspaceId),
-    });
+      quotedView.workspace.savedVersions.find(({ versionId }) => versionId === request.versionId),
+    );
+    if (request.shopDomain) {
+      stage = 'buyer customer synchronization';
+      if (!request.buyerPrincipalId) {
+        throw new ShopifyIntegrationError(
+          'BUYER_COMMERCE_PROFILE_REQUIRED',
+          'The manufacturing request is missing its buyer identity.',
+        );
+      }
+      const buyerProfile = await buyerCommerceProfile(request.buyerPrincipalId);
+      if (!buyerCommerceProfileComplete(buyerProfile)) {
+        throw new ShopifyIntegrationError(
+          'BUYER_COMMERCE_PROFILE_REQUIRED',
+          'Complete buyer details before a Shopify Draft Order can be prepared.',
+        );
+      }
+      const existingBinding = await shopifyCustomerBinding(
+        request.buyerPrincipalId,
+        request.shopDomain,
+      );
+      const binding = await synchronizeShopifyCustomer({ profile: buyerProfile, existingBinding });
+      if (binding.shopDomain !== request.shopDomain) {
+        throw new ShopifyIntegrationError(
+          'CONFORMANCE_FAILED',
+          'The Shopify customer belongs to a different maker store.',
+        );
+      }
+      await saveShopifyCustomerBinding(binding);
+      stage = 'Shopify Draft Order creation and reread';
+      const snapshot = await createAndVerifyDraftOrder({
+        workspaceId,
+        projectName: quotedView.product.projectName,
+        request,
+        quote,
+        customerId: binding.customerId,
+        buyerProfile,
+      });
+      stage = 'Draft Order reconciliation';
+      const current = await readWorkspaceBundle(workspaceId);
+      await executePersistedCommand({
+        workspaceId,
+        command: { type: 'synchronize_shopify_draft_order', snapshot },
+        envelope: {
+          commandId: `shopify-draft-order-${crypto.randomUUID()}`,
+          expectedWorkspaceSeq: current.workspace.workspaceSeq,
+          expectedCapabilityEpoch: current.workspace.capabilityEpoch,
+          expectedAuthorityEpoch: current.workspace.authorityEpoch,
+          expectedSpecHash: hashSpecification(current.workspace),
+        },
+        context: trustedShopifyReconciliationContext(workspaceId),
+      });
+    }
     stage = 'buyer notification';
     await notifyWorkspace({
       workspaceId,

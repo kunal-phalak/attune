@@ -2,6 +2,7 @@ import {
   attuneUserForSharing,
   attuneUsersByIds,
   bumpWorkspaceAuthorityEpochForRoom,
+  userCanManageLiveblocksRoom,
 } from '@attune/database';
 
 import { currentAttuneUser } from '../../../lib/auth/session';
@@ -52,9 +53,12 @@ function shareRequest(value: unknown): {
   return { roomId, identifier: identifier.trim(), role };
 }
 
-async function editableRoom(roomId: string, userId: string) {
-  const permission = await liveblocksRoomPermission(roomId, userId);
-  return permission.write ? getLiveblocks().getRoom(roomId) : null;
+async function manageableRoom(roomId: string, userId: string) {
+  const [permission, canManage] = await Promise.all([
+    liveblocksRoomPermission(roomId, userId),
+    userCanManageLiveblocksRoom(roomId, userId),
+  ]);
+  return permission.write && canManage ? getLiveblocks().getRoom(roomId) : null;
 }
 
 export async function GET(request: Request) {
@@ -62,8 +66,8 @@ export async function GET(request: Request) {
   const roomId = roomIdFrom(new URL(request.url).searchParams.get('room_id'));
   const user = await currentAttuneUser();
   if (!roomId || !user) return noStoreJson({ error: 'Authentication required.' }, 401);
-  const room = await editableRoom(roomId, user.userId);
-  if (!room) return noStoreJson({ error: 'Editor access is required.' }, 403);
+  const room = await manageableRoom(roomId, user.userId);
+  if (!room) return noStoreJson({ error: 'Owner access is required.' }, 403);
   const userIds = Object.keys(room.usersAccesses);
   const identities = await attuneUsersByIds(userIds);
   const names = new Map(identities.map((identity) => [identity.id, identity.name]));
@@ -84,8 +88,8 @@ export async function PATCH(request: Request) {
   const input = shareRequest(await request.json().catch(() => null));
   const user = await currentAttuneUser();
   if (!input || !user) return noStoreJson({ error: 'Invalid sharing request.' }, 400);
-  const room = await editableRoom(input.roomId, user.userId);
-  if (!room) return noStoreJson({ error: 'Editor access is required.' }, 403);
+  const room = await manageableRoom(input.roomId, user.userId);
+  if (!room) return noStoreJson({ error: 'Owner access is required.' }, 403);
   const target = await attuneUserForSharing(input.identifier);
   if (!target)
     return noStoreJson({ error: 'No Attune account matches that email or user ID.' }, 404);

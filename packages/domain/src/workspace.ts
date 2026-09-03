@@ -1,4 +1,5 @@
 import { applyRepairToGeometry, hashSpecification, validateGeometry } from './geometry';
+import { hashCanonical } from './hash';
 import { createSpokeSeedDocument } from './maker/makerjs-adapter';
 import type {
   AttuneCommand,
@@ -162,7 +163,7 @@ export function createAt1042Workspace(
   options: { readonly sketchTemplate?: 'blank' | 'spoke' } = {},
 ): AttuneWorkspace {
   return {
-    scenarioVersion: 3,
+    scenarioVersion: 4,
     projectId: 'project:attune',
     commitmentId: 'AT-1042',
     workspaceSeq: 0,
@@ -181,13 +182,66 @@ export function createAt1042Workspace(
     geometry: seedGeometry(),
     sketchDocument:
       options.sketchTemplate === 'blank' ? emptySketchDocument() : createSpokeSeedDocument(),
+    savedVersions: [],
     quoteRequests: [],
     frozenRevisions: [],
     quotes: [],
     acceptances: [],
     manufacturingRequests: [],
+    changeRequests: [],
     externalCommerceRecords: [],
     commerceLinks: [],
+  };
+}
+
+function nextSavedVersion(
+  workspace: AttuneWorkspace,
+  metadata: TransitionMetadata,
+  name?: string,
+  geometry = workspace.geometry,
+  sketchDocument = workspace.sketchDocument,
+) {
+  const versionNumber =
+    workspace.savedVersions.reduce(
+      (largest, candidate) => Math.max(largest, candidate.versionNumber),
+      0,
+    ) + 1;
+  const versionId = `version:${metadata.commandId}`;
+  const specification = { ...workspace, geometry, sketchDocument };
+  return {
+    versionId,
+    versionNumber,
+    name: name?.trim() || `Version ${versionNumber}`,
+    sourceDraftVersion: workspace.draftVersion,
+    specHash: hashSpecification(specification),
+    geometry: structuredClone(geometry),
+    sketchDocument: structuredClone(sketchDocument),
+    preview: { status: 'PENDING' as const },
+    savedAt: metadata.now,
+  };
+}
+
+function staleOpenLifecycle(workspace: AttuneWorkspace) {
+  const acceptedQuoteIds = new Set(workspace.acceptances.map(({ quoteId }) => quoteId));
+  const staleQuoteIds = new Set(
+    workspace.quotes
+      .filter(({ quoteId, status }) => status === 'READY' && !acceptedQuoteIds.has(quoteId))
+      .map(({ quoteId }) => quoteId),
+  );
+  const staleRequestIds = new Set(
+    workspace.quotes
+      .filter(({ quoteId }) => staleQuoteIds.has(quoteId))
+      .map(({ requestId }) => requestId),
+  );
+  return {
+    manufacturingRequests: workspace.manufacturingRequests.map((request) =>
+      staleRequestIds.has(request.requestId)
+        ? { ...request, status: 'STALE' as const }
+        : request,
+    ),
+    quotes: workspace.quotes.map((quote) =>
+      staleQuoteIds.has(quote.quoteId) ? { ...quote, status: 'STALE' as const } : quote,
+    ),
   };
 }
 
@@ -222,11 +276,13 @@ function hasCurrentConsequentialAuthority(workspace: AttuneWorkspace): boolean {
 }
 
 function mutateDraft(workspace: AttuneWorkspace, geometry: PanelGeometry): AttuneWorkspace {
+  const stale = staleOpenLifecycle(workspace);
   return advance(
     workspace,
     {
       draftVersion: workspace.draftVersion + 1,
       geometry,
+      ...stale,
     },
     hasCurrentConsequentialAuthority(workspace),
   );
@@ -236,9 +292,10 @@ function mutateSketchDraft(
   workspace: AttuneWorkspace,
   sketchDocument: SketchDocument,
 ): AttuneWorkspace {
+  const stale = staleOpenLifecycle(workspace);
   return advance(
     workspace,
-    { draftVersion: workspace.draftVersion + 1, sketchDocument },
+    { draftVersion: workspace.draftVersion + 1, sketchDocument, ...stale },
     hasCurrentConsequentialAuthority(workspace),
   );
 }
@@ -248,18 +305,26 @@ function freezeAndQuote(
   command: Extract<AttuneCommand, { type: 'freeze_and_quote_revision' }>,
   metadata: TransitionMetadata,
 ): AttuneWorkspace {
-  const specHash = hashSpecification(workspace);
-  const revisionId = `r${workspace.draftVersion}`;
-  const request = workspace.quoteRequests.find(
-    (candidate) =>
-      candidate.draftVersion === workspace.draftVersion && candidate.specHash === specHash,
+  const requestRecord = workspace.manufacturingRequests.findLast((candidate) =>
+    ['REQUESTED', 'UNDER_REVIEW', 'PROVIDER_REVIEW_REQUESTED', 'CHANGES_REQUESTED'].includes(
+      candidate.status,
+    ),
   );
+  const request = requestRecord
+    ? workspace.quoteRequests.find((candidate) => candidate.id === requestRecord.requestId)
+    : undefined;
 
   if (!request) {
     throw new Error(
-      'A current quote request is required before the provider can freeze a revision.',
+      'An active manufacturing request is required before the maker can freeze a version.',
     );
   }
+  const savedVersion = workspace.savedVersions.find(
+    (candidate) => candidate.versionId === request.versionId,
+  );
+  if (!savedVersion) throw new Error('The requested saved version is unavailable.');
+  const specHash = request.specHash;
+  const revisionId = request.specRevision;
   const configuration =
     workspace.manufacturingRequests.find(({ requestId }) => requestId === request.id)
       ?.configuration ?? manufacturingConfiguration(workspace);
@@ -280,11 +345,13 @@ function freezeAndQuote(
       ...workspace.frozenRevisions,
       {
         revisionId,
-        draftVersion: workspace.draftVersion,
+        versionId: savedVersion.versionId,
+        versionNumber: savedVersion.versionNumber,
+        draftVersion: savedVersion.sourceDraftVersion,
         specHash,
         provider: providerBinding(workspace),
-        geometry: structuredClone(workspace.geometry),
-        sketchDocument: structuredClone(workspace.sketchDocument),
+        geometry: structuredClone(savedVersion.geometry),
+        sketchDocument: structuredClone(savedVersion.sketchDocument),
         frozenAt: metadata.now,
       },
     ],
@@ -292,6 +359,9 @@ function freezeAndQuote(
       ...workspace.quotes,
       {
         quoteId: `quote:${metadata.commandId}`,
+        requestId: request.id,
+        versionId: savedVersion.versionId,
+        versionNumber: savedVersion.versionNumber,
         revisionId,
         specHash,
         provider: providerBinding(workspace),
@@ -301,6 +371,7 @@ function freezeAndQuote(
         commerceLotQuantity: 1,
         ...(command.leadTimeDays ? { leadTimeDays: command.leadTimeDays } : {}),
         ...(command.validUntil ? { validUntil: command.validUntil } : {}),
+        status: 'READY',
         quotedAt: metadata.now,
       },
     ],
@@ -314,7 +385,9 @@ function acceptRevision(
 ): AttuneWorkspace {
   const quote = workspace.quotes.find(
     (candidate) =>
-      candidate.quoteId === command.quoteId && candidate.revisionId === command.revisionId,
+      candidate.quoteId === command.quoteId &&
+      candidate.revisionId === command.revisionId &&
+      candidate.status === 'READY',
   );
 
   if (!quote) {
@@ -323,14 +396,22 @@ function acceptRevision(
 
   return advance(workspace, {
     manufacturingRequests: workspace.manufacturingRequests.map((candidate) =>
-      candidate.specRevision === quote.revisionId && candidate.specHash === quote.specHash
+      candidate.requestId === quote.requestId
         ? { ...candidate, status: 'ACCEPTED' as const, updatedAt: metadata.now }
+        : candidate,
+    ),
+    quotes: workspace.quotes.map((candidate) =>
+      candidate.quoteId === quote.quoteId
+        ? { ...candidate, status: 'ACCEPTED' as const }
         : candidate,
     ),
     acceptances: [
       ...workspace.acceptances,
       {
         acceptanceId: `acceptance:${metadata.commandId}`,
+        requestId: quote.requestId,
+        versionId: quote.versionId,
+        versionNumber: quote.versionNumber,
         quoteId: quote.quoteId,
         revisionId: quote.revisionId,
         specHash: quote.specHash,
@@ -355,6 +436,8 @@ function synchronizeDraftOrder(
       revisionId === request.specRevision && specHash === request.specHash,
   );
   const exact =
+    command.snapshot.versionId === request.versionId &&
+    command.snapshot.versionNumber === request.versionNumber &&
     command.snapshot.specRevision === request.specRevision &&
     command.snapshot.specHash === request.specHash &&
     JSON.stringify(command.snapshot.provider) === JSON.stringify(request.provider) &&
@@ -390,9 +473,17 @@ function materializeRevision(
   const revision = workspace.frozenRevisions.find(
     (candidate) => candidate.revisionId === command.revisionId,
   );
+  const acceptance = revision
+    ? workspace.acceptances.find(
+        (candidate) =>
+          candidate.revisionId === revision.revisionId &&
+          candidate.versionId === revision.versionId &&
+          candidate.specHash === revision.specHash,
+      )
+    : undefined;
 
-  if (!revision || revision.specHash !== hashSpecification(workspace)) {
-    throw new Error('Commerce materialization must target the exact current frozen specification.');
+  if (!revision || !acceptance) {
+    throw new Error('Commerce materialization must target an accepted exact frozen version.');
   }
   if (
     command.verification.commitmentId !== workspace.commitmentId ||
@@ -463,6 +554,44 @@ export function transitionWorkspace(
         workspace: advance(workspace, { providerCapabilityProfile: command.profile }),
         affectedEntities: [command.profile.providerId, command.profile.profileId],
       };
+    case 'save_design_version': {
+      const version = nextSavedVersion(workspace, metadata, command.name);
+      return {
+        workspace: advance(
+          workspace,
+          { savedVersions: [...workspace.savedVersions, version] },
+          false,
+        ),
+        affectedEntities: [version.versionId],
+      };
+    }
+    case 'set_version_preview': {
+      if (!workspace.savedVersions.some(({ versionId }) => versionId === command.versionId)) {
+        throw new Error('The saved version preview target was not found.');
+      }
+      return {
+        workspace: advance(
+          workspace,
+          {
+            savedVersions: workspace.savedVersions.map((version) =>
+              version.versionId === command.versionId
+                ? {
+                    ...version,
+                    preview: {
+                      status: command.status,
+                      ...(command.key ? { key: command.key } : {}),
+                      ...(command.storedAt ? { storedAt: command.storedAt } : {}),
+                      ...(command.errorCode ? { errorCode: command.errorCode } : {}),
+                    },
+                  }
+                : version,
+            ),
+          },
+          false,
+        ),
+        affectedEntities: [command.versionId, 'preview:version'],
+      };
+    }
     case 'request_quote': {
       const requestId = `quote-request:${metadata.commandId}`;
       const configuration = command.configuration ?? manufacturingConfiguration(workspace);
@@ -474,29 +603,49 @@ export function transitionWorkspace(
       ) {
         throw new Error('Manufacturing configuration values must be positive.');
       }
-      const configured = {
-        ...workspace,
-        fabricationQuantity: configuration.quantity,
-        manufacturingConfiguration: configuration,
-        geometry: {
-          ...workspace.geometry,
-          material: configuration.material,
-          thickness: configuration.thicknessMm,
-        },
-      };
-      if (!validateGeometry(configured.geometry, configured.providerCapabilityProfile).valid) {
+      const selectedVersion = command.versionId
+        ? workspace.savedVersions.find(({ versionId }) => versionId === command.versionId)
+        : undefined;
+      if (command.versionId && !selectedVersion) {
+        throw new Error('The selected saved version does not exist.');
+      }
+      const version =
+        selectedVersion ??
+        nextSavedVersion(
+          workspace,
+          metadata,
+          undefined,
+          {
+            ...workspace.geometry,
+            material: configuration.material,
+            thickness: configuration.thicknessMm,
+          },
+        );
+      if (!validateGeometry(version.geometry, workspace.providerCapabilityProfile).valid) {
         throw new Error('The selected manufacturing configuration is not compatible.');
       }
-      const specRevision = `r${configured.draftVersion}`;
-      const specHash = hashSpecification(configured);
-      const provider = providerBinding(configured);
+      const specRevision = `r${version.sourceDraftVersion}`;
+      const provider = providerBinding(workspace);
+      const specHash = hashCanonical({
+        versionId: version.versionId,
+        versionSpecHash: version.specHash,
+        configuration,
+        provider,
+      });
       return {
-        workspace: advance(configured, {
+        workspace: advance(workspace, {
+          fabricationQuantity: configuration.quantity,
+          manufacturingConfiguration: configuration,
+          savedVersions: selectedVersion
+            ? workspace.savedVersions
+            : [...workspace.savedVersions, version],
           quoteRequests: [
             ...workspace.quoteRequests,
             {
               id: requestId,
-              draftVersion: workspace.draftVersion,
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              draftVersion: version.sourceDraftVersion,
               specHash,
               specRevision,
               provider,
@@ -507,6 +656,9 @@ export function transitionWorkspace(
             ...workspace.manufacturingRequests,
             {
               requestId,
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              requestRevision: 1,
               specRevision,
               specHash,
               provider,
@@ -525,6 +677,84 @@ export function transitionWorkspace(
           ],
         }),
         affectedEntities: ['commitment:AT-1042'],
+      };
+    }
+    case 'request_changes': {
+      const previous = workspace.manufacturingRequests.find(
+        ({ requestId }) => requestId === command.requestId,
+      );
+      if (!previous) throw new Error('The manufacturing request was not found.');
+      if (workspace.acceptances.some(({ requestId }) => requestId === previous.requestId)) {
+        throw new Error('Accepted work requires a new manufacturing request.');
+      }
+      const configuration = command.configuration ?? previous.configuration;
+      if (!configuration) throw new Error('Manufacturing configuration is required.');
+      const version = nextSavedVersion(workspace, metadata);
+      const requestId = `quote-request:${metadata.commandId}`;
+      const provider = previous.provider;
+      const specHash = hashCanonical({
+        versionId: version.versionId,
+        versionSpecHash: version.specHash,
+        configuration,
+        provider,
+      });
+      return {
+        workspace: advance(workspace, {
+          savedVersions: [...workspace.savedVersions, version],
+          manufacturingConfiguration: configuration,
+          manufacturingRequests: [
+            ...workspace.manufacturingRequests.map((request) =>
+              request.requestId === previous.requestId
+                ? { ...request, status: 'SUPERSEDED' as const, updatedAt: metadata.now }
+                : request,
+            ),
+            {
+              ...previous,
+              requestId,
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              requestRevision: previous.requestRevision + 1,
+              supersedesRequestId: previous.requestId,
+              specRevision: `r${version.sourceDraftVersion}`,
+              specHash,
+              configuration,
+              status: 'CHANGES_REQUESTED',
+              requestedAt: metadata.now,
+              updatedAt: metadata.now,
+            },
+          ],
+          quoteRequests: [
+            ...workspace.quoteRequests,
+            {
+              id: requestId,
+              versionId: version.versionId,
+              versionNumber: version.versionNumber,
+              draftVersion: version.sourceDraftVersion,
+              specHash,
+              specRevision: `r${version.sourceDraftVersion}`,
+              provider,
+              requestedAt: metadata.now,
+            },
+          ],
+          quotes: workspace.quotes.map((quote) =>
+            quote.requestId === previous.requestId && quote.status !== 'ACCEPTED'
+              ? { ...quote, status: 'SUPERSEDED' as const }
+              : quote,
+          ),
+          changeRequests: [
+            ...workspace.changeRequests,
+            {
+              changeRequestId: `change:${metadata.commandId}`,
+              requestId: previous.requestId,
+              fromVersionId: previous.versionId,
+              status: 'OPEN',
+              requestedBy: 'buyer',
+              ...(command.note?.trim() ? { note: command.note.trim() } : {}),
+              createdAt: metadata.now,
+            },
+          ],
+        }),
+        affectedEntities: [previous.requestId, requestId, version.versionId],
       };
     }
     case 'freeze_and_quote_revision':

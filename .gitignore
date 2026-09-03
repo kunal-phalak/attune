@@ -13,3 +13,6 @@ test-results/
 *.log
 artifacts/shopify-spike/*.json
 docs/attune-ui-reference-pack/*
+docs/ATTUNE_PRODUCT_REALIGNMENT.md
+docs/ATTUNE_SEED_ASSEMBLY_ADDENDUM.md
+*.tsbuildinfo

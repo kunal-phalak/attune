@@ -40,11 +40,7 @@ interface ShopifyInstallationView {
   readonly shopDomain: string;
   readonly shopName: string;
   readonly primaryDomain: string;
-  readonly connectionStatus:
-    | 'connected'
-    | 'needs_reauthorization'
-    | 'disconnected'
-    | 'uninstalled';
+  readonly connectionStatus: 'connected' | 'needs_reauthorization' | 'disconnected' | 'uninstalled';
   readonly missingCoreScopes: readonly string[];
   readonly locations: readonly InstallationLocation[];
   readonly selectedLocationId?: string | null;
@@ -71,7 +67,8 @@ function isInstallationsEnvelope(value: unknown): value is InstallationsEnvelope
 async function installationResponse(response: Response): Promise<InstallationsEnvelope> {
   const payload: unknown = await response.json().catch(() => null);
   if (response.ok && isInstallationsEnvelope(payload)) return payload;
-  const error = typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : null;
+  const error =
+    typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : null;
   throw new Error(typeof error === 'string' ? error : 'Shopify connections are unavailable.');
 }
 
@@ -157,7 +154,9 @@ export function ProductSettings({
       if (!response.ok) throw new Error('The manufacturing location could not be updated.');
       await loadInstallations();
     } catch (error) {
-      setIntegrationError(error instanceof Error ? error.message : 'The location could not be updated.');
+      setIntegrationError(
+        error instanceof Error ? error.message : 'The location could not be updated.',
+      );
     } finally {
       setBusyId(null);
     }
@@ -174,14 +173,19 @@ export function ProductSettings({
       if (!response.ok) throw new Error('The Shopify store could not be disconnected.');
       await loadInstallations();
     } catch (error) {
-      setIntegrationError(error instanceof Error ? error.message : 'The store could not be disconnected.');
+      setIntegrationError(
+        error instanceof Error ? error.message : 'The store could not be disconnected.',
+      );
     } finally {
       setBusyId(null);
     }
   };
 
   const activeInstallations =
-    envelope?.installations.filter(({ connectionStatus }) => connectionStatus === 'connected' || connectionStatus === 'needs_reauthorization') ?? [];
+    envelope?.installations.filter(
+      ({ connectionStatus }) =>
+        connectionStatus === 'connected' || connectionStatus === 'needs_reauthorization',
+    ) ?? [];
 
   return (
     <main className="product-settings">
@@ -194,8 +198,8 @@ export function ProductSettings({
         <Dialog size="sm" className="shopify-connect-dialog">
           <header className="shopify-dialog-header">
             <div>
-              <Dialog.Title>Connect Shopify</Dialog.Title>
-              <Dialog.Description>
+              <Dialog.Title className="shopify-dialog-title">Connect Shopify</Dialog.Title>
+              <Dialog.Description className="shopify-dialog-description">
                 Enter the permanent myshopify.com address for the store you manage.
               </Dialog.Description>
             </div>
@@ -231,7 +235,13 @@ export function ProductSettings({
             </label>
             {shopError ? <p className="form-error">{shopError}</p> : null}
             <div className="shopify-dialog-actions">
-              <Dialog.Close render={<Button type="button" variant="secondary">Cancel</Button>} />
+              <Dialog.Close
+                render={
+                  <Button type="button" variant="secondary">
+                    Cancel
+                  </Button>
+                }
+              />
               <Button type="submit" variant="primary">
                 Continue to Shopify
               </Button>
@@ -275,8 +285,15 @@ export function ProductSettings({
         </Surface>
       </section>
 
-      <section id="integrations" className="product-settings-section" aria-labelledby="integrations-title">
-        <Surface render={<article />} className="product-settings-card is-stacked ring ring-kumo-line">
+      <section
+        id="integrations"
+        className="product-settings-section"
+        aria-labelledby="integrations-title"
+      >
+        <Surface
+          render={<article />}
+          className="product-settings-card is-stacked ring ring-kumo-line"
+        >
           <span className="product-settings-icon shopify-product-icon" aria-hidden>
             <img src="https://cdn.shopify.com/static/shopify-favicon.png" alt="" />
           </span>
@@ -317,17 +334,14 @@ export function ProductSettings({
                 {activeInstallations.map((installation) => {
                   const status = statusTreatment(installation.connectionStatus);
                   return (
-                    <div className="shopify-installation ring ring-kumo-line" key={installation.id}>
+                    <div className="shopify-installation" key={installation.id}>
                       <div className="settings-shop-identity">
                         <img src="https://cdn.shopify.com/static/shopify-favicon.png" alt="" />
                         <div>
                           <strong>{installation.shopName}</strong>
                           <small>{installation.primaryDomain}</small>
                         </div>
-                        <Badge
-                          variant={status.variant}
-                          appearance="dot"
-                        >
+                        <Badge variant={status.variant} appearance="dot">
                           {status.label}
                         </Badge>
                       </div>
@@ -351,11 +365,18 @@ export function ProductSettings({
                         </div>
                         <div>
                           <dt>Actual address</dt>
-                          <dd>{formattedLocation(installation.selectedLocation) || 'Not provided by Shopify'}</dd>
+                          <dd>
+                            {formattedLocation(installation.selectedLocation) ||
+                              'Not provided by Shopify'}
+                          </dd>
                         </div>
                         <div>
                           <dt>Product media</dt>
-                          <dd>{installation.publicationMediaAvailable ? 'Available' : 'Private Draft Orders only'}</dd>
+                          <dd>
+                            {installation.publicationMediaAvailable
+                              ? 'Available'
+                              : 'Private Draft Orders only'}
+                          </dd>
                         </div>
                       </dl>
                       {installation.locations.some(({ isActive }) => isActive) ? (
@@ -367,11 +388,13 @@ export function ProductSettings({
                             void updateLocation(installation.id, String(value))
                           }
                         >
-                          {installation.locations.filter(({ isActive }) => isActive).map((location) => (
-                            <Select.Option key={location.id} value={location.id}>
-                              {location.name}
-                            </Select.Option>
-                          ))}
+                          {installation.locations
+                            .filter(({ isActive }) => isActive)
+                            .map((location) => (
+                              <Select.Option key={location.id} value={location.id}>
+                                {location.name}
+                              </Select.Option>
+                            ))}
                         </Select>
                       ) : null}
                       <div className="shopify-installation-actions">
@@ -418,7 +441,10 @@ export function ProductSettings({
                 <StorefrontIcon size={20} />
                 <div>
                   <strong>No Shopify stores connected</strong>
-                  <p>Connect a store, choose its manufacturing location, then publish a Maker profile.</p>
+                  <p>
+                    Connect a store, choose its manufacturing location, then publish a Maker
+                    profile.
+                  </p>
                 </div>
               </div>
             ) : (
@@ -433,7 +459,11 @@ export function ProductSettings({
         </Surface>
       </section>
 
-      <section id="maker-profile" className="product-settings-section" aria-labelledby="maker-profile-title">
+      <section
+        id="maker-profile"
+        className="product-settings-section"
+        aria-labelledby="maker-profile-title"
+      >
         <Surface render={<article />} className="product-settings-card ring ring-kumo-line">
           <span className="product-settings-icon" aria-hidden>
             <FactoryIcon size={22} />

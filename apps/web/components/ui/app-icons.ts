@@ -55,6 +55,7 @@ import {
   RectangleIcon,
   PolygonIcon,
   ScissorsIcon,
+  HardHatIcon,
 } from '@phosphor-icons/react';
 
 const ConstraintIcons = {
@@ -124,6 +125,7 @@ export const AppIcons = {
 
   Search: MagnifyingGlassIcon,
   Settings: GearSixIcon,
+  MakerProfile: HardHatIcon,
   Select: NavigationArrowIcon,
 
   Sketch: PenNibIcon,

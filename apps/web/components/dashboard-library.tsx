@@ -800,18 +800,9 @@ function DashboardSidebar({
                 href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_profile`}
                 tooltip="Maker profile"
                 size="base"
-                icon={AppIcons.Settings}
+                icon={AppIcons.MakerProfile}
               >
                 Maker profile
-              </Sidebar.MenuButton>
-              <Sidebar.MenuButton
-                itemId="dashboard-notifications"
-                tooltip="Notifications"
-                size="base"
-                icon={AppIcons.Comments}
-                onClick={() => window.dispatchEvent(new Event('attune:open-notifications'))}
-              >
-                Notifications
               </Sidebar.MenuButton>
             </Sidebar.Menu>
           </Sidebar.Group>

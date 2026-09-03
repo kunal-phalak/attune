@@ -149,7 +149,7 @@ export default async function DashboardPage({
       user={{ id: user.userId, name: user.displayName }}
       filter={filter}
       canCreate={hasProjectCreatePermission && collaboration}
-      headerAction={collaboration ? <DashboardNotifications /> : null}
+      headerAction={collaboration ? <DashboardNotifications key="dashboard-notifications" /> : null}
       operationalWorkspaceId={user.judge ? JUDGE_WORKSPACE_ID : undefined}
     />
   );

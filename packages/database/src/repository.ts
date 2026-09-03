@@ -204,9 +204,7 @@ export async function listShopifyInstallations(
   return rows.map(immutableCopy);
 }
 
-export async function listConnectedShopifyInstallations(): Promise<
-  readonly ShopifyInstallation[]
-> {
+export async function listConnectedShopifyInstallations(): Promise<readonly ShopifyInstallation[]> {
   const rows = await getDatabase()
     .select(shopifyInstallationSelection())
     .from(shopifyInstallations)
@@ -616,16 +614,19 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       }));
   const versionFor = (revisionId: string, specHash: string) =>
     savedVersions.find(
-      (version) =>
-        version.specHash === specHash || `r${version.sourceDraftVersion}` === revisionId,
+      (version) => version.specHash === specHash || `r${version.sourceDraftVersion}` === revisionId,
     );
   const manufacturingRequests = Array.isArray(storedManufacturingRequests)
     ? storedManufacturingRequests.map((request, index) => {
         const version = versionFor(request.specRevision, request.specHash);
         return {
           ...request,
-          versionId: Reflect.get(request, 'versionId') ?? version?.versionId ?? `version:legacy:${request.specRevision}`,
-          versionNumber: Reflect.get(request, 'versionNumber') ?? version?.versionNumber ?? index + 1,
+          versionId:
+            Reflect.get(request, 'versionId') ??
+            version?.versionId ??
+            `version:legacy:${request.specRevision}`,
+          versionNumber:
+            Reflect.get(request, 'versionNumber') ?? version?.versionNumber ?? index + 1,
           requestRevision: Reflect.get(request, 'requestRevision') ?? 1,
         };
       })
@@ -722,7 +723,10 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
           );
           return {
             ...record,
-            versionId: Reflect.get(record, 'versionId') ?? request?.versionId ?? `version:legacy:${record.specRevision}`,
+            versionId:
+              Reflect.get(record, 'versionId') ??
+              request?.versionId ??
+              `version:legacy:${record.specRevision}`,
             versionNumber: Reflect.get(record, 'versionNumber') ?? request?.versionNumber ?? 1,
           };
         })

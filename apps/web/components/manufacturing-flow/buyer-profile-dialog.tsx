@@ -19,8 +19,10 @@ function isProfileEnvelope(value: unknown): value is ProfileEnvelope {
 async function profileResponse(response: Response): Promise<ProfileEnvelope> {
   const payload: unknown = await response.json();
   if (response.ok && isProfileEnvelope(payload)) return payload;
-  const error = typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : null;
-  const message = typeof error === 'object' && error !== null ? Reflect.get(error, 'message') : null;
+  const error =
+    typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : null;
+  const message =
+    typeof error === 'object' && error !== null ? Reflect.get(error, 'message') : null;
   throw new Error(typeof message === 'string' ? message : 'Buyer details could not be saved.');
 }
 
@@ -128,7 +130,8 @@ export function BuyerProfileDialog({
         if (active) setForm(formFromProfile(profile));
       })
       .catch((reason) => {
-        if (active) setError(reason instanceof Error ? reason.message : 'Buyer details unavailable.');
+        if (active)
+          setError(reason instanceof Error ? reason.message : 'Buyer details unavailable.');
       });
     return () => {
       active = false;
@@ -173,9 +176,10 @@ export function BuyerProfileDialog({
       <Dialog size="lg" className="buyer-profile-dialog">
         <header className="buyer-profile-header">
           <div>
-            <span className="manufacturing-eyebrow">Settings · Profile · Shipping &amp; billing</span>
-            <Dialog.Title>Complete buyer details</Dialog.Title>
-            <Dialog.Description>
+            <Dialog.Title className="buyer-profile-dialog-title">
+              Complete buyer details
+            </Dialog.Title>
+            <Dialog.Description className="buyer-profile-dialog-description">
               These details are needed so the maker can prepare your Shopify customer and delivery
               information.
             </Dialog.Description>
@@ -275,7 +279,11 @@ export function BuyerProfileDialog({
               />
             </section>
           ) : null}
-          {error ? <p className="buyer-profile-error" role="alert">{error}</p> : null}
+          {error ? (
+            <p className="buyer-profile-error" role="alert">
+              {error}
+            </p>
+          ) : null}
           <footer className="buyer-profile-actions">
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
               Cancel

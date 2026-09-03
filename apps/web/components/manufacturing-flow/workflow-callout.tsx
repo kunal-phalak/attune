@@ -35,8 +35,9 @@ export function WorkflowCallout({
       return {
         key: `accepted:${acceptance.acceptanceId}`,
         title: 'Version accepted',
-        detail: `Version ${acceptance.versionNumber} is locked and ready for commerce.`,
+        detail: 'This exact version is ready for commerce.',
         versionNumber: acceptance.versionNumber,
+        quote,
         kind: 'accepted' as const,
       };
     }
@@ -45,8 +46,9 @@ export function WorkflowCallout({
       ? {
           key: `maker:${quote.quoteId}`,
           title: 'Quote sent',
-          detail: `Buyer can now review Version ${quote.versionNumber}.`,
+          detail: `${view.product.projectName} can now review Version ${quote.versionNumber}.`,
           versionNumber: quote.versionNumber,
+          quote,
           kind: 'maker' as const,
         }
       : {
@@ -54,19 +56,26 @@ export function WorkflowCallout({
           title: 'Quote ready',
           detail: `${view.workspace.providerCapabilityProfile.providerName} quoted Version ${quote.versionNumber}.`,
           versionNumber: quote.versionNumber,
+          quote,
           kind: 'buyer' as const,
         };
-  }, [perspective, view.workspace]);
+  }, [perspective, view.product.projectName, view.workspace]);
   const [open, setOpen] = useState(true);
 
   useEffect(() => setOpen(true), [state?.key]);
   if (!state) return null;
 
   return (
-    <Surface render={<aside />} className="workflow-callout t-acc" data-open={open}>
+    <Surface
+      render={<aside />}
+      className="workflow-callout t-acc ring ring-kumo-line"
+      data-open={open}
+    >
       <Collapsible.Root open={open} onOpenChange={setOpen}>
         <div className="workflow-callout-head">
-          <span className="workflow-callout-icon"><SealCheckIcon size={18} weight="fill" /></span>
+          <span className="workflow-callout-icon">
+            <SealCheckIcon size={18} weight="fill" />
+          </span>
           <span>
             <strong>{state.title}</strong>
             {!open ? <small>Version {state.versionNumber}</small> : null}
@@ -75,12 +84,29 @@ export function WorkflowCallout({
             className="workflow-callout-toggle t-acc-head"
             aria-label={open ? 'Collapse workflow status' : 'Expand workflow status'}
           >
-            <span className="t-acc-chevron"><CaretDownIcon size={16} /></span>
+            <span className="t-acc-chevron">
+              <CaretDownIcon size={16} />
+            </span>
           </Collapsible.Trigger>
         </div>
         <Collapsible.Panel className="t-acc-panel">
           <div className="t-acc-panel-inner">
             <p>{state.detail}</p>
+            <dl className="workflow-callout-facts">
+              <div>
+                <dt>Price</dt>
+                <dd>
+                  {new Intl.NumberFormat('en-IN', {
+                    style: 'currency',
+                    currency: state.quote.currency,
+                  }).format(state.quote.amountMinor / 100)}
+                </dd>
+              </div>
+              <div>
+                <dt>Lead time</dt>
+                <dd>{state.quote.leadTimeDays ? `${state.quote.leadTimeDays} days` : 'Pending'}</dd>
+              </div>
+            </dl>
             <div className="workflow-callout-actions">
               {state.kind === 'maker' ? (
                 <LinkButton
@@ -92,16 +118,31 @@ export function WorkflowCallout({
                 </LinkButton>
               ) : null}
               {state.kind === 'buyer' ? (
-                <Button type="button" size="sm" variant="primary" onClick={() => onSurface('buyer_orders')}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  onClick={() => onSurface('buyer_orders')}
+                >
                   Review quote
                 </Button>
               ) : null}
               {state.kind === 'accepted' ? (
                 <>
-                  <Button type="button" size="sm" variant="primary" onClick={() => onSurface('buyer_orders')}>
-                    Continue to checkout
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="primary"
+                    onClick={() => onSurface('buyer_orders')}
+                  >
+                    Continue
                   </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => onSurface('design')}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onSurface('design')}
+                  >
                     Return to design
                   </Button>
                 </>

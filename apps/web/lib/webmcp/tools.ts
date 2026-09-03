@@ -303,7 +303,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'inspect_context',
       title: 'Inspect semantic sketch context',
       description:
-        'Read compact authoritative sketch context by stable entity, node, constraint, or group IDs and world region, including nearby semantic refs, active human tool, solver DOF, ranked candidates, relevant actions, and unseen human changes.',
+        'Use before editing when you need authoritative IDs, versions, nearby geometry, solver state, or unseen human changes. Do not use it to mutate the design or inspect commerce; it only reads the current sketch context.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -327,7 +327,13 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         },
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         const result = await runtime.observe(focus(input), execution?.signal);
@@ -338,7 +344,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'forecast_change',
       title: 'Forecast a semantic sketch change',
       description:
-        'Forecast one proposed semantic command against current authority without committing. Uses the same command application, PlaneGCS solve, validation, and capability compilation as commit.',
+        'Use to preview the solver, validation, and capability consequences of one proposed semantic command before committing it. Do not use when the user has already asked to apply the change; this tool never mutates the design.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -352,7 +358,13 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         required: ['command'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         const value = object(input, 'forecast_change input');
@@ -365,9 +377,15 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'check_design',
       title: 'Check semantic sketch design',
       description:
-        'Return compact current solver status, conflicts, degrees of freedom, constraint candidates, and available semantic actions without mutation.',
+        'Use after an edit or when asked whether the current design is valid to read solver status, conflicts, degrees of freedom, and available actions. Do not use it to change geometry or manufacturing state.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         empty(input);
@@ -384,7 +402,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'modify_geometry',
       title: 'Batch modify semantic geometry',
       description:
-        'Instantiate or update deterministic mechanical recipes, set a circle or arc radius by stable versioned target, or batch lower-level semantic geometry edits. Prefer instantiate_recipe for common mechanical structures; one request generates analytic Attune geometry, solves, safely rebases disjoint edits, and commits.',
+        'Use to commit a requested geometry creation, recipe instantiation/update, move, trim, transform, construction change, grouping change, or deletion. Prefer instantiate_recipe for common mechanical structures. Do not use for constraints, read-only inspection, or manufacturing actions; this mutates the draft and can invalidate an open quote.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -467,7 +485,13 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         required: ['operation'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         const result = await runtime.execute(
@@ -481,7 +505,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'constrain_geometry',
       title: 'Batch constrain semantic geometry',
       description:
-        'Apply/remove deterministic constraints, set dimensions, or make one selected line tangent to one selected circle or arc using versioned targets. Unsupported PlaneGCS projections return diagnostics and do not commit.',
+        'Use to commit requested constraints or dimensions, including tangency between versioned targets. Do not use for ordinary geometry edits or merely checking solver state. Removing constraints is destructive; unsupported projections return diagnostics without committing.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -529,7 +553,13 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         required: ['operation'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         const result = await runtime.execute(constraintCommand(input), execution?.signal);
@@ -598,14 +628,33 @@ function manufacturingTools(
       name: 'find_makers',
       title: 'Find makers for this design',
       description:
-        'Read the live Shopify-connected maker identity and locations, clearly labeled demo marketplace profiles, connection capability boundaries, and current design fit. Does not claim live data when the provider connection fails.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      annotations: { readOnlyHint: true, untrustedContentHint: true },
+        'Use when the user asks who can manufacture the actual currently selected or saved design. It reads live Shopify-connected maker identity, locations, capability boundaries, and deterministic fit, with demo profiles explicitly labeled. Do not use it to submit a request or imply that demo data is live.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          version_id: {
+            type: 'string',
+            description: 'Saved version ID to match; omit for the current draft.',
+          },
+        },
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
-        empty(input);
+        const value =
+          input === undefined || input === null ? {} : object(input, 'find_makers input');
+        exact(value, ['version_id'], 'find_makers input');
+        const versionId =
+          value.version_id === undefined ? undefined : string(value.version_id, 'version_id');
         if (!runtime.marketplace) throw new Error('Marketplace access is unavailable.');
-        const result = await runtime.marketplace(execution?.signal);
+        const result = await runtime.marketplace(versionId, execution?.signal);
         if (!isRecord(result)) return withToolDispatchTiming(result, startedAt);
         const connection = isRecord(result.connection) ? result.connection : {};
         return withToolDispatchTiming(
@@ -614,6 +663,7 @@ function manufacturingTools(
             connectedShop: connection.shop,
             providerCapabilities: connection.capabilities,
             providerProfile: result.providerProfile,
+            selectedVersionId: result.selectedVersionId,
             providers: result.providers,
           },
           startedAt,
@@ -624,9 +674,15 @@ function manufacturingTools(
       name: 'inspect_quote_or_order',
       title: 'Inspect a quote or order',
       description:
-        'Read linked manufacturing requests, exact saved versions, quotes, acceptances, and verified Shopify Draft Orders without mutation.',
+        'Use to read the exact-version chain across a manufacturing request, quote, acceptance, and verified Shopify Draft Order. Do not use it to quote, accept, submit, or navigate; it never mutates product or commerce state.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      annotations: { readOnlyHint: true, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         empty(input);
@@ -659,29 +715,43 @@ function manufacturingTools(
       name: 'navigate_workspace',
       title: 'Navigate the Attune workspace',
       description:
-        'Navigate to a reversible Attune destination. The server derives and revalidates the required Buyer or Maker authority; changing perspective never grants authority.',
+        'Use only when the user asks to open a named Attune surface. Do not use a role argument or choose authority: the destination determines the perspective and the server revalidates existing capabilities. Navigation is reversible and never grants authority.',
       inputSchema: {
         type: 'object',
         properties: {
           destination: {
             type: 'string',
-            enum: ['design', 'marketplace', 'buyer_orders', 'maker_requests', 'maker_profile'],
+            enum: [
+              'design',
+              'find_makers',
+              'buyer_orders',
+              'maker_requests',
+              'maker_profile',
+              'settings',
+            ],
           },
         },
         required: ['destination'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: false,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         const value = object(input, 'navigate_workspace input');
         exact(value, ['destination'], 'navigate_workspace input');
         if (
           value.destination !== 'design' &&
-          value.destination !== 'marketplace' &&
+          value.destination !== 'find_makers' &&
           value.destination !== 'buyer_orders' &&
           value.destination !== 'maker_requests' &&
-          value.destination !== 'maker_profile'
+          value.destination !== 'maker_profile' &&
+          value.destination !== 'settings'
         ) {
           throw new TypeError('destination is unsupported.');
         }
@@ -694,7 +764,7 @@ function manufacturingTools(
       name: 'manage_manufacturing_request',
       title: 'Manage a manufacturing request',
       description:
-        'Configure, bind an exact version, submit or revise a request, prepare Maker quote terms, or accept an exact quote. Maker quote sending stays an explicit human action and Buyer acceptance requires confirmed user intent.',
+        'Use for the typed manufacturing operations configure, select_version, submit, request_changes, prepare_quote, finalize_quote, or accept_quote. Do not use for maker discovery or navigation. Submission binds an immutable version; Maker Send quote remains a human action, and acceptance requires explicit Buyer confirmation.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -736,7 +806,13 @@ function manufacturingTools(
         required: ['operation'],
         additionalProperties: false,
       },
-      annotations: { readOnlyHint: false, untrustedContentHint: true },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+        untrustedContentHint: true,
+      },
       async execute(input, execution) {
         const startedAt = performance.now();
         const value = object(input, 'manage_manufacturing_request input');
@@ -790,7 +866,9 @@ function manufacturingTools(
           exact(value, ['operation', 'configuration', 'version_id'], 'submit input');
           requireCapability(capabilityIds, 'request_quote');
           const versionId =
-            value.version_id === undefined ? 'current_draft' : string(value.version_id, 'version_id');
+            value.version_id === undefined
+              ? 'current_draft'
+              : string(value.version_id, 'version_id');
           const result = await runtime.execute(
             {
               type: 'request_quote',

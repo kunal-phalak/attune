@@ -1,11 +1,5 @@
-import {
-  saveShopifyInstallation,
-  shopifyInstallationForShop,
-} from '@attune/database';
-import {
-  createAdminClientForAccessToken,
-  inspectShopifyProviderWithAdmin,
-} from '@attune/shopify';
+import { saveShopifyInstallation, shopifyInstallationForShop } from '@attune/database';
+import { createAdminClientForAccessToken, inspectShopifyProviderWithAdmin } from '@attune/shopify';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
@@ -27,9 +21,19 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+function clearOAuthCookie(response: NextResponse) {
+  response.cookies.set(SHOPIFY_OAUTH_COOKIE, '', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/api/shopify/oauth',
+    maxAge: 0,
+  });
+}
+
 function failure(message: string, status: number) {
   const response = NextResponse.json({ error: message }, { status });
-  response.cookies.delete(SHOPIFY_OAUTH_COOKIE);
+  clearOAuthCookie(response);
   return response;
 }
 
@@ -122,7 +126,7 @@ export async function GET(request: Request) {
       installation.connectionStatus === 'connected' ? 'connected' : 'needs_reauthorization',
     );
     const response = NextResponse.redirect(destination);
-    response.cookies.delete(SHOPIFY_OAUTH_COOKIE);
+    clearOAuthCookie(response);
     return response;
   } catch {
     return failure('Shopify authorization could not be completed.', 502);

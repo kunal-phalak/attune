@@ -235,9 +235,7 @@ function staleOpenLifecycle(workspace: AttuneWorkspace) {
   );
   return {
     manufacturingRequests: workspace.manufacturingRequests.map((request) =>
-      staleRequestIds.has(request.requestId)
-        ? { ...request, status: 'STALE' as const }
-        : request,
+      staleRequestIds.has(request.requestId) ? { ...request, status: 'STALE' as const } : request,
     ),
     quotes: workspace.quotes.map((quote) =>
       staleQuoteIds.has(quote.quoteId) ? { ...quote, status: 'STALE' as const } : quote,
@@ -594,12 +592,12 @@ export function transitionWorkspace(
     }
     case 'request_quote': {
       const requestId = `quote-request:${metadata.commandId}`;
-      const configuration = command.configuration ?? manufacturingConfiguration(workspace);
+      const requestedConfiguration = command.configuration ?? manufacturingConfiguration(workspace);
       if (
-        !Number.isSafeInteger(configuration.quantity) ||
-        configuration.quantity <= 0 ||
-        configuration.thicknessMm <= 0 ||
-        configuration.toleranceMm <= 0
+        !Number.isSafeInteger(requestedConfiguration.quantity) ||
+        requestedConfiguration.quantity <= 0 ||
+        requestedConfiguration.thicknessMm <= 0 ||
+        requestedConfiguration.toleranceMm <= 0
       ) {
         throw new Error('Manufacturing configuration values must be positive.');
       }
@@ -609,18 +607,20 @@ export function transitionWorkspace(
       if (command.versionId && !selectedVersion) {
         throw new Error('The selected saved version does not exist.');
       }
+      const configuration = selectedVersion
+        ? {
+            ...requestedConfiguration,
+            material: selectedVersion.geometry.material,
+            thicknessMm: selectedVersion.geometry.thickness,
+          }
+        : requestedConfiguration;
       const version =
         selectedVersion ??
-        nextSavedVersion(
-          workspace,
-          metadata,
-          undefined,
-          {
-            ...workspace.geometry,
-            material: configuration.material,
-            thickness: configuration.thicknessMm,
-          },
-        );
+        nextSavedVersion(workspace, metadata, undefined, {
+          ...workspace.geometry,
+          material: configuration.material,
+          thickness: configuration.thicknessMm,
+        });
       if (!validateGeometry(version.geometry, workspace.providerCapabilityProfile).valid) {
         throw new Error('The selected manufacturing configuration is not compatible.');
       }

@@ -31,14 +31,18 @@ function validWorkspace() {
 
 describe('manufacturing request lifecycle', () => {
   it('binds a request, quote, and acceptance to one immutable user-facing version', () => {
-    const saved = transition(validWorkspace(), { type: 'save_design_version', name: 'Plate' }, 'save');
+    const saved = transition(
+      validWorkspace(),
+      { type: 'save_design_version', name: 'Plate' },
+      'save',
+    );
     const version = saved.savedVersions[0];
     const requested = transition(
       saved,
       {
         type: 'request_quote',
         versionId: version.versionId,
-        configuration,
+        configuration: { ...configuration, material: 'acrylic', thicknessMm: 5 },
         buyerPrincipalId: 'user:buyer',
       },
       'request',
@@ -58,6 +62,10 @@ describe('manufacturing request lifecycle', () => {
       version.versionId,
     ]);
     expect([request.versionNumber, quote.versionNumber, frozen.versionNumber]).toEqual([1, 1, 1]);
+    expect(request.configuration).toMatchObject({
+      material: version.geometry.material,
+      thicknessMm: version.geometry.thickness,
+    });
     expect(request.reviewAccess).toEqual({
       providerId: request.provider.providerId,
       versionId: version.versionId,

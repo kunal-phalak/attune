@@ -1,10 +1,11 @@
+import type { SavedDesignVersion } from '@attune/domain';
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { SavedDesignVersion } from '@attune/domain';
 
 interface PreviewStorageConfiguration {
   readonly accountId: string;
@@ -46,8 +47,7 @@ function configuration(): PreviewStorageConfiguration {
     bucket: values.bucket!,
     accessKeyId: values.accessKeyId!,
     secretAccessKey: values.secretAccessKey!,
-    endpoint:
-      values.endpoint ?? `https://${values.accountId!}.r2.cloudflarestorage.com`,
+    endpoint: values.endpoint ?? `https://${values.accountId!}.r2.cloudflarestorage.com`,
     region: values.region || 'auto',
   };
 }
@@ -89,11 +89,25 @@ export class PreviewStorage {
 
   async getSignedPreviewUrl(key: string, expiresIn = 300): Promise<string> {
     const config = configuration();
-    return getSignedUrl(
-      client(config),
-      new GetObjectCommand({ Bucket: config.bucket, Key: key }),
-      { expiresIn },
+    return getSignedUrl(client(config), new GetObjectCommand({ Bucket: config.bucket, Key: key }), {
+      expiresIn,
+    });
+  }
+
+  async headVersionPreview(key: string): Promise<{
+    readonly contentLength: number;
+    readonly contentType: string | null;
+    readonly etag: string | null;
+  }> {
+    const config = configuration();
+    const result = await client(config).send(
+      new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
     );
+    return {
+      contentLength: result.ContentLength ?? 0,
+      contentType: result.ContentType ?? null,
+      etag: result.ETag ?? null,
+    };
   }
 }
 

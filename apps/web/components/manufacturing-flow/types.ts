@@ -10,6 +10,7 @@ export interface MarketplaceProvider {
   readonly connectionLabel?: string;
   readonly locationName?: string;
   readonly address?: string;
+  readonly logoUrl?: string;
   readonly latitude?: number;
   readonly longitude?: number;
   readonly fit: 'Compatible' | 'Needs review' | 'Not compatible';
@@ -63,8 +64,7 @@ export function isMarketplacePayload(value: unknown): value is MarketplacePayloa
     isAttuneApiView(Reflect.get(value, 'view')) &&
     Array.isArray(Reflect.get(value, 'providers')) &&
     (connection === null ||
-      (typeof connection === 'object' &&
-        Array.isArray(Reflect.get(connection, 'locations')))) &&
+      (typeof connection === 'object' && Array.isArray(Reflect.get(connection, 'locations')))) &&
     typeof profile === 'object' &&
     profile !== null &&
     typeof Reflect.get(profile, 'providerId') === 'string'

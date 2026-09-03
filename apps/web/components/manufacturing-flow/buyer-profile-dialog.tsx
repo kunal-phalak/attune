@@ -59,7 +59,7 @@ function formFromProfile(profile: BuyerCommerceProfile | null): BuyerForm {
     phone: profile.phone ?? '',
     shippingAddress: { ...emptyAddress, ...profile.shippingAddress },
     billingSameAsShipping: profile.billingSameAsShipping,
-    billingAddress: { ...emptyAddress, ...(profile.billingAddress ?? {}) },
+    billingAddress: { ...emptyAddress, ...profile.billingAddress },
   };
 }
 
@@ -92,14 +92,11 @@ function AddressFields({
           <span>{label}</span>
           <Input
             id={`${prefix}-${key}`}
+            aria-label={label}
             value={address[key]}
             required={required}
             autoComplete={
-              key === 'postalCode'
-                ? 'postal-code'
-                : key === 'countryCode'
-                  ? 'country'
-                  : key
+              key === 'postalCode' ? 'postal-code' : key === 'countryCode' ? 'country' : key
             }
             onChange={(event) => onChange(key, event.target.value)}
           />
@@ -123,7 +120,7 @@ export function BuyerProfileDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
     let active = true;
     void fetch('/api/attune/commerce-profile', { cache: 'no-store' })
       .then(profileResponse)
@@ -203,6 +200,7 @@ export function BuyerProfileDialog({
               <Input
                 id="buyer-first-name"
                 autoComplete="given-name"
+                aria-label="First name"
                 required
                 value={form.firstName}
                 onChange={(event) =>
@@ -215,6 +213,7 @@ export function BuyerProfileDialog({
               <Input
                 id="buyer-last-name"
                 autoComplete="family-name"
+                aria-label="Last name"
                 required
                 value={form.lastName}
                 onChange={(event) =>
@@ -228,6 +227,7 @@ export function BuyerProfileDialog({
                 id="buyer-email"
                 type="email"
                 autoComplete="email"
+                aria-label="Email"
                 required
                 value={form.email}
                 onChange={(event) =>
@@ -241,6 +241,7 @@ export function BuyerProfileDialog({
                 id="buyer-phone"
                 type="tel"
                 autoComplete="tel"
+                aria-label="Phone"
                 value={form.phone}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, phone: event.target.value }))

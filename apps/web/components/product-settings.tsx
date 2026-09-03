@@ -222,6 +222,7 @@ export function ProductSettings({
                 autoCorrect="off"
                 spellCheck={false}
                 placeholder="your-store.myshopify.com"
+                aria-label="Store address"
                 value={shopDomain}
                 onChange={(event) => setShopDomain(event.target.value)}
                 aria-invalid={Boolean(shopError)}
@@ -299,7 +300,9 @@ export function ProductSettings({
             {envelope?.configured === false ? (
               <div className="settings-truth-state" data-error>
                 <WarningCircleIcon size={18} />
-                <p>Shopify OAuth needs its server credentials, redirect URI, and token-encryption key.</p>
+                <p>
+                  Shopify OAuth needs its app credentials, callback URL, and a strong server secret.
+                </p>
               </div>
             ) : null}
             {integrationError ? (

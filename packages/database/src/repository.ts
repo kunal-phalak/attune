@@ -420,6 +420,7 @@ export async function disconnectShopifyInstallation(
       accessTokenExpiresAt: null,
       refreshTokenExpiresAt: null,
       connectionStatus: 'disconnected',
+      marketplaceListed: false,
       uninstalledAt: now,
       updatedAt: now,
     })
@@ -441,6 +442,7 @@ export async function markShopifyInstallationUninstalled(shopDomain: string): Pr
       accessTokenExpiresAt: null,
       refreshTokenExpiresAt: null,
       connectionStatus: 'uninstalled',
+      marketplaceListed: false,
       uninstalledAt: now,
       updatedAt: now,
     })

@@ -30,11 +30,25 @@ export default async function SignUpPage({
           <form action={signUp}>
             <label htmlFor="sign-up-name">
               Name
-              <Input id="sign-up-name" name="name" type="text" autoComplete="name" required />
+              <Input
+                id="sign-up-name"
+                name="name"
+                type="text"
+                autoComplete="name"
+                aria-label="Name"
+                required
+              />
             </label>
             <label htmlFor="sign-up-email">
               Email
-              <Input id="sign-up-email" name="email" type="email" autoComplete="email" required />
+              <Input
+                id="sign-up-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                aria-label="Email"
+                required
+              />
             </label>
             <label htmlFor="sign-up-password">
               Password
@@ -43,6 +57,7 @@ export default async function SignUpPage({
                 name="password"
                 type="password"
                 autoComplete="new-password"
+                aria-label="Password"
                 minLength={8}
                 required
               />

@@ -29,7 +29,14 @@ export default async function SignInPage({
           <form action={signIn}>
             <label htmlFor="sign-in-email">
               Email
-              <Input id="sign-in-email" name="email" type="email" autoComplete="email" required />
+              <Input
+                id="sign-in-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                aria-label="Email"
+                required
+              />
             </label>
             <label htmlFor="sign-in-password">
               Password
@@ -38,6 +45,7 @@ export default async function SignInPage({
                 name="password"
                 type="password"
                 autoComplete="current-password"
+                aria-label="Password"
                 required
               />
             </label>

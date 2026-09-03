@@ -140,12 +140,19 @@ describe('one-request WebMCP semantic mutation runtime', () => {
 
     await expect(runtime.navigate?.('maker_requests')).resolves.toEqual({
       status: 'NAVIGATION_INITIATED',
-      fromSurface: 'marketplace',
+      fromSurface: 'find_makers',
       toSurface: 'maker_requests',
       perspective: 'provider',
       authorityUnchanged: true,
     });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('perspective=provider');
+    const requestTarget = fetchMock.mock.calls[0]?.[0];
+    const requestedUrl =
+      requestTarget instanceof URL
+        ? requestTarget.href
+        : typeof requestTarget === 'string'
+          ? requestTarget
+          : requestTarget?.url;
+    expect(requestedUrl).toContain('perspective=provider');
     expect(assign).toHaveBeenCalledWith(
       '/workspace/workspace%3Aat-1042?perspective=provider&surface=provider_requests',
     );
@@ -157,12 +164,13 @@ describe('one-request WebMCP semantic mutation runtime', () => {
     vi.stubGlobal('window', { location: { search: '', assign } });
     vi.stubGlobal(
       'fetch',
-      vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener('abort', () =>
-            reject(new DOMException('Aborted', 'AbortError')),
-          );
-        }),
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            );
+          }),
       ),
     );
     const viewRef = { current: bootstrapView() };

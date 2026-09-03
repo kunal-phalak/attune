@@ -157,6 +157,37 @@ describe('native model-context registration contract', () => {
       'modify_geometry',
       'navigate_workspace',
     ]);
+    for (const tool of registered.values()) {
+      expect(tool.description).toMatch(/^Use /);
+      expect(tool.description).toContain('Do not use');
+      expect(tool.annotations).toEqual(
+        expect.objectContaining({
+          readOnlyHint: expect.any(Boolean),
+          destructiveHint: expect.any(Boolean),
+          idempotentHint: expect.any(Boolean),
+          openWorldHint: expect.any(Boolean),
+        }),
+      );
+    }
+    const navigationSchema = registered.get('navigate_workspace')?.inputSchema;
+    const destination =
+      navigationSchema &&
+      navigationSchema.properties !== null &&
+      typeof navigationSchema.properties === 'object'
+        ? Reflect.get(navigationSchema.properties, 'destination')
+        : undefined;
+    expect(destination).toEqual(
+      expect.objectContaining({
+        enum: [
+          'design',
+          'find_makers',
+          'buyer_orders',
+          'maker_requests',
+          'maker_profile',
+          'settings',
+        ],
+      }),
+    );
     expect(registrationSignals.every((signal) => signal === registration.signal)).toBe(true);
 
     const execution = new AbortController();
@@ -259,10 +290,7 @@ describe('native model-context registration contract', () => {
     expect(execute).not.toHaveBeenCalled();
 
     const cancellation = new AbortController();
-    await navigation?.execute(
-      { destination: 'maker_requests' },
-      { signal: cancellation.signal },
-    );
+    await navigation?.execute({ destination: 'maker_requests' }, { signal: cancellation.signal });
     expect(navigate).toHaveBeenCalledWith('maker_requests', cancellation.signal);
   });
 });

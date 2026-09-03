@@ -59,9 +59,7 @@ function requiredEnvironment(name: string): string {
 
 export function normalizeShopDomain(value: string): string {
   const normalized = value.trim().toLocaleLowerCase();
-  if (
-    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(normalized)
-  ) {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(normalized)) {
     throw new TypeError('Enter a valid store address ending in .myshopify.com.');
   }
   return normalized;
@@ -70,11 +68,11 @@ export function normalizeShopDomain(value: string): string {
 export function shopifyOAuthConfigured(): boolean {
   return Boolean(
     process.env.SHOPIFY_CLIENT_ID?.trim() &&
-      process.env.SHOPIFY_CLIENT_SECRET?.trim() &&
-      process.env.SHOPIFY_ADMIN_API_VERSION?.trim() &&
-      (process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY?.trim() ||
-        (process.env.ATTUNE_SESSION_SECRET?.length ?? 0) >= 32) &&
-      (process.env.SHOPIFY_OAUTH_REDIRECT_URI?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim()),
+    process.env.SHOPIFY_CLIENT_SECRET?.trim() &&
+    process.env.SHOPIFY_ADMIN_API_VERSION?.trim() &&
+    (process.env.SHOPIFY_TOKEN_ENCRYPTION_KEY?.trim() ||
+      (process.env.ATTUNE_SESSION_SECRET?.length ?? 0) >= 32) &&
+    (process.env.SHOPIFY_OAUTH_REDIRECT_URI?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim()),
   );
 }
 
@@ -82,10 +80,7 @@ export function shopifyOAuthConfiguration(): ShopifyOAuthConfiguration {
   const explicitRedirect = process.env.SHOPIFY_OAUTH_REDIRECT_URI?.trim();
   const redirectUri = explicitRedirect
     ? new URL(explicitRedirect).toString()
-    : new URL(
-        '/api/shopify/oauth/callback',
-        requiredEnvironment('NEXT_PUBLIC_APP_URL'),
-      ).toString();
+    : new URL('/api/shopify/oauth/callback', requiredEnvironment('NEXT_PUBLIC_APP_URL')).toString();
   if (new URL(redirectUri).protocol !== 'https:' && process.env.NODE_ENV === 'production') {
     throw new Error('SHOPIFY_OAUTH_REDIRECT_URI must use HTTPS in production.');
   }
@@ -99,7 +94,8 @@ export function shopifyOAuthConfiguration(): ShopifyOAuthConfiguration {
 
 function stateSecret(): string {
   const secret = requiredEnvironment('ATTUNE_SESSION_SECRET');
-  if (secret.length < 32) throw new Error('ATTUNE_SESSION_SECRET must contain at least 32 characters.');
+  if (secret.length < 32)
+    throw new Error('ATTUNE_SESSION_SECRET must contain at least 32 characters.');
   return secret;
 }
 
@@ -177,7 +173,7 @@ export function verifyShopifyCallbackHmac(
   if (!supplied || !/^[a-f0-9]{64}$/i.test(supplied)) return false;
   const message = [...searchParams.entries()]
     .filter(([key]) => key !== 'hmac' && key !== 'signature')
-    .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+    .toSorted(([leftKey, leftValue], [rightKey, rightValue]) =>
       leftKey === rightKey ? leftValue.localeCompare(rightValue) : leftKey.localeCompare(rightKey),
     )
     .map(([key, value]) => `${key}=${value}`)
@@ -210,7 +206,11 @@ function tokenEncryptionKey(): Buffer {
 
   let key: Buffer;
   if (/^[a-f0-9]{64}$/i.test(encoded)) key = Buffer.from(encoded, 'hex');
-  else key = Buffer.from(encoded, encoded.includes('-') || encoded.includes('_') ? 'base64url' : 'base64');
+  else
+    key = Buffer.from(
+      encoded,
+      encoded.includes('-') || encoded.includes('_') ? 'base64url' : 'base64',
+    );
   if (key.length !== 32) {
     throw new Error('SHOPIFY_TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes.');
   }
@@ -222,7 +222,12 @@ export function encryptShopifyToken(token: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', tokenEncryptionKey(), iv);
   const encrypted = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
-  return ['v1', iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), encrypted.toString('base64url')].join('.');
+  return [
+    'v1',
+    iv.toString('base64url'),
+    cipher.getAuthTag().toString('base64url'),
+    encrypted.toString('base64url'),
+  ].join('.');
 }
 
 export function decryptShopifyToken(value: string): string {
@@ -274,16 +279,17 @@ async function tokenRequest(
   if (typeof accessToken !== 'string' || !accessToken || typeof scope !== 'string') {
     throw new Error('Shopify token exchange returned an invalid response.');
   }
+  const accessTokenExpiresAt = expiry(Reflect.get(payload, 'expires_in'));
+  const refreshTokenExpiresAt = expiry(Reflect.get(payload, 'refresh_token_expires_in'));
   return {
     accessToken,
     ...(typeof refreshToken === 'string' && refreshToken ? { refreshToken } : {}),
-    grantedScopes: scope.split(',').map((value) => value.trim()).filter(Boolean),
-    ...(expiry(Reflect.get(payload, 'expires_in'))
-      ? { accessTokenExpiresAt: expiry(Reflect.get(payload, 'expires_in')) }
-      : {}),
-    ...(expiry(Reflect.get(payload, 'refresh_token_expires_in'))
-      ? { refreshTokenExpiresAt: expiry(Reflect.get(payload, 'refresh_token_expires_in')) }
-      : {}),
+    grantedScopes: scope
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+    ...(accessTokenExpiresAt ? { accessTokenExpiresAt } : {}),
+    ...(refreshTokenExpiresAt ? { refreshTokenExpiresAt } : {}),
   };
 }
 
@@ -324,7 +330,9 @@ export function refreshShopifyOfflineToken(
 }
 
 function impliedScope(granted: ReadonlySet<string>, scope: string): boolean {
-  return granted.has(scope) || (scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`));
+  return (
+    granted.has(scope) || (scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`))
+  );
 }
 
 export function missingShopifyCoreScopes(grantedScopes: readonly string[]): readonly string[] {

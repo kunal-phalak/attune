@@ -84,7 +84,7 @@ export function MechanicalPreview({ compact = false }: { readonly compact?: bool
           <path d="M125 404h42M146 383v42" />
           <circle cx="146" cy="404" r="3" />
           <text x="174" y="411">
-            Revision r7
+            Version 7
           </text>
         </g>
       </svg>

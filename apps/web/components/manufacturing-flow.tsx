@@ -1,12 +1,12 @@
 'use client';
 
 import type { PanelGeometry, ProviderCapabilityProfile } from '@attune/domain';
-import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Combobox } from '@cloudflare/kumo/components/combobox';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Surface } from '@cloudflare/kumo/components/surface';
-import { Tabs } from '@cloudflare/kumo/components/tabs';
+import { Text } from '@cloudflare/kumo/components/text';
 import {
   ArrowRightIcon,
   BuildingsIcon,
@@ -20,7 +20,7 @@ import {
   WarningCircleIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   attuneWorkspaceEndpoint,
@@ -35,15 +35,12 @@ import {
   validateProviderCapability,
   validateUniversalGeometry,
 } from '../lib/manufacturing/validation';
+import { resolveManufacturingVersionSelection } from '../lib/manufacturing/version-selection';
 import { attuneToastManager } from './attune-ui-provider';
 import { BuyerProfileDialog } from './manufacturing-flow/buyer-profile-dialog';
 import { MakerMap } from './manufacturing-flow/maker-map';
 import { ProviderProfileSurface } from './manufacturing-flow/provider-profile';
-import {
-  isMarketplacePayload,
-  type MarketplacePayload,
-  type MarketplaceProvider,
-} from './manufacturing-flow/types';
+import { isMarketplacePayload, type MarketplacePayload } from './manufacturing-flow/types';
 import { WorkflowCallout } from './manufacturing-flow/workflow-callout';
 
 export type ManufacturingSurface =
@@ -52,6 +49,16 @@ export type ManufacturingSurface =
   | 'buyer_orders'
   | 'provider_requests'
   | 'provider_profile';
+
+function isManufacturingSurface(value: string): value is ManufacturingSurface {
+  return [
+    'design',
+    'marketplace',
+    'buyer_orders',
+    'provider_requests',
+    'provider_profile',
+  ].includes(value);
+}
 
 function DesignPreview({
   view,
@@ -110,33 +117,33 @@ function DesignPreview({
           transform={`translate(15 15) scale(${sx} ${sy})`}
           className="manufacturing-preview-geometry"
         >
-        <rect width={geometry.width} height={geometry.height} rx={5 / Math.max(sx, sy)} />
-        {[...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts].map(
-          (feature) => (
-            <circle
+          <rect width={geometry.width} height={geometry.height} rx={5 / Math.max(sx, sy)} />
+          {[...geometry.mounts, ...geometry.auxiliaryHoles, ...geometry.circularCutouts].map(
+            (feature) => (
+              <circle
+                key={feature.id}
+                cx={feature.center.x}
+                cy={feature.center.y}
+                r={feature.diameter / 2}
+                vectorEffect="non-scaling-stroke"
+              />
+            ),
+          )}
+          {[geometry.slot, ...geometry.rectangularCutouts, ...geometry.ventSlots].map((feature) => (
+            <rect
               key={feature.id}
-              cx={feature.center.x}
-              cy={feature.center.y}
-              r={feature.diameter / 2}
+              x={feature.center.x - feature.width / 2}
+              y={feature.center.y - feature.height / 2}
+              width={feature.width}
+              height={feature.height}
+              rx={
+                'cornerRadius' in feature && typeof feature.cornerRadius === 'number'
+                  ? feature.cornerRadius
+                  : 2
+              }
               vectorEffect="non-scaling-stroke"
             />
-          ),
-        )}
-        {[geometry.slot, ...geometry.rectangularCutouts, ...geometry.ventSlots].map((feature) => (
-          <rect
-            key={feature.id}
-            x={feature.center.x - feature.width / 2}
-            y={feature.center.y - feature.height / 2}
-            width={feature.width}
-            height={feature.height}
-            rx={
-              'cornerRadius' in feature && typeof feature.cornerRadius === 'number'
-                ? feature.cornerRadius
-                : 2
-            }
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
+          ))}
         </g>
       </svg>
       {storageMessage ? <figcaption>{storageMessage}</figcaption> : null}
@@ -170,11 +177,11 @@ function makerInitials(name: string): string {
 }
 
 function FitReport({
-  view,
+  geometry,
   profile,
   configuration,
 }: {
-  readonly view: AttuneApiView;
+  readonly geometry: PanelGeometry;
   readonly profile: ProviderCapabilityProfile;
   readonly configuration: {
     readonly material: 'aluminium' | 'acrylic';
@@ -184,11 +191,6 @@ function FitReport({
     readonly toleranceMm: number;
   };
 }) {
-  const geometry = {
-    ...view.workspace.geometry,
-    material: configuration.material,
-    thickness: configuration.thicknessMm,
-  };
   const universal = validateUniversalGeometry(geometry);
   const providerIssues = validateProviderCapability(geometry, profile);
   const issueIds = new Set(providerIssues.map(({ id }) => id));
@@ -243,8 +245,7 @@ function FitReport({
       detail: `±${configuration.toleranceMm} mm requested · ±${profile.toleranceMm} mm capability`,
       source: 'Project requirement · Maker profile',
       pass:
-        typeof profile.toleranceMm !== 'number' ||
-        configuration.toleranceMm >= profile.toleranceMm,
+        typeof profile.toleranceMm !== 'number' || configuration.toleranceMm >= profile.toleranceMm,
     },
   ];
   return (
@@ -287,11 +288,13 @@ function ConfigurationControl({
   values,
   value,
   onChange,
+  disabled = false,
 }: {
   readonly label: string;
   readonly values: readonly (string | number)[];
   readonly value: string | number;
   readonly onChange: (value: string | number) => void;
+  readonly disabled?: boolean;
 }) {
   return (
     <fieldset className="configuration-control">
@@ -304,6 +307,7 @@ function ConfigurationControl({
             size="sm"
             variant={option === value ? 'primary' : 'secondary'}
             aria-pressed={option === value}
+            disabled={disabled}
             onClick={() => onChange(option)}
           >
             {typeof option === 'number' && label === 'Thickness' ? `${option} mm` : option}
@@ -347,15 +351,44 @@ function MarketplaceSurface({
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState('current');
   const makerCardRefs = useRef(new Map<string, HTMLElement>());
-  const geometry = {
-    ...view.workspace.geometry,
-    material: configuration.material,
-    thickness: configuration.thicknessMm,
-  };
+  const versionOptions = useMemo(
+    () => [
+      { id: 'current', label: 'Current draft' },
+      ...view.workspace.savedVersions
+        .toSorted((left, right) => right.versionNumber - left.versionNumber)
+        .map((version) => ({
+          id: version.versionId,
+          label: `Version ${version.versionNumber}`,
+        })),
+    ],
+    [view.workspace.savedVersions],
+  );
+  const selectedVersionOption =
+    versionOptions.find(({ id }) => id === selectedVersionId) ?? versionOptions[0];
+  const selection = resolveManufacturingVersionSelection(
+    view.workspace,
+    selectedVersionOption.id,
+    configuration,
+  );
+  const geometry = selection.geometry;
   const compatible =
     selected?.label === 'Live maker' &&
     validateUniversalGeometry(geometry).length === 0 &&
     validateProviderCapability(geometry, profile).length === 0;
+
+  const selectVersion = (versionId: string) => {
+    const version = view.workspace.savedVersions.find(
+      (candidate) => candidate.versionId === versionId,
+    );
+    setSelectedVersionId(versionId);
+    if (version) {
+      setConfiguration((current) => ({
+        ...current,
+        material: version.geometry.material,
+        thicknessMm: version.geometry.thickness,
+      }));
+    }
+  };
 
   const submitRequest = async () => {
     setSubmitting(true);
@@ -370,12 +403,12 @@ function MarketplaceSurface({
             body: JSON.stringify({ installationId: selected.installationId }),
           },
         );
-        const selection: unknown = await selectionResponse.json();
-        if (!selectionResponse.ok || !isMarketplacePayload(selection)) {
+        const selectedMakerPayload: unknown = await selectionResponse.json();
+        if (!selectionResponse.ok || !isMarketplacePayload(selectedMakerPayload)) {
           throw new Error('The selected Shopify Maker could not be bound to this request.');
         }
-        requestView = selection.view;
-        onView(selection.view);
+        requestView = selectedMakerPayload.view;
+        onView(selectedMakerPayload.view);
       }
       const next = await requestAttuneView(
         attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
@@ -385,8 +418,8 @@ function MarketplaceSurface({
             requestView,
             {
               type: 'request_quote',
-              configuration,
-              ...(selectedVersionId !== 'current' ? { versionId: selectedVersionId } : {}),
+              configuration: selection.configuration,
+              ...(selection.version ? { versionId: selection.version.versionId } : {}),
             },
             'human-request',
             requestView.workspace.workspaceSeq,
@@ -427,8 +460,8 @@ function MarketplaceSurface({
           <span className="manufacturing-eyebrow">Design-driven search</span>
           <h2>Find makers</h2>
           <p>
-            Matching the exact {view.workspace.geometry.width} × {view.workspace.geometry.height} mm
-            design in {configuration.thicknessMm} mm {configuration.material}.
+            Matching the exact {geometry.width} × {geometry.height} mm design in{' '}
+            {selection.configuration.thicknessMm} mm {selection.configuration.material}.
           </p>
         </div>
         <div className="maker-list">
@@ -445,7 +478,14 @@ function MarketplaceSurface({
               }}
             >
               <span className="maker-card-icon" aria-hidden>
-                {makerInitials(provider.name)}
+                <span>{makerInitials(provider.name)}</span>
+                {provider.logoUrl ? (
+                  <img
+                    src={provider.logoUrl}
+                    alt=""
+                    onError={(event) => event.currentTarget.remove()}
+                  />
+                ) : null}
               </span>
               <span className="maker-card-main">
                 <span className="maker-card-title">
@@ -498,78 +538,104 @@ function MarketplaceSurface({
           {selected?.label === 'Live maker' ? (
             <>
               {canConfigure ? (
-                <Select
+                <Combobox
                   label="Version to send"
-                  value={selectedVersionId}
-                  onValueChange={(value) => setSelectedVersionId(String(value))}
+                  items={versionOptions}
+                  value={selectedVersionOption}
+                  onValueChange={(value) => {
+                    if (value && typeof value === 'object' && 'id' in value) {
+                      selectVersion(value.id);
+                    }
+                  }}
                 >
-                  <Select.Option value="current">Current draft</Select.Option>
-                  {view.workspace.savedVersions
-                    .toSorted((left, right) => right.versionNumber - left.versionNumber)
-                    .map((version) => (
-                      <Select.Option key={version.versionId} value={version.versionId}>
-                        Version {version.versionNumber} · {version.name}
-                      </Select.Option>
-                    ))}
-                </Select>
+                  <Combobox.TriggerValue placeholder="Choose a version" />
+                  <Combobox.Content>
+                    <Combobox.Input placeholder="Search versions" />
+                    <Combobox.Empty>No versions found.</Combobox.Empty>
+                    <Combobox.List>
+                      {(option: { id: string; label: string }) => (
+                        <Combobox.Item key={option.id} value={option}>
+                          {option.label}
+                        </Combobox.Item>
+                      )}
+                    </Combobox.List>
+                  </Combobox.Content>
+                </Combobox>
               ) : null}
-              {canConfigure ? <div className="configuration-grid">
-                <ConfigurationControl
-                  label="Material"
-                  values={['aluminium', 'acrylic']}
-                  value={configuration.material}
-                  onChange={(value) =>
-                    setConfiguration((current) => ({
-                      ...current,
-                      material: value === 'acrylic' ? 'acrylic' : 'aluminium',
-                    }))
-                  }
-                />
-                <ConfigurationControl
-                  label="Thickness"
-                  values={[2, 3, 4, 5, 6]}
-                  value={configuration.thicknessMm}
-                  onChange={(value) =>
-                    setConfiguration((current) => ({ ...current, thicknessMm: Number(value) }))
-                  }
-                />
-                <ConfigurationControl
-                  label="Finish"
-                  values={profile.finishes ?? ['As cut']}
-                  value={configuration.finish}
-                  onChange={(value) =>
-                    setConfiguration((current) => ({ ...current, finish: String(value) }))
-                  }
-                />
-                <ConfigurationControl
-                  label="Quantity"
-                  values={[1, 2, 4, 8, 16]}
-                  value={configuration.quantity}
-                  onChange={(value) =>
-                    setConfiguration((current) => ({ ...current, quantity: Number(value) }))
-                  }
-                />
-              </div> : null}
-              <FitReport view={view} profile={profile} configuration={configuration} />
-              {canConfigure ? <div className="manufacturing-primary-action">
-                <div>
-                  <strong>Request a quote for the exact version</strong>
-                  <small>Later design changes won&apos;t alter the submitted version.</small>
+              <div className="manufacturing-version-preview">
+                <DesignPreview view={view} versionId={selection.version?.versionId} />
+                <Text as="p" variant="secondary" size="sm">
+                  {selection.version
+                    ? `Version ${selection.version.versionNumber} · Exact version locked.`
+                    : 'Current draft · A new exact Version will be created before sending.'}
+                </Text>
+              </div>
+              {canConfigure ? (
+                <div className="configuration-grid">
+                  <ConfigurationControl
+                    label="Material"
+                    values={['aluminium', 'acrylic']}
+                    value={configuration.material}
+                    disabled={Boolean(selection.version)}
+                    onChange={(value) =>
+                      setConfiguration((current) => ({
+                        ...current,
+                        material: value === 'acrylic' ? 'acrylic' : 'aluminium',
+                      }))
+                    }
+                  />
+                  <ConfigurationControl
+                    label="Thickness"
+                    values={[2, 3, 4, 5, 6]}
+                    value={configuration.thicknessMm}
+                    disabled={Boolean(selection.version)}
+                    onChange={(value) =>
+                      setConfiguration((current) => ({ ...current, thicknessMm: Number(value) }))
+                    }
+                  />
+                  <ConfigurationControl
+                    label="Finish"
+                    values={profile.finishes ?? ['As cut']}
+                    value={configuration.finish}
+                    onChange={(value) =>
+                      setConfiguration((current) => ({ ...current, finish: String(value) }))
+                    }
+                  />
+                  <ConfigurationControl
+                    label="Quantity"
+                    values={[1, 2, 4, 8, 16]}
+                    value={configuration.quantity}
+                    onChange={(value) =>
+                      setConfiguration((current) => ({ ...current, quantity: Number(value) }))
+                    }
+                  />
                 </div>
-                <Button
-                  type="button"
-                  variant="primary"
-                  loading={submitting}
-                  disabled={
-                    !compatible || submitting
-                  }
-                  onClick={() => void submitRequest()}
-                >
-                  Request quote
-                </Button>
-              </div> : (
+              ) : null}
+              <FitReport
+                geometry={geometry}
+                profile={profile}
+                configuration={selection.configuration}
+              />
+              {canConfigure ? (
+                <div className="manufacturing-primary-action">
+                  <div>
+                    <strong>Request a quote for the exact version</strong>
+                    <small>Later design changes won&apos;t alter the submitted version.</small>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    loading={submitting}
+                    disabled={!compatible || submitting}
+                    onClick={() => void submitRequest()}
+                  >
+                    Request quote
+                  </Button>
+                </div>
+              ) : (
                 <p className="manufacturing-readonly-note">
-                  You can inspect maker fit. Buyer authority is required to configure or submit a request.
+                  You can inspect maker fit. Buyer authority is required to configure or submit a
+                  request.
                 </p>
               )}
             </>
@@ -619,24 +685,24 @@ function OrdersSurface({
     : undefined;
   const stale = Boolean(
     quote &&
-      (quote.status === 'STALE' ||
-        quote.status === 'SUPERSEDED' ||
-        request?.status === 'STALE' ||
-        request?.status === 'SUPERSEDED'),
+    (quote.status === 'STALE' ||
+      quote.status === 'SUPERSEDED' ||
+      request?.status === 'STALE' ||
+      request?.status === 'SUPERSEDED'),
   );
   const checkoutConformant = Boolean(
     request &&
-      quote &&
-      acceptance &&
-      commerce &&
-      commerce.syncState === 'IN_SYNC' &&
-      commerce.customerId &&
-      commerce.requestId === request.requestId &&
-      commerce.versionId === acceptance.versionId &&
-      commerce.versionNumber === acceptance.versionNumber &&
-      commerce.specHash === acceptance.specHash &&
-      commerce.amountMinor === quote.amountMinor &&
-      commerce.currency === quote.currency,
+    quote &&
+    acceptance &&
+    commerce &&
+    commerce.syncState === 'IN_SYNC' &&
+    commerce.customerId &&
+    commerce.requestId === request.requestId &&
+    commerce.versionId === acceptance.versionId &&
+    commerce.versionNumber === acceptance.versionNumber &&
+    commerce.specHash === acceptance.specHash &&
+    commerce.amountMinor === quote.amountMinor &&
+    commerce.currency === quote.currency,
   );
   const [busy, setBusy] = useState(false);
 
@@ -1127,22 +1193,45 @@ export function ManufacturingFlow({
     );
   };
 
+  const navigateSurface = (
+    next: ManufacturingSurface,
+    destinationPerspective?: Extract<CapabilityRole, 'buyer' | 'provider'>,
+  ) => {
+    if (
+      view.product.agentToolsEnabled &&
+      destinationPerspective &&
+      destinationPerspective !== perspective
+    ) {
+      window.location.assign(
+        `/workspace/${encodeURIComponent(workspaceId)}?perspective=${destinationPerspective}&surface=${next}`,
+      );
+      return;
+    }
+    setSurface(next);
+  };
+
   return (
-    <section className="manufacturing-flow t-panel-slide" data-open={open} aria-hidden={!open}>
+    <section
+      className="manufacturing-flow t-panel-slide"
+      data-open={open}
+      data-judge-perspective={view.product.agentToolsEnabled ? perspective : undefined}
+      aria-hidden={!open}
+    >
       {view.product.agentToolsEnabled ? (
-        <div className="judge-mode-frame">
-          <Banner
-            variant="default"
-            size="sm"
-            icon={<SealCheckIcon size={16} weight="fill" />}
-            title={`Judge demo · ${perspective === 'provider' ? 'Maker' : 'Buyer'} view`}
-            description={
-              perspective === 'provider'
-                ? "You're viewing the maker side with the same judge account. This is a demo convenience."
-                : undefined
-            }
-          />
-        </div>
+        <aside className="judge-mode-frame ring ring-kumo-line" aria-label="Judge demo context">
+          <SealCheckIcon size={18} weight="fill" aria-hidden />
+          <span>
+            <Text as="strong" variant="heading">
+              Judge demo · {perspective === 'provider' ? 'Maker' : 'Buyer'} view
+            </Text>
+            <Text as="span" variant="secondary" size="sm">
+              {perspective === 'provider'
+                ? "You're viewing the maker side with the same judge account."
+                : "You're viewing the buyer side with the same judge account."}{' '}
+              This is a challenge demonstration convenience.
+            </Text>
+          </span>
+        </aside>
       ) : null}
       <header className="manufacturing-header">
         <div className="manufacturing-header-left">
@@ -1155,13 +1244,15 @@ export function ManufacturingFlow({
             aria-label="Return to design"
             onClick={() => setSurface('design')}
           />
-          <div>
-            <span className="manufacturing-eyebrow">
+          <div className="manufacturing-title">
+            <Text as="span" variant="secondary" size="sm">
               {activeRequest
                 ? `Exact version locked · Version ${activeRequest.versionNumber}`
                 : 'Current design draft'}
-            </span>
-            <strong>{view.product.projectName}</strong>
+            </Text>
+            <Text as="strong" variant="heading">
+              {view.product.projectName}
+            </Text>
           </div>
         </div>
         <nav className="manufacturing-nav" aria-label="Manufacturing workspace">
@@ -1174,22 +1265,24 @@ export function ManufacturingFlow({
           >
             Find makers
           </Button>
-          {canBuy ? <Button
-            type="button"
-            size="sm"
-            variant={surface === 'buyer_orders' ? 'secondary' : 'ghost'}
-            aria-current={surface === 'buyer_orders' ? 'page' : undefined}
-            onClick={() => setSurface('buyer_orders')}
-          >
-            Orders
-          </Button> : null}
+          {canBuy ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={surface === 'buyer_orders' ? 'secondary' : 'ghost'}
+              aria-current={surface === 'buyer_orders' ? 'page' : undefined}
+              onClick={() => navigateSurface('buyer_orders', 'buyer')}
+            >
+              Orders
+            </Button>
+          ) : null}
           {canMake ? (
             <Button
               type="button"
               size="sm"
               variant={surface === 'provider_requests' ? 'secondary' : 'ghost'}
               aria-current={surface === 'provider_requests' ? 'page' : undefined}
-              onClick={() => setSurface('provider_requests')}
+              onClick={() => navigateSurface('provider_requests', 'provider')}
             >
               Requests
             </Button>
@@ -1200,7 +1293,7 @@ export function ManufacturingFlow({
               size="sm"
               variant={surface === 'provider_profile' ? 'secondary' : 'ghost'}
               aria-current={surface === 'provider_profile' ? 'page' : undefined}
-              onClick={() => setSurface('provider_profile')}
+              onClick={() => navigateSurface('provider_profile', 'provider')}
             >
               Maker profile
             </Button>
@@ -1210,7 +1303,18 @@ export function ManufacturingFlow({
           aria-label="Manufacturing section"
           className="manufacturing-nav-mobile"
           value={surface}
-          onValueChange={(value) => setSurface(value as ManufacturingSurface)}
+          onValueChange={(value) => {
+            if (value === null || !isManufacturingSurface(value)) return;
+            const next = value;
+            navigateSurface(
+              next,
+              next === 'buyer_orders'
+                ? 'buyer'
+                : next === 'provider_requests' || next === 'provider_profile'
+                  ? 'provider'
+                  : undefined,
+            );
+          }}
         >
           <Select.Option value="design">Design</Select.Option>
           <Select.Option value="marketplace">Find makers</Select.Option>
@@ -1218,42 +1322,6 @@ export function ManufacturingFlow({
           {canMake ? <Select.Option value="provider_requests">Requests</Select.Option> : null}
           {canMake ? <Select.Option value="provider_profile">Maker profile</Select.Option> : null}
         </Select>
-        <Tabs
-          variant="segmented"
-          size="sm"
-          className="perspective-switch"
-          aria-label="Workspace perspective"
-          value={perspective}
-          tabs={[
-            {
-              value: 'buyer',
-              label: 'Buyer',
-              nativeButton: false,
-              render: (props: ComponentProps<'a'>) => (
-                <a {...props} href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=buyer&surface=${surface}`}>
-                  Buyer
-                </a>
-              ),
-            },
-            ...(canMake
-              ? [
-                  {
-                    value: 'provider',
-                    label: 'Maker',
-                    nativeButton: false,
-                    render: (props: ComponentProps<'a'>) => (
-                      <a
-                        {...props}
-                        href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=${surface === 'buyer_orders' ? 'provider_requests' : surface}`}
-                      >
-                        Maker
-                      </a>
-                    ),
-                  },
-                ]
-              : []),
-          ]}
-        />
       </header>
       <WorkflowCallout
         workspaceId={workspaceId}
@@ -1331,8 +1399,8 @@ export function FindMakersButton({ onClick }: { readonly onClick: () => void }) 
     <Button
       type="button"
       variant="primary"
-      size="sm"
-      className="find-makers-button"
+      size="base"
+      className="text-sm"
       icon={<StorefrontIcon size={16} />}
       onClick={onClick}
     >

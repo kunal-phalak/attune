@@ -163,7 +163,6 @@
   .product-settings-header h1 {
     margin: 4px 0;
     font-size: clamp(30px, 4vw, 46px);
-    letter-spacing: -0.04em;
   }
 
   .product-settings-header p,
@@ -207,19 +206,22 @@
   }
 
   .product-settings-card {
+    display: grid;
+    align-items: start;
     min-height: 150px;
-    gap: 16px;
-    padding: 22px;
+    gap: 18px;
+    padding: 24px;
     border-radius: 16px;
   }
 
-  .product-settings-card.is-stacked {
-    align-items: flex-start;
+  .product-settings-card > button,
+  .product-settings-card > a,
+  .product-settings-card > [data-kumo-component='Badge'] {
+    justify-self: start;
   }
 
   .product-settings-icon {
     display: grid;
-    flex: 0 0 42px;
     width: 42px;
     height: 42px;
     place-items: center;
@@ -230,8 +232,7 @@
 
   .product-settings-copy {
     display: grid;
-    flex: 1;
-    gap: 7px;
+    gap: 8px;
     min-width: 0;
   }
 
@@ -246,13 +247,13 @@
     max-width: 720px;
     padding: 11px 12px;
     border-radius: 9px;
-    color: #73561c;
-    background: #fff6dc;
+    color: var(--color-kumo-warning);
+    background: var(--color-kumo-warning-tint);
   }
 
   .settings-truth-state[data-error] {
-    color: #883b31;
-    background: #fff0ee;
+    color: var(--color-kumo-danger);
+    background: var(--color-kumo-danger-tint);
   }
 
   .settings-shop-identity {
@@ -308,9 +309,16 @@
   .shopify-installation {
     display: grid;
     gap: 14px;
-    padding: 16px 18px;
-    border-radius: 12px;
-    background: var(--color-kumo-base);
+    padding: 16px 0 0;
+    border-top: 1px solid var(--color-kumo-line);
+  }
+
+  .shopify-installation:first-child {
+    border-top: 0;
+  }
+
+  .shopify-installation:last-child {
+    padding-bottom: 4px;
   }
 
   .settings-shop-identity > img,
@@ -362,6 +370,11 @@
     font-size: 0.9em;
   }
 
+  .shopify-connect-dialog {
+    width: min(400px, calc(100vw - 28px));
+    padding: 24px;
+  }
+
   .shopify-dialog-header {
     align-items: flex-start;
   }
@@ -393,8 +406,8 @@
   }
 
   .settings-shop-identity small {
-    color: #276449;
-    font-size: 13px;
+    color: var(--color-kumo-success);
+    font-size: 14px;
   }
 
   .settings-facts {
@@ -403,7 +416,7 @@
 
   .settings-healthy {
     gap: 5px;
-    color: #276449;
+    color: var(--color-kumo-success);
   }
 
   @media (max-width: 680px) {
@@ -471,19 +484,25 @@
 
   .manufacturing-header-left > div {
     display: grid;
+    min-width: 0;
     gap: 1px;
   }
 
   .manufacturing-header-left strong {
     overflow: hidden;
-    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .manufacturing-header-left span {
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .manufacturing-eyebrow {
     color: var(--manufacturing-muted);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.35;
   }
 
@@ -617,10 +636,19 @@
   }
 
   .maker-card-icon {
+    position: relative;
     flex: 0 0 38px;
+    overflow: hidden;
     font-size: 13px;
-    font-weight: 750;
-    letter-spacing: 0.03em;
+    font-weight: 600;
+  }
+
+  .maker-card-icon img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .maker-card-main {
@@ -743,7 +771,21 @@
     box-shadow: 0 5px 14px rgb(23 32 45 / 24%);
     cursor: pointer;
     rotate: -45deg;
-    transition: transform var(--duration-fast, 250ms) var(--ease-smooth-out, ease-out);
+    transition-property: transform;
+    transition-duration: var(--duration-fast, 250ms);
+    transition-timing-function: var(--ease-smooth-out, ease-out);
+  }
+
+  .maker-map-pin > span,
+  .maker-map-pin > img {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 8px;
+    line-height: 18px;
+    object-fit: cover;
+    rotate: 45deg;
   }
 
   .maker-map-pin[data-selected='true'] {
@@ -797,6 +839,21 @@
     display: grid;
     gap: 24px;
     padding: 22px 24px 24px;
+  }
+
+  .manufacturing-version-preview {
+    display: grid;
+    gap: 8px;
+  }
+
+  .manufacturing-version-preview .exact-preview-frame,
+  .manufacturing-version-preview .manufacturing-design-preview {
+    height: 260px;
+    min-height: 260px;
+  }
+
+  .manufacturing-version-preview > p {
+    margin: 0;
   }
 
   .maker-detail-heading,
@@ -1223,15 +1280,45 @@
   }
 
   .judge-mode-frame {
-    position: absolute;
-    z-index: 4;
-    right: 16px;
-    bottom: 44px;
-    max-width: min(560px, calc(100% - 32px));
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 8px 20px;
+    color: var(--manufacturing-ink);
+    background: var(--color-kumo-tint);
+  }
+
+  .judge-mode-frame > svg {
+    flex: 0 0 auto;
+    color: var(--manufacturing-accent);
+  }
+
+  .judge-mode-frame > span {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .judge-mode-frame > span > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .manufacturing-flow:has(.judge-mode-frame) {
-    box-shadow: inset 0 0 0 2px rgb(31 94 255 / 22%);
+    grid-template-rows: 52px 60px minmax(0, 1fr) 36px;
+  }
+
+  .manufacturing-flow[data-judge-perspective='provider'] {
+    box-shadow: inset 3px 0 0 color-mix(in oklch, var(--manufacturing-accent) 60%, transparent);
+  }
+
+  .manufacturing-flow:has(.judge-mode-frame) .workflow-callout {
+    top: 124px;
   }
 
   .workflow-callout {
@@ -1244,9 +1331,7 @@
     border: 0;
     border-radius: 12px;
     background: var(--color-kumo-base);
-    box-shadow:
-      0 0 0 1px var(--color-kumo-line),
-      0 16px 44px rgb(23 32 45 / 13%);
+    box-shadow: 0 16px 44px rgb(23 32 45 / 13%);
   }
 
   .workflow-callout-head {
@@ -1262,11 +1347,17 @@
     min-width: 0;
   }
 
+  .workflow-callout-head strong {
+    font-weight: 600;
+    font-size: 16px;
+    line-height: 1.3;
+  }
+
   .workflow-callout-head small,
   .workflow-callout p,
   .maker-profile-controls small {
     color: var(--manufacturing-muted);
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .workflow-callout-icon {
@@ -1275,8 +1366,8 @@
     height: 32px;
     place-items: center;
     border-radius: 8px;
-    color: #276449;
-    background: #e8f5ee;
+    color: var(--color-kumo-success);
+    background: var(--color-kumo-success-tint);
   }
 
   .workflow-callout-toggle {
@@ -1300,6 +1391,28 @@
     line-height: 1.45;
   }
 
+  .workflow-callout-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+
+  .workflow-callout-facts div {
+    display: grid;
+    gap: 1px;
+  }
+
+  .workflow-callout-facts dt {
+    color: var(--manufacturing-muted);
+    font-size: 12px;
+  }
+
+  .workflow-callout-facts dd {
+    margin: 0;
+    font-weight: 600;
+  }
+
   .workflow-callout-actions {
     display: flex;
     flex-wrap: wrap;
@@ -1316,6 +1429,7 @@
   .buyer-profile-dialog {
     width: min(760px, calc(100vw - 28px));
     max-height: min(860px, calc(100vh - 28px));
+    padding: 24px;
     overflow: auto;
   }
 
@@ -1329,7 +1443,24 @@
 
   .buyer-profile-header > div {
     display: grid;
-    gap: 5px;
+    gap: 4px;
+  }
+
+  .buyer-profile-dialog-title,
+  .shopify-dialog-title {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--text-color-kumo-strong);
+  }
+
+  .buyer-profile-dialog-description,
+  .shopify-dialog-description {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-kumo-subtle);
   }
 
   .buyer-profile-form,
@@ -1349,19 +1480,20 @@
     gap: 6px;
   }
 
-  .buyer-profile-field > span,
-  .buyer-profile-section h3 {
+  .buyer-profile-field > span {
+    font-size: 14px;
     font-weight: 500;
   }
 
   .buyer-profile-section h3 {
     margin: 0;
     font-size: 16px;
+    font-weight: 600;
   }
 
   .buyer-profile-error {
     margin: 0;
-    color: #9b302b;
+    color: var(--color-kumo-danger);
   }
 
   .buyer-profile-actions {
@@ -1407,6 +1539,19 @@
   @media (max-width: 700px) {
     .manufacturing-flow {
       grid-template-rows: 56px minmax(0, 1fr) 34px;
+    }
+    .manufacturing-flow:has(.judge-mode-frame) {
+      grid-template-rows: 62px 56px minmax(0, 1fr) 34px;
+    }
+    .judge-mode-frame {
+      padding: 8px 12px;
+    }
+    .judge-mode-frame > span {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+    .manufacturing-flow:has(.judge-mode-frame) .workflow-callout {
+      top: 130px;
     }
     .manufacturing-header {
       padding: 0 10px;

@@ -47,11 +47,13 @@ export function MakerMap({
   const rootRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMapInstance | null>(null);
   const markersRef = useRef<MapboxMarkerInstance[]>([]);
+  const providersRef = useRef(providers);
   const onSelectRef = useRef(onSelect);
   const syncMarkersRef = useRef<() => void>(() => undefined);
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
   const selected = providers.find(({ id }) => id === selectedId);
 
+  providersRef.current = providers;
   onSelectRef.current = onSelect;
   syncMarkersRef.current = () => {
     if (!mapRef.current || !window.mapboxgl) return;
@@ -64,6 +66,21 @@ export function MakerMap({
       element.dataset.providerId = maker.id;
       element.dataset.selected = maker.id === selectedId ? 'true' : 'false';
       element.setAttribute('aria-label', `Select ${maker.name}`);
+      const fallback = document.createElement('span');
+      fallback.textContent = maker.name
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join('');
+      element.append(fallback);
+      if (maker.logoUrl) {
+        const logo = document.createElement('img');
+        logo.src = maker.logoUrl;
+        logo.alt = '';
+        logo.addEventListener('error', () => logo.remove(), { once: true });
+        element.append(logo);
+      }
       element.addEventListener('click', () => onSelectRef.current(maker.id));
       return [
         new window.mapboxgl!.Marker({ element, anchor: 'bottom' })
@@ -88,7 +105,7 @@ export function MakerMap({
     const initialize = () => {
       if (cancelled || !rootRef.current || !window.mapboxgl || mapRef.current) return;
       window.mapboxgl.accessToken = token;
-      const first = providers.find(
+      const first = providersRef.current.find(
         (maker) => typeof maker.longitude === 'number' && typeof maker.latitude === 'number',
       );
       const map = new window.mapboxgl.Map({

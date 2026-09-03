@@ -12,12 +12,10 @@ import type { ShopifyProviderConnection } from '@attune/shopify';
 
 import { parseWorkspaceId } from '../../../../lib/attune-request';
 import { attuneErrorResponse, noStoreJson } from '../../../../lib/attune-response';
-import {
-  inspectForCurrentHuman,
-  synchronizeProviderProfile,
-} from '../../../../lib/attune-runtime';
+import { inspectForCurrentHuman, synchronizeProviderProfile } from '../../../../lib/attune-runtime';
 import { workspaceIdentity } from '../../../../lib/auth/session';
 import { assertMarketplaceRouteAccess } from '../../../../lib/manufacturing/access';
+import { withGeocodedShopifyLocation } from '../../../../lib/manufacturing/geocoding';
 import {
   DEMO_MARKETPLACE_PROVIDERS,
   oauthShopifyProviderConnection,
@@ -93,30 +91,32 @@ async function inspectedInstallation(
   }
 }
 
-function marketplaceProvider(
+async function marketplaceProvider(
   live: LiveMaker,
   geometry: Parameters<typeof validateUniversalGeometry>[0],
 ) {
+  const profile = await withGeocodedShopifyLocation(live.profile);
   const universalIssues = validateUniversalGeometry(geometry);
-  const makerIssues = validateProviderCapability(geometry, live.profile);
+  const makerIssues = validateProviderCapability(geometry, profile);
   const compatible = universalIssues.length === 0 && makerIssues.length === 0;
   return {
-    id: live.profile.providerId,
+    id: profile.providerId,
     installationId: live.installation?.id,
-    name: live.profile.providerName,
+    name: profile.providerName,
     label: 'Live maker' as const,
     connectionLabel: 'Shopify connected',
-    locationName: live.profile.shopify?.locationName,
-    address: live.profile.shopify?.address,
-    latitude: live.profile.shopify?.latitude,
-    longitude: live.profile.shopify?.longitude,
-    profile: live.profile,
+    locationName: profile.shopify?.locationName,
+    address: profile.shopify?.address,
+    logoUrl: profile.shopify?.primaryDomain
+      ? `https://${profile.shopify.primaryDomain}/favicon.ico`
+      : undefined,
+    latitude: profile.shopify?.latitude,
+    longitude: profile.shopify?.longitude,
+    profile,
     fit: compatible ? ('Compatible' as const) : ('Needs review' as const),
     reason: compatible
       ? 'The exact design satisfies this maker profile.'
-      : (universalIssues[0]?.message ??
-        makerIssues[0]?.message ??
-        'Maker review is required.'),
+      : (universalIssues[0]?.message ?? makerIssues[0]?.message ?? 'Maker review is required.'),
   };
 }
 
@@ -125,11 +125,7 @@ async function compatibilityMaker(existing: ProviderCapabilityProfile): Promise<
   return {
     installation: null,
     connection,
-    profile: shopifyProviderProfile(
-      connection,
-      existing.shopify?.locationId,
-      existing,
-    ),
+    profile: shopifyProviderProfile(connection, existing.shopify?.locationId, existing),
   };
 }
 
@@ -137,6 +133,7 @@ async function marketplace(
   workspaceId: string,
   update: MarketplaceUpdate,
   refresh: boolean,
+  versionId?: string,
 ) {
   const identity = await workspaceIdentity(workspaceId);
   const updateRole = Object.keys(update).length > 0 ? 'provider' : undefined;
@@ -182,14 +179,12 @@ async function marketplace(
     return noStoreJson({
       view,
       activeInstallationId: null,
-      installations: ownerInstallations.map(
-        ({ id, shopName, shopDomain, connectionStatus }) => ({
-          id,
-          shopName,
-          shopDomain,
-          connectionStatus,
-        }),
-      ),
+      installations: ownerInstallations.map(({ id, shopName, shopDomain, connectionStatus }) => ({
+        id,
+        shopName,
+        shopDomain,
+        connectionStatus,
+      })),
       connection: null,
       providerProfile: bundle.workspace.providerCapabilityProfile,
       providers: DEMO_MARKETPLACE_PROVIDERS,
@@ -218,8 +213,7 @@ async function marketplace(
         update.locationId ?? active.installation.selectedLocationId ?? undefined,
         active.installation.makerProfile ?? bundle.workspace.providerCapabilityProfile,
       );
-      const marketplaceListed =
-        update.marketplaceListed ?? active.installation.marketplaceListed;
+      const marketplaceListed = update.marketplaceListed ?? active.installation.marketplaceListed;
       await saveShopifyInstallationMakerProfile({
         ownerPrincipalId: identity.principalId,
         installationId: active.installation.id,
@@ -252,8 +246,15 @@ async function marketplace(
     listed.unshift(active);
   }
   const view = await inspectForCurrentHuman(workspaceId);
+  const selectedVersion = versionId
+    ? view.workspace.savedVersions.find(({ versionId: candidateId }) => candidateId === versionId)
+    : undefined;
+  if (versionId && !selectedVersion)
+    throw new TypeError('The selected saved version does not exist.');
+  const fitGeometry = selectedVersion?.geometry ?? view.workspace.geometry;
   return noStoreJson({
     view,
+    selectedVersionId: selectedVersion?.versionId ?? null,
     activeInstallationId: active.installation?.id ?? null,
     installations: ownerInstallations.map(({ id, shopName, shopDomain, connectionStatus }) => ({
       id,
@@ -269,7 +270,9 @@ async function marketplace(
     },
     providerProfile: active.profile,
     providers: [
-      ...listed.map((candidate) => marketplaceProvider(candidate, view.workspace.geometry)),
+      ...(await Promise.all(
+        listed.map((candidate) => marketplaceProvider(candidate, fitGeometry)),
+      )),
       ...DEMO_MARKETPLACE_PROVIDERS,
     ],
   });
@@ -279,7 +282,12 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = parseWorkspaceId(url.searchParams.get('workspace_id'));
-    return marketplace(workspaceId, {}, url.searchParams.get('refresh') === 'true');
+    return marketplace(
+      workspaceId,
+      {},
+      url.searchParams.get('refresh') === 'true',
+      url.searchParams.get('version_id') ?? undefined,
+    );
   } catch (error) {
     return attuneErrorResponse(error);
   }

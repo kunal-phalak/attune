@@ -31,7 +31,7 @@ export interface AgentContextFocus {
 
 export interface ToolRuntime {
   readonly current?: (signal?: AbortSignal) => Promise<AttuneApiView>;
-  readonly marketplace?: (signal?: AbortSignal) => Promise<unknown>;
+  readonly marketplace?: (versionId?: string, signal?: AbortSignal) => Promise<unknown>;
   readonly navigate?: (surface: string, signal?: AbortSignal) => Promise<unknown>;
   readonly observe: (
     focus?: AgentContextFocus,
@@ -336,11 +336,15 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
-  const marketplace = async (signal?: AbortSignal) => {
+  const marketplace = async (versionId?: string, signal?: AbortSignal) => {
     input.report({ execution: 'executing', lastAction: 'find_makers' });
     try {
       const response = await fetch(
-        attuneWorkspaceEndpoint('/api/attune/marketplace', input.workspaceId),
+        attuneWorkspaceEndpoint(
+          '/api/attune/marketplace',
+          input.workspaceId,
+          versionId ? { version_id: versionId } : undefined,
+        ),
         { cache: 'no-store', headers: { Accept: 'application/json' }, signal },
       );
       const payload = await responseJson(response);
@@ -358,7 +362,15 @@ export function createToolRuntime(input: {
     }
   };
   const navigate: ToolRuntime['navigate'] = async (surface, signal) => {
-    const fromSurface = new URLSearchParams(window.location.search).get('surface') ?? 'design';
+    const currentSurface = new URLSearchParams(window.location.search).get('surface') ?? 'design';
+    const fromSurface =
+      currentSurface === 'marketplace'
+        ? 'find_makers'
+        : currentSurface === 'provider_requests'
+          ? 'maker_requests'
+          : currentSurface === 'provider_profile'
+            ? 'maker_profile'
+            : currentSurface;
     const currentPerspective = perspective();
     const requiredPerspective =
       surface === 'buyer_orders'
@@ -381,11 +393,24 @@ export function createToolRuntime(input: {
       }
       signal?.throwIfAborted();
       const pageSurface =
-        surface === 'maker_requests'
-          ? 'provider_requests'
-          : surface === 'maker_profile'
-            ? 'provider_profile'
-            : surface;
+        surface === 'find_makers'
+          ? 'marketplace'
+          : surface === 'maker_requests'
+            ? 'provider_requests'
+            : surface === 'maker_profile'
+              ? 'provider_profile'
+              : surface;
+      if (surface === 'settings') {
+        window.location.assign('/settings?section=integrations');
+        input.report({ execution: 'completed', lastAction: action });
+        return {
+          status: 'NAVIGATION_INITIATED',
+          fromSurface,
+          toSurface: surface,
+          perspective: requiredPerspective,
+          authorityUnchanged: true,
+        };
+      }
       const parameters = new URLSearchParams();
       if (requiredPerspective === 'provider') parameters.set('perspective', 'provider');
       if (pageSurface !== 'design') parameters.set('surface', pageSurface);

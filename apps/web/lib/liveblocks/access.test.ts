@@ -7,6 +7,7 @@ import {
   roomPermissionsAllow,
   roomPermissionsForShareRole,
   roomPermissionsForWorkspaceMember,
+  roomUsersAccessesForWorkspaceMembers,
   shareRoleForRoomPermissions,
 } from './access';
 
@@ -45,6 +46,18 @@ describe('Liveblocks room access roles', () => {
       '*:read',
       'comments:none',
     ]);
+  });
+
+  it('builds explicit access for a newly provisioned workspace room', () => {
+    expect(
+      roomUsersAccessesForWorkspaceMembers([
+        { userId: 'user:owner', roles: ['buyer'], canComment: true },
+        { userId: 'user:reviewer', roles: ['reviewer'], canComment: false },
+      ]),
+    ).toEqual({
+      'user:owner': ['*:write'],
+      'user:reviewer': ['*:read', 'comments:none'],
+    });
   });
 
   it('migrates missing legacy members once and preserves explicit room access', () => {

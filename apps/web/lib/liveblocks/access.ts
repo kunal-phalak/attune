@@ -17,6 +17,14 @@ export function roomPermissionsForWorkspaceMember(member: {
   return member.canComment ? ['*:read', 'comments:write'] : ['*:read', 'comments:none'];
 }
 
+export function roomUsersAccessesForWorkspaceMembers(
+  members: readonly WorkspaceRoomMember[],
+): Record<string, AttuneRoomPermission[]> {
+  return Object.fromEntries(
+    members.map((member) => [member.userId, [...roomPermissionsForWorkspaceMember(member)]]),
+  );
+}
+
 export function legacyWorkspaceAccessMigration(
   room: {
     readonly metadata: Readonly<Record<string, unknown>>;

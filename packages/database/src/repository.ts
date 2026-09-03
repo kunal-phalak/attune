@@ -1411,6 +1411,30 @@ export async function workspaceMembersForLiveblocksRoom(
     .where(eq(workspaces.liveblocksRoomId, roomId));
 }
 
+export async function workspaceBootstrapForLiveblocksRoom(roomId: string): Promise<{
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly fileKind: string;
+  readonly workspace: AttuneWorkspace;
+} | null> {
+  const rows = await getDatabase()
+    .select({
+      workspaceId: workspaces.id,
+      projectId: projects.id,
+      projectName: projects.name,
+      fileKind: workspaceFiles.kind,
+      workspace: workspaces.currentSpecification,
+    })
+    .from(workspaces)
+    .innerJoin(projects, eq(projects.id, workspaces.projectId))
+    .innerJoin(workspaceFiles, eq(workspaceFiles.workspaceId, workspaces.id))
+    .where(eq(workspaces.liveblocksRoomId, roomId))
+    .limit(1);
+  const row = rows[0];
+  return row ? { ...row, workspace: workspaceWithCurrentContract(row.workspace) } : null;
+}
+
 export async function attuneUsersByIds(
   userIds: readonly string[],
 ): Promise<readonly { readonly id: string; readonly name: string }[]> {

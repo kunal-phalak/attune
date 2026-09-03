@@ -1,6 +1,9 @@
-import { workspaceMembersForLiveblocksRoom } from '@attune/database';
+import {
+  workspaceBootstrapForLiveblocksRoom,
+  workspaceMembersForLiveblocksRoom,
+} from '@attune/database';
 import { hashSpecification, type AttuneWorkspace } from '@attune/domain';
-import { Liveblocks } from '@liveblocks/node';
+import { Liveblocks, LiveblocksError } from '@liveblocks/node';
 import * as Y from 'yjs';
 
 import { isAttuneCollaborativeDraft, type AttuneCollaborativeDraft } from '../../liveblocks.config';
@@ -9,6 +12,7 @@ import {
   effectiveRoomPermissions,
   legacyWorkspaceAccessMigration,
   roomPermissionsAllow,
+  roomUsersAccessesForWorkspaceMembers,
 } from './access';
 
 let liveblocks: Liveblocks | undefined;
@@ -46,7 +50,34 @@ async function roomWithCurrentAccessModel(roomId: string): Promise<LiveblocksRoo
   if (previous) return previous;
   const migration = (async () => {
     const client = getLiveblocks();
-    const room = await client.getRoom(roomId);
+    let room: LiveblocksRoom;
+    try {
+      room = await client.getRoom(roomId);
+    } catch (error) {
+      if (!(error instanceof LiveblocksError) || error.status !== 404) throw error;
+      const [bootstrap, members] = await Promise.all([
+        workspaceBootstrapForLiveblocksRoom(roomId),
+        workspaceMembersForLiveblocksRoom(roomId),
+      ]);
+      if (!bootstrap || members.length === 0) throw error;
+      room = await client.createRoom(
+        roomId,
+        {
+          defaultAccesses: [],
+          groupsAccesses: {},
+          usersAccesses: roomUsersAccessesForWorkspaceMembers(members),
+          metadata: {
+            workspaceId: bootstrap.workspaceId,
+            projectId: bootstrap.projectId,
+            name: bootstrap.projectName,
+            kind: bootstrap.fileKind,
+            attuneAccessModel: ATTUNE_ROOM_ACCESS_MODEL,
+          },
+        },
+        { idempotent: true },
+      );
+      await syncAuthoritativeWorkspace(roomId, bootstrap.workspace);
+    }
     if (room.metadata.attuneAccessModel === ATTUNE_ROOM_ACCESS_MODEL) return room;
     const members = await workspaceMembersForLiveblocksRoom(roomId);
     const update = legacyWorkspaceAccessMigration(room, members);

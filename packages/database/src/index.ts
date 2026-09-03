@@ -50,6 +50,7 @@ export {
   userCanManageLiveblocksRoom,
   userIdForPrincipalId,
   workspaceMembersForLiveblocksRoom,
+  workspaceBootstrapForLiveblocksRoom,
   workspaceMemberUserIds,
   workspaceRoles,
 } from './repository';

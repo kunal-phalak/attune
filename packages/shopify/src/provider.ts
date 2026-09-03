@@ -11,12 +11,16 @@ import { INSPECT_PROVIDER } from './queries';
 import type { ShopifyLocation, ShopifyProviderConnection, ShopifyShopIdentity } from './types';
 
 function hasEvery(granted: ReadonlySet<string>, required: readonly string[]): boolean {
-  return required.every((scope) => granted.has(scope));
+  return required.every(
+    (scope) =>
+      granted.has(scope) ||
+      (scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`)),
+  );
 }
 
-export async function inspectShopifyProvider(): Promise<ShopifyProviderConnection> {
-  const configuration = coreConfigurationFromEnvironment();
-  const admin = await createAdminClient(configuration);
+export async function inspectShopifyProviderWithAdmin(
+  admin: Awaited<ReturnType<typeof createAdminClient>>,
+): Promise<ShopifyProviderConnection> {
   const data = await admin<{
     currentAppInstallation: { accessScopes: readonly { handle: string }[] };
     shop: ShopifyShopIdentity;
@@ -49,4 +53,9 @@ export async function inspectShopifyProvider(): Promise<ShopifyProviderConnectio
       ),
     },
   };
+}
+
+export async function inspectShopifyProvider(): Promise<ShopifyProviderConnection> {
+  const configuration = coreConfigurationFromEnvironment();
+  return inspectShopifyProviderWithAdmin(await createAdminClient(configuration));
 }

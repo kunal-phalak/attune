@@ -170,7 +170,7 @@
   .product-settings-copy p {
     margin: 0;
     color: var(--color-kumo-subtle);
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.55;
   }
 
@@ -192,9 +192,8 @@
     padding: 8px 12px;
     border-radius: 8px;
     font-size: 14px;
-    font-weight: 650;
+    font-weight: 500;
     text-decoration: none;
-    transition: background 160ms ease-out;
   }
 
   .product-settings-nav a:hover,
@@ -239,7 +238,6 @@
   .product-settings-copy h2 {
     margin: 0;
     font-size: 22px;
-    letter-spacing: -0.025em;
   }
 
   .settings-truth-state {
@@ -270,7 +268,123 @@
     color: #fff;
     background: #1f2933;
     font-size: 13px;
-    font-weight: 750;
+    font-weight: 600;
+  }
+
+  .settings-section-heading,
+  .shopify-installation-actions,
+  .shopify-dialog-header,
+  .shopify-dialog-actions,
+  .shopify-disconnected-state {
+    display: flex;
+    align-items: center;
+  }
+
+  .settings-section-heading,
+  .shopify-dialog-header,
+  .shopify-dialog-actions {
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .settings-section-heading > div,
+  .shopify-installations,
+  .shopify-connect-form {
+    display: grid;
+    gap: 8px;
+  }
+
+  .shopify-installations {
+    gap: 12px;
+    margin-top: 8px;
+  }
+
+  .shopify-installations h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .shopify-installation {
+    display: grid;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 12px;
+    background: var(--color-kumo-base);
+  }
+
+  .settings-shop-identity > img,
+  .shopify-product-icon img {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+  }
+
+  .settings-shop-identity > div {
+    min-width: 0;
+  }
+
+  .settings-shop-identity > div strong,
+  .settings-shop-identity > div small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .settings-shop-identity > :last-child {
+    margin-left: auto;
+  }
+
+  .shopify-installation-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .shopify-disconnected-state {
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    background: var(--color-kumo-tint);
+  }
+
+  .shopify-disconnected-state > div {
+    display: grid;
+    gap: 2px;
+  }
+
+  .shopify-redirect-note {
+    overflow-wrap: anywhere;
+  }
+
+  .shopify-redirect-note span {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+  }
+
+  .shopify-dialog-header {
+    align-items: flex-start;
+  }
+
+  .shopify-dialog-header > div {
+    display: grid;
+    gap: 4px;
+  }
+
+  .shopify-connect-form {
+    gap: 14px;
+    margin-top: 20px;
+  }
+
+  .shopify-connect-form label {
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .shopify-dialog-actions {
+    justify-content: flex-end;
   }
 
   .settings-shop-identity > div {
@@ -299,9 +413,14 @@
     }
 
     .product-settings-header,
-    .product-settings-card {
+    .product-settings-card,
+    .settings-section-heading {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .settings-section-heading > button {
+      width: 100%;
     }
 
     .product-settings-nav {

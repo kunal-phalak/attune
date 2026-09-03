@@ -38,6 +38,32 @@ const updatedAt = timestamp('updated_at', { mode: 'string', withTimezone: true }
   .notNull()
   .defaultNow();
 
+export type ShopifyInstallationStatus =
+  | 'connected'
+  | 'needs_reauthorization'
+  | 'disconnected'
+  | 'uninstalled';
+
+export interface ShopifyInstallationLocation {
+  readonly id: string;
+  readonly name: string;
+  readonly isActive: boolean;
+  readonly fulfillsOnlineOrders: boolean;
+  readonly address?: {
+    readonly formatted?: readonly string[];
+    readonly address1?: string | null;
+    readonly address2?: string | null;
+    readonly city?: string | null;
+    readonly province?: string | null;
+    readonly provinceCode?: string | null;
+    readonly country?: string | null;
+    readonly countryCode?: string | null;
+    readonly zip?: string | null;
+    readonly latitude?: number | null;
+    readonly longitude?: number | null;
+  } | null;
+}
+
 export const organizations = pgTable('organizations', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -82,6 +108,48 @@ export const shopifyCustomerBindings = pgTable(
     ),
   ],
 );
+
+export const shopifyInstallations = pgTable(
+  'shopify_installations',
+  {
+    id: text('id').primaryKey(),
+    ownerPrincipalId: text('owner_principal_id').notNull(),
+    shopId: text('shop_id').notNull(),
+    shopDomain: text('shop_domain').notNull(),
+    shopName: text('shop_name').notNull(),
+    primaryDomain: text('primary_domain').notNull(),
+    currencyCode: text('currency_code').notNull(),
+    encryptedOfflineAccessToken: text('encrypted_offline_access_token'),
+    encryptedOfflineRefreshToken: text('encrypted_offline_refresh_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', {
+      mode: 'string',
+      withTimezone: true,
+    }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', {
+      mode: 'string',
+      withTimezone: true,
+    }),
+    grantedScopes: text('granted_scopes').array().$type<string[]>().notNull(),
+    connectionStatus: text('connection_status').$type<ShopifyInstallationStatus>().notNull(),
+    locations: jsonb('locations').$type<ShopifyInstallationLocation[]>().notNull(),
+    selectedLocationId: text('selected_location_id'),
+    makerProfile: jsonb('maker_profile').$type<ProviderCapabilityProfile>(),
+    marketplaceListed: boolean('marketplace_listed').notNull().default(false),
+    installedAt: timestamp('installed_at', { mode: 'string', withTimezone: true }).notNull(),
+    updatedAt,
+    uninstalledAt: timestamp('uninstalled_at', { mode: 'string', withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('shopify_installations_owner_shop_unique').on(
+      table.ownerPrincipalId,
+      table.shopId,
+    ),
+    index('shopify_installations_owner_index').on(table.ownerPrincipalId),
+    index('shopify_installations_domain_index').on(table.shopDomain),
+  ],
+);
+
+export type ShopifyInstallation = typeof shopifyInstallations.$inferSelect;
 
 export const organizationMemberships = pgTable(
   'organization_memberships',

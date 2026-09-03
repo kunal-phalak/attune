@@ -24,6 +24,7 @@ import {
   type AttuneRole,
   type AttuneWorkspace,
   type BuyerCommerceProfile,
+  type ProviderCapabilityProfile,
   type ShopifyCustomerBinding,
   type SketchDocument,
 } from '@attune/domain';
@@ -52,11 +53,17 @@ import {
   quoteRequests,
   quotes,
   shopifyCustomerBindings,
+  shopifyInstallations,
   users,
   workspaceFiles,
   workspaceMemberships,
   workspaceSnapshots,
   workspaces,
+} from './schema';
+import type {
+  ShopifyInstallation,
+  ShopifyInstallationLocation,
+  ShopifyInstallationStatus,
 } from './schema';
 
 export const JUDGE_WORKSPACE_ID = 'workspace:at-1042';
@@ -159,6 +166,285 @@ export async function saveShopifyCustomerBinding(
       },
     });
   return binding;
+}
+
+function shopifyInstallationSelection() {
+  return {
+    id: shopifyInstallations.id,
+    ownerPrincipalId: shopifyInstallations.ownerPrincipalId,
+    shopId: shopifyInstallations.shopId,
+    shopDomain: shopifyInstallations.shopDomain,
+    shopName: shopifyInstallations.shopName,
+    primaryDomain: shopifyInstallations.primaryDomain,
+    currencyCode: shopifyInstallations.currencyCode,
+    encryptedOfflineAccessToken: shopifyInstallations.encryptedOfflineAccessToken,
+    encryptedOfflineRefreshToken: shopifyInstallations.encryptedOfflineRefreshToken,
+    accessTokenExpiresAt: shopifyInstallations.accessTokenExpiresAt,
+    refreshTokenExpiresAt: shopifyInstallations.refreshTokenExpiresAt,
+    grantedScopes: shopifyInstallations.grantedScopes,
+    connectionStatus: shopifyInstallations.connectionStatus,
+    locations: shopifyInstallations.locations,
+    selectedLocationId: shopifyInstallations.selectedLocationId,
+    makerProfile: shopifyInstallations.makerProfile,
+    marketplaceListed: shopifyInstallations.marketplaceListed,
+    installedAt: shopifyInstallations.installedAt,
+    updatedAt: shopifyInstallations.updatedAt,
+    uninstalledAt: shopifyInstallations.uninstalledAt,
+  };
+}
+
+export async function listShopifyInstallations(
+  ownerPrincipalId: string,
+): Promise<readonly ShopifyInstallation[]> {
+  const rows = await getDatabase()
+    .select(shopifyInstallationSelection())
+    .from(shopifyInstallations)
+    .where(eq(shopifyInstallations.ownerPrincipalId, ownerPrincipalId))
+    .orderBy(asc(shopifyInstallations.shopName));
+  return rows.map(immutableCopy);
+}
+
+export async function listConnectedShopifyInstallations(): Promise<
+  readonly ShopifyInstallation[]
+> {
+  const rows = await getDatabase()
+    .select(shopifyInstallationSelection())
+    .from(shopifyInstallations)
+    .where(eq(shopifyInstallations.connectionStatus, 'connected'))
+    .orderBy(asc(shopifyInstallations.shopName));
+  return rows.map(immutableCopy);
+}
+
+export async function shopifyInstallationForOwner(
+  ownerPrincipalId: string,
+  installationId: string,
+): Promise<ShopifyInstallation | null> {
+  const rows = await getDatabase()
+    .select(shopifyInstallationSelection())
+    .from(shopifyInstallations)
+    .where(
+      and(
+        eq(shopifyInstallations.ownerPrincipalId, ownerPrincipalId),
+        eq(shopifyInstallations.id, installationId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ? immutableCopy(rows[0]) : null;
+}
+
+export async function shopifyInstallationForShop(
+  ownerPrincipalId: string,
+  shopDomain: string,
+): Promise<ShopifyInstallation | null> {
+  const rows = await getDatabase()
+    .select(shopifyInstallationSelection())
+    .from(shopifyInstallations)
+    .where(
+      and(
+        eq(shopifyInstallations.ownerPrincipalId, ownerPrincipalId),
+        eq(shopifyInstallations.shopDomain, shopDomain),
+      ),
+    )
+    .limit(1);
+  return rows[0] ? immutableCopy(rows[0]) : null;
+}
+
+export async function connectedShopifyInstallationForDomain(
+  shopDomain: string,
+): Promise<ShopifyInstallation | null> {
+  const rows = await getDatabase()
+    .select(shopifyInstallationSelection())
+    .from(shopifyInstallations)
+    .where(
+      and(
+        eq(shopifyInstallations.shopDomain, shopDomain),
+        eq(shopifyInstallations.connectionStatus, 'connected'),
+      ),
+    )
+    .orderBy(desc(shopifyInstallations.updatedAt))
+    .limit(1);
+  return rows[0] ? immutableCopy(rows[0]) : null;
+}
+
+export async function shopifyInstallationForDomain(
+  shopDomain: string,
+): Promise<ShopifyInstallation | null> {
+  const rows = await getDatabase()
+    .select(shopifyInstallationSelection())
+    .from(shopifyInstallations)
+    .where(eq(shopifyInstallations.shopDomain, shopDomain))
+    .orderBy(desc(shopifyInstallations.updatedAt))
+    .limit(1);
+  return rows[0] ? immutableCopy(rows[0]) : null;
+}
+
+export async function saveShopifyInstallation(input: {
+  readonly id: string;
+  readonly ownerPrincipalId: string;
+  readonly shopId: string;
+  readonly shopDomain: string;
+  readonly shopName: string;
+  readonly primaryDomain: string;
+  readonly currencyCode: string;
+  readonly encryptedOfflineAccessToken: string;
+  readonly encryptedOfflineRefreshToken?: string | null;
+  readonly accessTokenExpiresAt?: string | null;
+  readonly refreshTokenExpiresAt?: string | null;
+  readonly grantedScopes: readonly string[];
+  readonly connectionStatus: ShopifyInstallationStatus;
+  readonly locations: readonly ShopifyInstallationLocation[];
+  readonly selectedLocationId?: string | null;
+  readonly makerProfile?: ProviderCapabilityProfile | null;
+  readonly marketplaceListed?: boolean;
+  readonly installedAt: string;
+  readonly updatedAt: string;
+}): Promise<ShopifyInstallation> {
+  const values = {
+    ...input,
+    grantedScopes: [...input.grantedScopes],
+    locations: [...input.locations],
+    makerProfile: input.makerProfile ?? null,
+    marketplaceListed: input.marketplaceListed ?? false,
+    uninstalledAt: null,
+  };
+  const rows = await getDatabase()
+    .insert(shopifyInstallations)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [shopifyInstallations.ownerPrincipalId, shopifyInstallations.shopId],
+      set: {
+        shopDomain: values.shopDomain,
+        shopName: values.shopName,
+        primaryDomain: values.primaryDomain,
+        currencyCode: values.currencyCode,
+        encryptedOfflineAccessToken: values.encryptedOfflineAccessToken,
+        encryptedOfflineRefreshToken: values.encryptedOfflineRefreshToken ?? null,
+        accessTokenExpiresAt: values.accessTokenExpiresAt ?? null,
+        refreshTokenExpiresAt: values.refreshTokenExpiresAt ?? null,
+        grantedScopes: values.grantedScopes,
+        connectionStatus: values.connectionStatus,
+        locations: values.locations,
+        selectedLocationId: values.selectedLocationId ?? null,
+        makerProfile: values.makerProfile,
+        marketplaceListed: values.marketplaceListed,
+        updatedAt: values.updatedAt,
+        uninstalledAt: null,
+      },
+    })
+    .returning(shopifyInstallationSelection());
+  const installation = rows[0];
+  if (!installation) throw new Error('SHOPIFY_INSTALLATION_NOT_SAVED');
+  return immutableCopy(installation);
+}
+
+export async function updateShopifyInstallationCredentials(input: {
+  readonly installationId: string;
+  readonly encryptedOfflineAccessToken: string;
+  readonly encryptedOfflineRefreshToken?: string | null;
+  readonly accessTokenExpiresAt?: string | null;
+  readonly refreshTokenExpiresAt?: string | null;
+  readonly updatedAt: string;
+}): Promise<void> {
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({
+      encryptedOfflineAccessToken: input.encryptedOfflineAccessToken,
+      encryptedOfflineRefreshToken: input.encryptedOfflineRefreshToken ?? null,
+      accessTokenExpiresAt: input.accessTokenExpiresAt ?? null,
+      refreshTokenExpiresAt: input.refreshTokenExpiresAt ?? null,
+      connectionStatus: 'connected',
+      updatedAt: input.updatedAt,
+    })
+    .where(eq(shopifyInstallations.id, input.installationId));
+}
+
+export async function markShopifyInstallationNeedsReauthorization(
+  installationId: string,
+): Promise<void> {
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({
+      connectionStatus: 'needs_reauthorization',
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(shopifyInstallations.id, installationId));
+}
+
+export async function selectShopifyInstallationLocation(input: {
+  readonly ownerPrincipalId: string;
+  readonly installationId: string;
+  readonly locationId: string;
+}): Promise<void> {
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({ selectedLocationId: input.locationId, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(shopifyInstallations.ownerPrincipalId, input.ownerPrincipalId),
+        eq(shopifyInstallations.id, input.installationId),
+      ),
+    );
+}
+
+export async function saveShopifyInstallationMakerProfile(input: {
+  readonly ownerPrincipalId: string;
+  readonly installationId: string;
+  readonly makerProfile: ProviderCapabilityProfile;
+  readonly marketplaceListed: boolean;
+}): Promise<void> {
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({
+      makerProfile: input.makerProfile,
+      marketplaceListed: input.marketplaceListed,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(shopifyInstallations.ownerPrincipalId, input.ownerPrincipalId),
+        eq(shopifyInstallations.id, input.installationId),
+      ),
+    );
+}
+
+export async function disconnectShopifyInstallation(
+  ownerPrincipalId: string,
+  installationId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({
+      encryptedOfflineAccessToken: null,
+      encryptedOfflineRefreshToken: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
+      connectionStatus: 'disconnected',
+      uninstalledAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(shopifyInstallations.ownerPrincipalId, ownerPrincipalId),
+        eq(shopifyInstallations.id, installationId),
+      ),
+    );
+}
+
+export async function markShopifyInstallationUninstalled(shopDomain: string): Promise<void> {
+  const now = new Date().toISOString();
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({
+      encryptedOfflineAccessToken: null,
+      encryptedOfflineRefreshToken: null,
+      accessTokenExpiresAt: null,
+      refreshTokenExpiresAt: null,
+      connectionStatus: 'uninstalled',
+      uninstalledAt: now,
+      updatedAt: now,
+    })
+    .where(eq(shopifyInstallations.shopDomain, shopDomain));
 }
 
 export interface CreateSketchProjectRecordInput {

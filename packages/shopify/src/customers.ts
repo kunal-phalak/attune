@@ -127,7 +127,11 @@ async function requireCustomerScopes(admin: GraphqlClient): Promise<void> {
     currentAppInstallation: { accessScopes: readonly { handle: string }[] };
   }>(VERIFY_SCOPES, {}, 'Verify customer scopes');
   const granted = new Set(data.currentAppInstallation.accessScopes.map(({ handle }) => handle));
-  const missing = CUSTOMER_WRITE_ADMIN_SCOPES.filter((scope) => !granted.has(scope));
+  const missing = CUSTOMER_WRITE_ADMIN_SCOPES.filter(
+    (scope) =>
+      !granted.has(scope) &&
+      !(scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`)),
+  );
   if (missing.length) {
     throw new ShopifyIntegrationError(
       'MISSING_ADMIN_SCOPES',

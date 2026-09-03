@@ -80,8 +80,20 @@ export async function createAdminClient(
   configuration: ShopifyCoreConfiguration,
 ): Promise<GraphqlClient> {
   const accessToken = await getAdminToken(configuration);
+  return createAdminClientForAccessToken(
+    configuration.domain,
+    configuration.adminVersion,
+    accessToken,
+  );
+}
+
+export function createAdminClientForAccessToken(
+  shopDomain: string,
+  adminVersion: string,
+  accessToken: string,
+): GraphqlClient {
   return graphqlClient(
-    `https://${configuration.domain}/admin/api/${configuration.adminVersion}/graphql.json`,
+    `https://${shopDomain}/admin/api/${adminVersion}/graphql.json`,
     { 'X-Shopify-Access-Token': accessToken },
   );
 }

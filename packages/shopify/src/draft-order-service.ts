@@ -114,16 +114,17 @@ function assertDraftOrderConforms(
   }
 }
 
-export async function createAndVerifyDraftOrder(input: {
-  readonly workspaceId: string;
-  readonly projectName: string;
-  readonly request: ManufacturingRequest;
-  readonly quote: Quote;
-  readonly customerId: string;
-  readonly buyerProfile: BuyerCommerceProfile;
-}): Promise<ExternalCommerceSnapshot> {
-  const configuration = coreConfigurationFromEnvironment();
-  const admin = await createAdminClient(configuration);
+export async function createAndVerifyDraftOrderWithAdmin(
+  admin: GraphqlClient,
+  input: {
+    readonly workspaceId: string;
+    readonly projectName: string;
+    readonly request: ManufacturingRequest;
+    readonly quote: Quote;
+    readonly customerId: string;
+    readonly buyerProfile: BuyerCommerceProfile;
+  },
+): Promise<ExternalCommerceSnapshot> {
   await requireDraftOrderScope(admin);
   const prepared = prepareDraftOrderInput(input);
   const created = await admin<{
@@ -161,4 +162,16 @@ export async function createAndVerifyDraftOrder(input: {
     ...(node.invoiceUrl ? { invoiceUrl: node.invoiceUrl } : {}),
     updatedAt: node.updatedAt,
   };
+}
+
+export async function createAndVerifyDraftOrder(input: {
+  readonly workspaceId: string;
+  readonly projectName: string;
+  readonly request: ManufacturingRequest;
+  readonly quote: Quote;
+  readonly customerId: string;
+  readonly buyerProfile: BuyerCommerceProfile;
+}): Promise<ExternalCommerceSnapshot> {
+  const configuration = coreConfigurationFromEnvironment();
+  return createAndVerifyDraftOrderWithAdmin(await createAdminClient(configuration), input);
 }

@@ -9,6 +9,7 @@ import {
   agentDelegationForWorkspace,
   advanceDelegationObservation,
   buyerCommerceProfile,
+  connectedShopifyInstallationForDomain,
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
@@ -20,6 +21,7 @@ import {
   reserveExternalMaterialization,
   revokeAgentDelegation,
   saveShopifyCustomerBinding,
+  shopifyInstallationForDomain,
   shopifyCustomerBinding,
   workspaceMemberUserIds,
   type WorkspaceBundle,
@@ -41,8 +43,11 @@ import {
 import { getPlaneGcsSolver } from '@attune/domain/planegcs';
 import {
   createAndVerifyDraftOrder,
+  createAndVerifyDraftOrderWithAdmin,
+  coreConfigurationFromEnvironment,
   materializeRevision,
   ShopifyIntegrationError,
+  synchronizeCustomerWithAdmin,
   synchronizeShopifyCustomer,
 } from '@attune/shopify';
 import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp';
@@ -68,7 +73,11 @@ import {
 } from './liveblocks/server';
 import { buyerCommerceProfileComplete } from './manufacturing/buyer-commerce';
 import { workspaceForMakerReview } from './manufacturing/maker-review';
-import { shopifyProviderConnection, shopifyProviderProfile } from './manufacturing/marketplace';
+import {
+  oauthShopifyProviderConnection,
+  shopifyProviderConnection,
+  shopifyProviderProfile,
+} from './manufacturing/marketplace';
 import {
   PreviewStorage,
   PreviewStorageConfigurationError,
@@ -76,6 +85,7 @@ import {
 } from './manufacturing/preview-storage';
 import { renderVersionPreview } from './manufacturing/version-preview';
 import { measureServerPhase, type ServerTimingRecorder } from './server-timing';
+import { adminForShopifyInstallation } from './shopify/installations';
 
 export interface CommandExecutionInput {
   readonly command: AttuneCommand;
@@ -813,11 +823,24 @@ async function persistProviderProfile(
 
 async function synchronizeLiveMakerForRequest(workspaceId: string): Promise<WorkspaceBundle> {
   const bundle = await readWorkspaceBundle(workspaceId);
-  const connection = await shopifyProviderConnection();
+  const existing = bundle.workspace.providerCapabilityProfile;
+  const knownInstallation = existing.shopify
+    ? await shopifyInstallationForDomain(existing.shopify.shopDomain)
+    : null;
+  if (knownInstallation && knownInstallation.connectionStatus !== 'connected') {
+    throw new ShopifyIntegrationError(
+      'ADMIN_AUTH_FAILED',
+      'The selected Maker store must reconnect Shopify before receiving a request.',
+    );
+  }
+  const installation = knownInstallation;
+  const connection = installation
+    ? await oauthShopifyProviderConnection(installation)
+    : await shopifyProviderConnection();
   const profile = shopifyProviderProfile(
     connection,
-    bundle.workspace.providerCapabilityProfile.shopify?.locationId,
-    bundle.workspace.providerCapabilityProfile,
+    installation?.selectedLocationId ?? existing.shopify?.locationId,
+    installation?.makerProfile ?? existing,
   );
   return persistProviderProfile(workspaceId, profile);
 }
@@ -1136,7 +1159,28 @@ export async function finalizeProviderQuote(workspaceId: string, input: CommandE
         request.buyerPrincipalId,
         request.shopDomain,
       );
-      const binding = await synchronizeShopifyCustomer({ profile: buyerProfile, existingBinding });
+      const knownInstallation = await shopifyInstallationForDomain(request.shopDomain);
+      if (knownInstallation && knownInstallation.connectionStatus !== 'connected') {
+        throw new ShopifyIntegrationError(
+          'ADMIN_AUTH_FAILED',
+          'The selected Maker store must reconnect Shopify before receiving commerce.',
+        );
+      }
+      const installation = await connectedShopifyInstallationForDomain(request.shopDomain);
+      if (!installation && coreConfigurationFromEnvironment().domain !== request.shopDomain) {
+        throw new ShopifyIntegrationError(
+          'ADMIN_AUTH_FAILED',
+          'The selected Maker store must reconnect Shopify before receiving commerce.',
+        );
+      }
+      const admin = installation ? await adminForShopifyInstallation(installation) : null;
+      const binding = admin
+        ? await synchronizeCustomerWithAdmin(admin, {
+            profile: buyerProfile,
+            existingBinding,
+            shopDomain: request.shopDomain,
+          })
+        : await synchronizeShopifyCustomer({ profile: buyerProfile, existingBinding });
       if (binding.shopDomain !== request.shopDomain) {
         throw new ShopifyIntegrationError(
           'CONFORMANCE_FAILED',
@@ -1145,14 +1189,17 @@ export async function finalizeProviderQuote(workspaceId: string, input: CommandE
       }
       await saveShopifyCustomerBinding(binding);
       stage = 'Shopify Draft Order creation and reread';
-      const snapshot = await createAndVerifyDraftOrder({
+      const draftOrderInput = {
         workspaceId,
         projectName: quotedView.product.projectName,
         request,
         quote,
         customerId: binding.customerId,
         buyerProfile,
-      });
+      };
+      const snapshot = admin
+        ? await createAndVerifyDraftOrderWithAdmin(admin, draftOrderInput)
+        : await createAndVerifyDraftOrder(draftOrderInput);
       stage = 'Draft Order reconciliation';
       const current = await readWorkspaceBundle(workspaceId);
       await executePersistedCommand({

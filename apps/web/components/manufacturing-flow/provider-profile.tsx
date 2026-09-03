@@ -3,7 +3,7 @@
 import { Select } from '@cloudflare/kumo/components/select';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import { Switch } from '@cloudflare/kumo/components/switch';
-import { CheckCircleIcon, FactoryIcon, StorefrontIcon } from '@phosphor-icons/react';
+import { FactoryIcon, StorefrontIcon } from '@phosphor-icons/react';
 import { useState } from 'react';
 
 import { attuneWorkspaceEndpoint, type AttuneApiView } from '../../lib/attune-view';
@@ -25,6 +25,7 @@ export function ProviderProfileSurface({
   const shopify = profile.shopify;
   const [busy, setBusy] = useState(false);
   const updateProfile = async (body: {
+    readonly installationId?: string;
     readonly locationId?: string;
     readonly marketplaceListed?: boolean;
   }) => {
@@ -62,15 +63,33 @@ export function ProviderProfileSurface({
         </p>
       </div>
       <div className="provider-profile-grid">
-        <Surface render={<section />} className="provider-profile-section">
+        <Surface render={<section />} className="provider-profile-section ring ring-kumo-line">
           <div className="provider-section-icon">
             <StorefrontIcon size={22} />
           </div>
           <div>
             <span className="manufacturing-eyebrow">Settings · Integrations · Shopify</span>
-            <h3>{shopify?.shopDomain ? payload.connection.shop.name : 'Connection unavailable'}</h3>
+            <h3>{shopify?.shopDomain ? payload.connection?.shop.name : 'Connect a Shopify store'}</h3>
           </div>
-          <dl className="profile-facts">
+          {payload.installations && payload.installations.length > 1 ? (
+            <Select
+              label="Shopify store"
+              value={payload.activeInstallationId ?? ''}
+              disabled={busy}
+              onValueChange={(installationId) =>
+                void updateProfile({ installationId: String(installationId) })
+              }
+            >
+              {payload.installations
+                .filter(({ connectionStatus }) => connectionStatus === 'connected')
+                .map((installation) => (
+                  <Select.Option key={installation.id} value={installation.id}>
+                    {installation.shopName}
+                  </Select.Option>
+                ))}
+            </Select>
+          ) : null}
+          {payload.connection ? <dl className="profile-facts">
             <div>
               <dt>Primary domain</dt>
               <dd>{shopify?.primaryDomain}</dd>
@@ -87,17 +106,18 @@ export function ProviderProfileSurface({
               <dt>Currency</dt>
               <dd>{shopify?.currency}</dd>
             </div>
-          </dl>
-          <span className="connection-state">
-            <CheckCircleIcon size={16} weight="fill" /> Shopify connected · identity, location,
-            customers and Draft Orders available
-          </span>
-          <p className="human-authority-note">
-            This challenge environment uses a preconfigured store connection. General OAuth setup
-            is not available in this build.
-          </p>
+          </dl> : null}
+          {payload.connection ? (
+            <Badge variant="success" appearance="dot">
+              Shopify connected
+            </Badge>
+          ) : (
+            <LinkButton href="/settings#integrations" variant="primary">
+              Connect Shopify
+            </LinkButton>
+          )}
         </Surface>
-        <Surface render={<section />} className="provider-profile-section">
+        <Surface render={<section />} className="provider-profile-section ring ring-kumo-line">
           <div className="provider-section-icon">
             <FactoryIcon size={22} />
           </div>
@@ -138,10 +158,10 @@ export function ProviderProfileSurface({
             <Select
               label="Selected manufacturing location"
               value={shopify?.locationId}
-              disabled={busy}
+              disabled={busy || !payload.connection}
               onValueChange={(locationId) => void updateProfile({ locationId: String(locationId) })}
             >
-              {payload.connection.locations
+              {payload.connection?.locations
                 .filter(({ isActive }) => isActive)
                 .map((location) => (
                   <Select.Option key={location.id} value={location.id}>
@@ -153,7 +173,7 @@ export function ProviderProfileSurface({
               size="base"
               label="List my shop in Attune marketplace"
               checked={profile.marketplaceListed !== false}
-              disabled={busy}
+              disabled={busy || !payload.connection}
               onCheckedChange={(marketplaceListed) => void updateProfile({ marketplaceListed })}
             />
             <small>
@@ -165,3 +185,5 @@ export function ProviderProfileSurface({
     </div>
   );
 }
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { LinkButton } from '@cloudflare/kumo/components/button';

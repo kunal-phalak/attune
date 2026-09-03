@@ -4,6 +4,7 @@ import { isAttuneApiView, type AttuneApiView } from '../../lib/attune-view';
 
 export interface MarketplaceProvider {
   readonly id: string;
+  readonly installationId?: string;
   readonly name: string;
   readonly label: 'Live maker' | 'Demo profile';
   readonly connectionLabel?: string;
@@ -13,11 +14,19 @@ export interface MarketplaceProvider {
   readonly longitude?: number;
   readonly fit: 'Compatible' | 'Needs review' | 'Not compatible';
   readonly reason: string;
+  readonly profile?: ProviderCapabilityProfile;
 }
 
 export interface MarketplacePayload {
   readonly view: AttuneApiView;
   readonly providerProfile: ProviderCapabilityProfile;
+  readonly activeInstallationId?: string | null;
+  readonly installations?: readonly {
+    readonly id: string;
+    readonly shopName: string;
+    readonly shopDomain: string;
+    readonly connectionStatus: string;
+  }[];
   readonly connection: {
     readonly verifiedAt: string;
     readonly shop: {
@@ -42,7 +51,7 @@ export interface MarketplacePayload {
       readonly productMaterialization: boolean;
       readonly storefront: boolean;
     };
-  };
+  } | null;
   readonly providers: readonly MarketplaceProvider[];
 }
 
@@ -53,9 +62,9 @@ export function isMarketplacePayload(value: unknown): value is MarketplacePayloa
   return (
     isAttuneApiView(Reflect.get(value, 'view')) &&
     Array.isArray(Reflect.get(value, 'providers')) &&
-    typeof connection === 'object' &&
-    connection !== null &&
-    Array.isArray(Reflect.get(connection, 'locations')) &&
+    (connection === null ||
+      (typeof connection === 'object' &&
+        Array.isArray(Reflect.get(connection, 'locations')))) &&
     typeof profile === 'object' &&
     profile !== null &&
     typeof Reflect.get(profile, 'providerId') === 'string'

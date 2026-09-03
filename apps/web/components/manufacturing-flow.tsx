@@ -333,7 +333,8 @@ function MarketplaceSurface({
   readonly onSurface: (surface: ManufacturingSurface) => void;
   readonly canConfigure: boolean;
 }) {
-  const profile = payload.providerProfile;
+  const selected = payload.providers.find(({ id }) => id === selectedId) ?? payload.providers[0];
+  const profile = selected?.profile ?? payload.providerProfile;
   const initial = view.workspace.manufacturingConfiguration ?? {
     material: view.workspace.geometry.material,
     thicknessMm: view.workspace.geometry.thickness,
@@ -346,7 +347,6 @@ function MarketplaceSurface({
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedVersionId, setSelectedVersionId] = useState('current');
   const makerCardRefs = useRef(new Map<string, HTMLElement>());
-  const selected = payload.providers.find(({ id }) => id === selectedId) ?? payload.providers[0];
   const geometry = {
     ...view.workspace.geometry,
     material: configuration.material,
@@ -360,19 +360,36 @@ function MarketplaceSurface({
   const submitRequest = async () => {
     setSubmitting(true);
     try {
+      let requestView = view;
+      if (selected?.label === 'Live maker' && selected.installationId) {
+        const selectionResponse = await fetch(
+          attuneWorkspaceEndpoint('/api/attune/marketplace', workspaceId),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ installationId: selected.installationId }),
+          },
+        );
+        const selection: unknown = await selectionResponse.json();
+        if (!selectionResponse.ok || !isMarketplacePayload(selection)) {
+          throw new Error('The selected Shopify Maker could not be bound to this request.');
+        }
+        requestView = selection.view;
+        onView(selection.view);
+      }
       const next = await requestAttuneView(
         attuneWorkspaceEndpoint('/api/attune/human', workspaceId),
         {
           method: 'POST',
           body: commandRequestBody(
-            view,
+            requestView,
             {
               type: 'request_quote',
               configuration,
               ...(selectedVersionId !== 'current' ? { versionId: selectedVersionId } : {}),
             },
             'human-request',
-            view.workspace.workspaceSeq,
+            requestView.workspace.workspaceSeq,
           ),
         },
       );

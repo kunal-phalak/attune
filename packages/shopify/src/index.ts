@@ -1,4 +1,5 @@
 export { ShopifyIntegrationError } from './errors';
+export { createAdminClientForAccessToken } from './admin-client';
 export {
   configurationFromEnvironment,
   coreConfigurationFromEnvironment,
@@ -17,7 +18,7 @@ export {
   synchronizeCustomerWithAdmin,
   synchronizeShopifyCustomer,
 } from './customers';
-export { inspectShopifyProvider } from './provider';
+export { inspectShopifyProvider, inspectShopifyProviderWithAdmin } from './provider';
 export type {
   ShopifyCoreConfiguration,
   ShopifyLocation,
@@ -32,6 +33,6 @@ export {
   DRAFT_ORDER_WEBHOOK_TOPICS,
   prepareDraftOrderInput,
 } from './draft-orders';
-export { createAndVerifyDraftOrder } from './draft-order-service';
+export { createAndVerifyDraftOrder, createAndVerifyDraftOrderWithAdmin } from './draft-order-service';
 export { materializeRevision } from './materialize';
 export { attachExactVersionPreview } from './product-media';

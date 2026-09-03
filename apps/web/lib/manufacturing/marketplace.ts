@@ -1,9 +1,12 @@
 import type { ProviderCapabilityProfile } from '@attune/domain';
+import type { ShopifyInstallation } from '@attune/database';
 import {
   inspectShopifyProvider,
   type ShopifyLocation,
   type ShopifyProviderConnection,
 } from '@attune/shopify';
+
+import { inspectShopifyInstallation } from '../shopify/installations';
 
 interface ConnectionCache {
   expiresAt: number;
@@ -11,6 +14,7 @@ interface ConnectionCache {
 }
 
 let connectionCache: ConnectionCache | undefined;
+const installationConnectionCache = new Map<string, ConnectionCache>();
 
 export function shopifyProviderConnection(refresh = false): Promise<ShopifyProviderConnection> {
   const now = Date.now();
@@ -19,6 +23,23 @@ export function shopifyProviderConnection(refresh = false): Promise<ShopifyProvi
   connectionCache = { expiresAt: now + 5 * 60 * 1000, value };
   void value.catch(() => {
     if (connectionCache?.value === value) connectionCache = undefined;
+  });
+  return value;
+}
+
+export function oauthShopifyProviderConnection(
+  installation: ShopifyInstallation,
+  refresh = false,
+): Promise<ShopifyProviderConnection> {
+  const now = Date.now();
+  const cached = installationConnectionCache.get(installation.id);
+  if (!refresh && cached && cached.expiresAt > now) return cached.value;
+  const value = inspectShopifyInstallation(installation);
+  installationConnectionCache.set(installation.id, { expiresAt: now + 5 * 60 * 1_000, value });
+  void value.catch(() => {
+    if (installationConnectionCache.get(installation.id)?.value === value) {
+      installationConnectionCache.delete(installation.id);
+    }
   });
   return value;
 }

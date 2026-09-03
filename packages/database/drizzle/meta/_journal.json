@@ -43,6 +43,13 @@
       "when": 1788435048477,
       "tag": "0005_quick_tarot",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788441880764,
+      "tag": "0006_round_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

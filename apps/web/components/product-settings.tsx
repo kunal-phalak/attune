@@ -1,19 +1,107 @@
 'use client';
 
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Dialog } from '@cloudflare/kumo/components/dialog';
+import { Input } from '@cloudflare/kumo/components/input';
+import { Select } from '@cloudflare/kumo/components/select';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import {
-  CheckCircleIcon,
+  ArrowClockwiseIcon,
   FactoryIcon,
   IdentificationCardIcon,
+  PlugsConnectedIcon,
   StorefrontIcon,
+  TrashIcon,
   WarningCircleIcon,
+  XIcon,
 } from '@phosphor-icons/react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
-import { attuneWorkspaceEndpoint } from '../lib/attune-view';
 import { BuyerProfileDialog } from './manufacturing-flow/buyer-profile-dialog';
-import { isMarketplacePayload, type MarketplacePayload } from './manufacturing-flow/types';
+
+interface InstallationLocation {
+  readonly id: string;
+  readonly name: string;
+  readonly isActive: boolean;
+  readonly address?: {
+    readonly formatted?: readonly string[];
+    readonly address1?: string | null;
+    readonly address2?: string | null;
+    readonly city?: string | null;
+    readonly province?: string | null;
+    readonly country?: string | null;
+    readonly zip?: string | null;
+  } | null;
+}
+
+interface ShopifyInstallationView {
+  readonly id: string;
+  readonly shopDomain: string;
+  readonly shopName: string;
+  readonly primaryDomain: string;
+  readonly connectionStatus:
+    | 'connected'
+    | 'needs_reauthorization'
+    | 'disconnected'
+    | 'uninstalled';
+  readonly missingCoreScopes: readonly string[];
+  readonly locations: readonly InstallationLocation[];
+  readonly selectedLocationId?: string | null;
+  readonly selectedLocation?: InstallationLocation | null;
+  readonly publicationMediaAvailable: boolean;
+  readonly marketplaceListed: boolean;
+}
+
+interface InstallationsEnvelope {
+  readonly configured: boolean;
+  readonly redirectUri?: string | null;
+  readonly installations: readonly ShopifyInstallationView[];
+}
+
+function isInstallationsEnvelope(value: unknown): value is InstallationsEnvelope {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof Reflect.get(value, 'configured') === 'boolean' &&
+    Array.isArray(Reflect.get(value, 'installations'))
+  );
+}
+
+async function installationResponse(response: Response): Promise<InstallationsEnvelope> {
+  const payload: unknown = await response.json().catch(() => null);
+  if (response.ok && isInstallationsEnvelope(payload)) return payload;
+  const error = typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : null;
+  throw new Error(typeof error === 'string' ? error : 'Shopify connections are unavailable.');
+}
+
+function formattedLocation(location: InstallationLocation | null | undefined): string {
+  const formatted = location?.address?.formatted?.filter(Boolean).join(', ');
+  if (formatted) return formatted;
+  return [
+    location?.address?.address1,
+    location?.address?.address2,
+    location?.address?.city,
+    location?.address?.province,
+    location?.address?.country,
+    location?.address?.zip,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function statusTreatment(status: ShopifyInstallationView['connectionStatus']) {
+  if (status === 'connected') {
+    return { variant: 'success' as const, label: 'Connected' };
+  }
+  if (status === 'needs_reauthorization') {
+    return {
+      variant: 'warning' as const,
+      label: 'Additional permission required',
+    };
+  }
+  return { variant: 'secondary' as const, label: 'Disconnected' };
+}
 
 export function ProductSettings({
   judge,
@@ -23,33 +111,77 @@ export function ProductSettings({
   readonly workspaceId?: string;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
-  const [marketplace, setMarketplace] = useState<MarketplacePayload | null>(null);
+  const [shopDialogOpen, setShopDialogOpen] = useState(false);
+  const [shopDomain, setShopDomain] = useState('');
+  const [shopError, setShopError] = useState<string | null>(null);
+  const [envelope, setEnvelope] = useState<InstallationsEnvelope | null>(null);
   const [integrationError, setIntegrationError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const loadInstallations = useCallback(async () => {
+    setIntegrationError(null);
+    try {
+      setEnvelope(
+        await installationResponse(
+          await fetch('/api/shopify/installations', { cache: 'no-store' }),
+        ),
+      );
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'Shopify is unavailable.');
+    }
+  }, []);
 
   useEffect(() => {
-    if (!judge || !workspaceId) return undefined;
-    const cancellation = new AbortController();
-    void fetch(attuneWorkspaceEndpoint('/api/attune/marketplace', workspaceId), {
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-      signal: cancellation.signal,
-    })
-      .then(async (response) => {
-        const payload: unknown = await response.json();
-        if (!response.ok || !isMarketplacePayload(payload)) {
-          throw new Error('The Shopify connection could not be inspected.');
-        }
-        setMarketplace(payload);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
-        setIntegrationError(error instanceof Error ? error.message : 'Shopify is unavailable.');
-      });
-    return () => cancellation.abort();
-  }, [judge, workspaceId]);
+    void loadInstallations();
+  }, [loadInstallations]);
 
-  const shopify = marketplace?.providerProfile.shopify;
-  const process = marketplace?.providerProfile.processes[0];
+  const connect = (event: FormEvent) => {
+    event.preventDefault();
+    setShopError(null);
+    const normalized = shopDomain.trim().toLocaleLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myshopify\.com$/.test(normalized)) {
+      setShopError('Enter a valid store address ending in .myshopify.com.');
+      return;
+    }
+    window.location.assign(`/api/shopify/oauth/start?shop=${encodeURIComponent(normalized)}`);
+  };
+
+  const updateLocation = async (installationId: string, locationId: string) => {
+    setBusyId(installationId);
+    try {
+      const response = await fetch('/api/shopify/installations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installationId, locationId }),
+      });
+      if (!response.ok) throw new Error('The manufacturing location could not be updated.');
+      await loadInstallations();
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'The location could not be updated.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const disconnect = async (installationId: string) => {
+    setBusyId(installationId);
+    try {
+      const response = await fetch('/api/shopify/installations', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installationId }),
+      });
+      if (!response.ok) throw new Error('The Shopify store could not be disconnected.');
+      await loadInstallations();
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'The store could not be disconnected.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const activeInstallations =
+    envelope?.installations.filter(({ connectionStatus }) => connectionStatus === 'connected' || connectionStatus === 'needs_reauthorization') ?? [];
 
   return (
     <main className="product-settings">
@@ -58,11 +190,60 @@ export function ProductSettings({
         onOpenChange={setProfileOpen}
         onSaved={() => undefined}
       />
+      <Dialog.Root open={shopDialogOpen} onOpenChange={setShopDialogOpen}>
+        <Dialog size="sm" className="shopify-connect-dialog">
+          <header className="shopify-dialog-header">
+            <div>
+              <Dialog.Title>Connect Shopify</Dialog.Title>
+              <Dialog.Description>
+                Enter the permanent myshopify.com address for the store you manage.
+              </Dialog.Description>
+            </div>
+            <Dialog.Close
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  shape="square"
+                  title="Close Shopify connection"
+                  icon={<XIcon size={17} />}
+                />
+              }
+            />
+          </header>
+          <form className="shopify-connect-form" onSubmit={connect}>
+            <label htmlFor="shopify-store-domain">
+              <span>Store address</span>
+              <Input
+                id="shopify-store-domain"
+                name="shop"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="your-store.myshopify.com"
+                value={shopDomain}
+                onChange={(event) => setShopDomain(event.target.value)}
+                aria-invalid={Boolean(shopError)}
+                required
+              />
+            </label>
+            {shopError ? <p className="form-error">{shopError}</p> : null}
+            <div className="shopify-dialog-actions">
+              <Dialog.Close render={<Button type="button" variant="secondary">Cancel</Button>} />
+              <Button type="submit" variant="primary">
+                Continue to Shopify
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+      </Dialog.Root>
+
       <header className="product-settings-header">
         <div>
           <span className="manufacturing-eyebrow">Attune</span>
           <h1>Settings</h1>
-          <p>Manage Buyer delivery details and truthful commerce integration state.</p>
+          <p>Manage delivery details, store connections, and manufacturing capability.</p>
         </div>
         <LinkButton href="/dashboard" variant="secondary">
           Back to projects
@@ -75,7 +256,7 @@ export function ProductSettings({
       </nav>
 
       <section id="profile" className="product-settings-section" aria-labelledby="profile-title">
-        <Surface render={<article />} className="product-settings-card">
+        <Surface render={<article />} className="product-settings-card ring ring-kumo-line">
           <span className="product-settings-icon" aria-hidden>
             <IdentificationCardIcon size={22} />
           </span>
@@ -83,112 +264,196 @@ export function ProductSettings({
             <span className="manufacturing-eyebrow">Settings · Profile</span>
             <h2 id="profile-title">Shipping &amp; billing</h2>
             <p>
-              These details let a live Maker prepare your store-specific Shopify customer and
-              delivery information. Attune never stores card details.
+              These details let a Maker prepare your store-specific Shopify customer and delivery
+              information. Attune never stores card details.
             </p>
           </div>
           <Button type="button" variant="primary" onClick={() => setProfileOpen(true)}>
-            Edit Buyer details
+            Edit buyer details
           </Button>
         </Surface>
       </section>
 
-      <section
-        id="integrations"
-        className="product-settings-section"
-        aria-labelledby="integrations-title"
-      >
-        <Surface render={<article />} className="product-settings-card is-stacked">
-          <span className="product-settings-icon" aria-hidden>
-            <StorefrontIcon size={22} />
+      <section id="integrations" className="product-settings-section" aria-labelledby="integrations-title">
+        <Surface render={<article />} className="product-settings-card is-stacked ring ring-kumo-line">
+          <span className="product-settings-icon shopify-product-icon" aria-hidden>
+            <img src="https://cdn.shopify.com/static/shopify-favicon.png" alt="" />
           </span>
           <div className="product-settings-copy">
             <span className="manufacturing-eyebrow">Settings · Integrations</span>
-            <h2 id="integrations-title">Shopify</h2>
-            {!judge ? (
-              <div className="settings-truth-state">
-                <WarningCircleIcon size={18} />
-                <p>
-                  General Shopify OAuth is not available in this build. The release demo uses one
-                  preconfigured own-store connection only in the designated judge workspace.
-                </p>
+            <div className="settings-section-heading">
+              <div>
+                <h2 id="integrations-title">Shopify</h2>
+                <p>Connect a store to receive manufacturing requests and manage commerce.</p>
               </div>
-            ) : integrationError ? (
+              <Button
+                type="button"
+                variant="primary"
+                icon={<PlugsConnectedIcon size={17} />}
+                disabled={envelope?.configured === false}
+                onClick={() => setShopDialogOpen(true)}
+              >
+                Connect Shopify
+              </Button>
+            </div>
+            {envelope?.configured === false ? (
+              <div className="settings-truth-state" data-error>
+                <WarningCircleIcon size={18} />
+                <p>Shopify OAuth needs its server credentials, redirect URI, and token-encryption key.</p>
+              </div>
+            ) : null}
+            {integrationError ? (
               <div className="settings-truth-state" data-error>
                 <WarningCircleIcon size={18} />
                 <p>{integrationError}</p>
               </div>
-            ) : marketplace ? (
-              <>
-                <div className="settings-shop-identity">
-                  <span aria-hidden>
-                    {marketplace.connection.shop.name.slice(0, 2).toUpperCase()}
-                  </span>
-                  <div>
-                    <strong>{marketplace.connection.shop.name}</strong>
-                    <small>Shopify connected</small>
-                  </div>
+            ) : null}
+            {activeInstallations.length > 0 ? (
+              <div className="shopify-installations">
+                <h3>Connected stores</h3>
+                {activeInstallations.map((installation) => {
+                  const status = statusTreatment(installation.connectionStatus);
+                  return (
+                    <div className="shopify-installation ring ring-kumo-line" key={installation.id}>
+                      <div className="settings-shop-identity">
+                        <img src="https://cdn.shopify.com/static/shopify-favicon.png" alt="" />
+                        <div>
+                          <strong>{installation.shopName}</strong>
+                          <small>{installation.primaryDomain}</small>
+                        </div>
+                        <Badge
+                          variant={status.variant}
+                          appearance="dot"
+                        >
+                          {status.label}
+                        </Badge>
+                      </div>
+                      {installation.connectionStatus === 'needs_reauthorization' ? (
+                        <div className="settings-truth-state">
+                          <WarningCircleIcon size={18} />
+                          <p>
+                            Additional Shopify permission required. Reconnect Shopify to approve the
+                            missing core scopes.
+                          </p>
+                        </div>
+                      ) : null}
+                      <dl className="profile-facts settings-facts">
+                        <div>
+                          <dt>Store address</dt>
+                          <dd>{installation.shopDomain}</dd>
+                        </div>
+                        <div>
+                          <dt>Manufacturing location</dt>
+                          <dd>{installation.selectedLocation?.name ?? 'Select a location'}</dd>
+                        </div>
+                        <div>
+                          <dt>Actual address</dt>
+                          <dd>{formattedLocation(installation.selectedLocation) || 'Not provided by Shopify'}</dd>
+                        </div>
+                        <div>
+                          <dt>Product media</dt>
+                          <dd>{installation.publicationMediaAvailable ? 'Available' : 'Private Draft Orders only'}</dd>
+                        </div>
+                      </dl>
+                      {installation.locations.some(({ isActive }) => isActive) ? (
+                        <Select
+                          label="Manufacturing location"
+                          value={installation.selectedLocationId ?? ''}
+                          disabled={busyId === installation.id}
+                          onValueChange={(value) =>
+                            void updateLocation(installation.id, String(value))
+                          }
+                        >
+                          {installation.locations.filter(({ isActive }) => isActive).map((location) => (
+                            <Select.Option key={location.id} value={location.id}>
+                              {location.name}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                      ) : null}
+                      <div className="shopify-installation-actions">
+                        {judge && workspaceId ? (
+                          <LinkButton
+                            href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile&installation=${encodeURIComponent(installation.id)}`}
+                            variant="secondary"
+                          >
+                            Manage
+                          </LinkButton>
+                        ) : (
+                          <Button type="button" variant="secondary" disabled>
+                            Manage
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          icon={<ArrowClockwiseIcon size={17} />}
+                          onClick={() =>
+                            window.location.assign(
+                              `/api/shopify/oauth/start?shop=${encodeURIComponent(installation.shopDomain)}`,
+                            )
+                          }
+                        >
+                          Reconnect
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          icon={<TrashIcon size={17} />}
+                          loading={busyId === installation.id}
+                          onClick={() => void disconnect(installation.id)}
+                        >
+                          Disconnect
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : envelope ? (
+              <div className="shopify-disconnected-state">
+                <StorefrontIcon size={20} />
+                <div>
+                  <strong>No Shopify stores connected</strong>
+                  <p>Connect a store, choose its manufacturing location, then publish a Maker profile.</p>
                 </div>
-                <dl className="profile-facts settings-facts">
-                  <div>
-                    <dt>Primary domain</dt>
-                    <dd>{shopify?.primaryDomain}</dd>
-                  </div>
-                  <div>
-                    <dt>Manufacturing location</dt>
-                    <dd>{shopify?.locationName}</dd>
-                  </div>
-                  <div>
-                    <dt>Actual address</dt>
-                    <dd>{shopify?.address}</dd>
-                  </div>
-                  <div>
-                    <dt>Connection health</dt>
-                    <dd className="settings-healthy">
-                      <CheckCircleIcon size={16} weight="fill" /> Verified
-                    </dd>
-                  </div>
-                </dl>
-              </>
+              </div>
             ) : (
-              <output>Checking the configured Shopify connection…</output>
+              <output>Checking Shopify connections…</output>
             )}
+            {envelope?.redirectUri ? (
+              <p className="shopify-redirect-note">
+                OAuth callback: <span>{envelope.redirectUri}</span>
+              </p>
+            ) : null}
           </div>
         </Surface>
       </section>
 
-      <section
-        id="maker-profile"
-        className="product-settings-section"
-        aria-labelledby="maker-profile-title"
-      >
-        <Surface render={<article />} className="product-settings-card">
+      <section id="maker-profile" className="product-settings-section" aria-labelledby="maker-profile-title">
+        <Surface render={<article />} className="product-settings-card ring ring-kumo-line">
           <span className="product-settings-icon" aria-hidden>
             <FactoryIcon size={22} />
           </span>
           <div className="product-settings-copy">
             <span className="manufacturing-eyebrow">Settings · Maker profile</span>
             <h2 id="maker-profile-title">Manufacturing capability</h2>
-            {judge && marketplace ? (
-              <p>
-                {process?.name} · {process?.workEnvelopeMm.width} × {process?.workEnvelopeMm.height}{' '}
-                mm ·{' '}
-                {marketplace.providerProfile.marketplaceListed === false
-                  ? 'Not listed in marketplace'
-                  : 'Listed in marketplace'}
-              </p>
-            ) : (
-              <p>Maker profile setup becomes available after an authorized Shopify connection.</p>
-            )}
+            <p>
+              Each Maker profile is bound to one authorized Shopify store and one selected location.
+            </p>
           </div>
-          {judge && workspaceId ? (
+          {judge && workspaceId && activeInstallations.length > 0 ? (
             <LinkButton
               href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile`}
               variant="secondary"
             >
-              Manage Maker profile
+              Manage Maker profiles
             </LinkButton>
-          ) : null}
+          ) : (
+            <Badge variant="secondary" appearance="dot">
+              Connect Shopify first
+            </Badge>
+          )}
         </Surface>
       </section>
     </main>

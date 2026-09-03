@@ -19,7 +19,8 @@ async function authenticatedUser() {
 }
 
 function bodyIdentifiers(value: unknown): { installationId: string; locationId?: string } {
-  if (typeof value !== 'object' || value === null) throw new TypeError('A request body is required.');
+  if (typeof value !== 'object' || value === null)
+    throw new TypeError('A request body is required.');
   const installationId = Reflect.get(value, 'installationId');
   const locationId = Reflect.get(value, 'locationId');
   if (typeof installationId !== 'string' || !installationId.startsWith('shopify:')) {
@@ -41,9 +42,7 @@ export async function GET() {
     return NextResponse.json(
       {
         configured: shopifyOAuthConfigured(),
-        redirectUri: shopifyOAuthConfigured()
-          ? shopifyOAuthConfiguration().redirectUri
-          : null,
+        redirectUri: shopifyOAuthConfigured() ? shopifyOAuthConfiguration().redirectUri : null,
         installations: installations.map(publicShopifyInstallation),
       },
       { headers: { 'Cache-Control': 'no-store' } },
@@ -62,7 +61,8 @@ export async function PATCH(request: Request) {
     const { installationId, locationId } = bodyIdentifiers(await request.json());
     if (!locationId) throw new TypeError('A Shopify location is required.');
     const installation = await shopifyInstallationForOwner(user.principalId, installationId);
-    if (!installation) return NextResponse.json({ error: 'Installation not found.' }, { status: 404 });
+    if (!installation)
+      return NextResponse.json({ error: 'Installation not found.' }, { status: 404 });
     if (!installation.locations.some(({ id, isActive }) => id === locationId && isActive)) {
       return NextResponse.json({ error: 'Select an active Shopify location.' }, { status: 400 });
     }
@@ -86,7 +86,8 @@ export async function DELETE(request: Request) {
     const user = await authenticatedUser();
     const { installationId } = bodyIdentifiers(await request.json());
     const installation = await shopifyInstallationForOwner(user.principalId, installationId);
-    if (!installation) return NextResponse.json({ error: 'Installation not found.' }, { status: 404 });
+    if (!installation)
+      return NextResponse.json({ error: 'Installation not found.' }, { status: 404 });
     await disconnectShopifyInstallation(user.principalId, installationId);
     return NextResponse.json({ disconnected: true });
   } catch (error) {

@@ -168,6 +168,42 @@ describe('native model-context registration contract', () => {
     ]);
   });
 
+  it('adds dashboard, flow, and guarded reset tools only for the judge control surface', () => {
+    const runtime: ToolRuntime = {
+      observe: vi.fn(unavailable),
+      execute: vi.fn(unavailable),
+      forecast: vi.fn(unavailable),
+      resetReview: vi.fn(unavailable),
+    };
+    const tools = toolsForCapabilities(runtime, new Set(['request_quote', 'accept_revision']), {
+      surface: 'review_control_center',
+      judgeMode: true,
+    });
+    const names = tools.map(({ name }) => name);
+    const navigation = tools.find(({ name }) => name === 'navigate_workspace');
+    const reset = tools.find(({ name }) => name === 'reset_judge_workspace');
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'navigate_workspace',
+        'inspect_review_flow',
+        'reset_judge_workspace',
+      ]),
+    );
+    expect(toolPropertyEnum(navigation, 'destination')).toEqual([
+      'dashboard',
+      'review_control_center',
+      'design',
+      'find_makers',
+      'buyer_requests',
+      'buyer_orders',
+      'settings',
+    ]);
+    expect(reset?.annotations).toEqual(
+      expect.objectContaining({ destructiveHint: true, idempotentHint: true }),
+    );
+  });
+
   it('exposes stable tools and executes geometry and constraint schemas with AbortSignal', async () => {
     const execute = vi.fn(async (command: Readonly<Record<string, unknown>>) => ({
       status: 'APPLIED',
@@ -222,7 +258,8 @@ describe('native model-context registration contract', () => {
     ]);
     for (const tool of registered.values()) {
       expect(tool.description).toMatch(/^Use /);
-      expect(tool.description).toContain('Do not use');
+      expect(tool.description.length).toBeLessThanOrEqual(500);
+      expect(tool.description).not.toContain('Do not use');
       expect(tool.annotations).toEqual(
         expect.objectContaining({
           readOnlyHint: expect.any(Boolean),
@@ -348,5 +385,108 @@ describe('native model-context registration contract', () => {
     const cancellation = new AbortController();
     await navigation?.execute({ destination: 'maker_requests' }, { signal: cancellation.signal });
     expect(navigate).toHaveBeenCalledWith('maker_requests', cancellation.signal);
+  });
+
+  it('discloses only state-valid operations on each commerce surface', () => {
+    const runtime: ToolRuntime = {
+      current: vi.fn(unavailable),
+      observe: vi.fn(unavailable),
+      execute: vi.fn(unavailable),
+      forecast: vi.fn(unavailable),
+    };
+
+    const makerTools = toolsForCapabilities(
+      runtime,
+      new Set(['freeze_and_quote_revision']),
+      { surface: 'provider_requests' },
+      new Set(['freeze_and_quote_revision']),
+    );
+    expect(makerTools.map(({ name }) => name)).toEqual([
+      'navigate_workspace',
+      'manage_manufacturing_request',
+      'inspect_commerce_pipeline',
+      'manage_account',
+    ]);
+    expect(
+      toolPropertyEnum(
+        makerTools.find(({ name }) => name === 'manage_manufacturing_request'),
+        'operation',
+      ),
+    ).toEqual(['prepare_quote', 'finalize_quote']);
+
+    const buyerTools = toolsForCapabilities(
+      runtime,
+      new Set(['request_changes', 'accept_revision']),
+      { surface: 'buyer_orders', checkoutAvailable: true },
+      new Set(['request_quote', 'request_changes', 'accept_revision']),
+    );
+    expect(buyerTools.map(({ name }) => name)).toEqual([
+      'navigate_workspace',
+      'manage_manufacturing_request',
+      'inspect_commerce_pipeline',
+      'prepare_customer_checkout',
+      'manage_account',
+    ]);
+    expect(
+      toolPropertyEnum(
+        buyerTools.find(({ name }) => name === 'manage_manufacturing_request'),
+        'operation',
+      ),
+    ).toEqual(['request_changes', 'accept_quote']);
+
+    const designTools = toolsForCapabilities(runtime, new Set(['edit_draft']), {
+      surface: 'design',
+    });
+    expect(designTools.map(({ name }) => name)).not.toEqual(
+      expect.arrayContaining(['inspect_commerce_pipeline', 'prepare_customer_checkout']),
+    );
+  });
+
+  it('requires explicit confirmation before quote finalization and checkout handoff', async () => {
+    const current = vi.fn(unavailable);
+    const execute = vi.fn(async () => ({ status: 'APPLIED' }));
+    const runtime: ToolRuntime = {
+      current,
+      observe: vi.fn(unavailable),
+      execute,
+      forecast: vi.fn(unavailable),
+    };
+    const maker = toolsForCapabilities(runtime, new Set(['freeze_and_quote_revision']), {
+      surface: 'provider_requests',
+    }).find(({ name }) => name === 'manage_manufacturing_request');
+    const quote = {
+      operation: 'finalize_quote',
+      amount_minor: 825_000,
+      currency: 'INR',
+      lead_time_days: 14,
+      valid_until: '2026-10-01T00:00:00.000Z',
+    };
+
+    await expect(maker?.execute({ ...quote, user_confirmed: false })).resolves.toEqual(
+      expect.objectContaining({ status: 'USER_CONFIRMATION_REQUIRED' }),
+    );
+    expect(execute).not.toHaveBeenCalled();
+    await expect(maker?.execute({ ...quote, user_confirmed: true })).resolves.toEqual(
+      expect.objectContaining({ status: 'APPLIED' }),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      {
+        type: 'freeze_and_quote_revision',
+        amountMinor: 825_000,
+        currency: 'INR',
+        leadTimeDays: 14,
+        validUntil: '2026-10-01T00:00:00.000Z',
+      },
+      undefined,
+    );
+
+    const checkout = toolsForCapabilities(runtime, new Set(), {
+      surface: 'provider_jobs',
+      checkoutAvailable: true,
+    }).find(({ name }) => name === 'prepare_customer_checkout');
+    await expect(checkout?.execute({ user_confirmed: false })).resolves.toEqual(
+      expect.objectContaining({ status: 'USER_CONFIRMATION_REQUIRED' }),
+    );
+    expect(current).not.toHaveBeenCalled();
   });
 });

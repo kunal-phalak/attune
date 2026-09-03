@@ -35,13 +35,13 @@ import {
 } from '@liveblocks/react-ui';
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 
+import { EDITOR_CHROME } from '../lib/sketch/editor-chrome';
 import {
   humanizeSketchItemName,
   recursiveGroupEntityIds,
   sketchEntityDisplayName,
 } from '../lib/sketch/items-tree';
 import { sketchDocumentFromYjsVersion } from '../lib/sketch/versions';
-import { EDITOR_CHROME } from '../lib/sketch/editor-chrome';
 import { AppIcons } from './ui/app-icons';
 import type { CameraViewState, CanvasCommentPlacement } from './workspace-canvas';
 
@@ -664,7 +664,13 @@ export interface SketchHistoryEvent {
   readonly createdAt: string;
 }
 
-function HistoryActorAvatar({ actorId, actor }: { readonly actorId: string; readonly actor: string }) {
+function HistoryActorAvatar({
+  actorId,
+  actor,
+}: {
+  readonly actorId: string;
+  readonly actor: string;
+}) {
   const { user } = useUser(actorId);
   return <Avatar src={user?.avatar} name={actor} className="sketch-history-avatar" />;
 }

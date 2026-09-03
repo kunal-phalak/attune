@@ -23,8 +23,7 @@ beforeEach(() => {
   process.env.SHOPIFY_CLIENT_ID = 'test-client';
   process.env.SHOPIFY_CLIENT_SECRET = 'test-secret';
   process.env.SHOPIFY_ADMIN_API_VERSION = '2026-07';
-  process.env.SHOPIFY_OAUTH_REDIRECT_URI =
-    'https://attune.example.test/api/shopify/oauth/callback';
+  process.env.SHOPIFY_OAUTH_REDIRECT_URI = 'https://attune.example.test/api/shopify/oauth/callback';
 });
 
 afterEach(() => {
@@ -33,9 +32,7 @@ afterEach(() => {
 
 describe('Shopify OAuth security', () => {
   it('accepts only canonical myshopify domains', () => {
-    expect(normalizeShopDomain('  Maker-One.myshopify.com ')).toBe(
-      'maker-one.myshopify.com',
-    );
+    expect(normalizeShopDomain('  Maker-One.myshopify.com ')).toBe('maker-one.myshopify.com');
     for (const invalid of [
       'https://maker-one.myshopify.com',
       'maker-one.example.com',
@@ -47,11 +44,7 @@ describe('Shopify OAuth security', () => {
   });
 
   it('binds short-lived state to the principal and shop', () => {
-    const created = createShopifyOAuthState(
-      'user:buyer',
-      'maker-one.myshopify.com',
-      1_000,
-    );
+    const created = createShopifyOAuthState('user:buyer', 'maker-one.myshopify.com', 1_000);
     expect(
       verifyShopifyOAuthState({
         cookieValue: created.cookieValue,
@@ -109,7 +102,7 @@ describe('Shopify OAuth security', () => {
       timestamp: '1788440000',
     });
     const message = [...params.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
+      .toSorted(([left], [right]) => left.localeCompare(right))
       .map(([key, value]) => `${key}=${value}`)
       .join('&');
     params.set('hmac', createHmac('sha256', 'test-secret').update(message).digest('hex'));
@@ -139,8 +132,14 @@ describe('Shopify OAuth security', () => {
 
   it('requests an expiring offline token and keeps core scopes separate', async () => {
     const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
-      expect(String(init?.body)).toContain('expiring=1');
-      expect(String(init?.body)).not.toContain('per-user');
+      const body =
+        init?.body instanceof URLSearchParams
+          ? init.body.toString()
+          : typeof init?.body === 'string'
+            ? init.body
+            : '';
+      expect(body).toContain('expiring=1');
+      expect(body).not.toContain('per-user');
       return Response.json({
         access_token: 'shpat_private-token',
         refresh_token: 'shprt_private-refresh',

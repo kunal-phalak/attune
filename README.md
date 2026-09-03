@@ -19,21 +19,27 @@ Attune carries one exact design version through a two-sided manufacturing workfl
   version, preview, specification hash, quote, and acceptance chain.
 
 Authenticated workspaces expose contextual browser-native WebMCP tools through
-`document.modelContext`. A normal Buyer/editor receives nine stable tools for inspection,
-forecasting, design changes, maker discovery, navigation, account setup, and manufacturing
-requests. Viewer and Commenter access remains read-only; tool schemas and server execution both
-derive authority from current workspace capabilities. Agent access is visible, enabled by default,
-finite, revocable, and revalidated after authority changes.
+`document.modelContext`. Tools use progressive disclosure rather than a global fixed set: the
+dashboard exposes project and notification tools; Design exposes inspection and geometry tools;
+Buyer and Maker surfaces expose only operations valid for the current request state; Settings
+exposes connected-store and loaded-Draft-Order tools. Tool schemas, navigation destinations, and
+server execution all derive from the signed-in user's possessed authority and current capability
+blockers. Quote finalization, acceptance, checkout handoff, and judge reset require explicit
+confirmation. Agent access is visible, finite, revocable, and revalidated after authority changes.
 
 Shopify OAuth creates a durable store installation, adds Maker authority without removing Buyer
-authority, selects a real active location when available, and prepares a Maker profile. OAuth
-approval remains a human merchant action.
+authority, selects a real active location when available, and prepares a marketplace-listed Maker
+profile. Listed connected Makers are discoverable across accounts, while connection management,
+customer data, and Draft Orders remain owner-scoped. Exact-version previews are stored privately in
+Cloudflare R2 and supplied to Shopify only through short-lived signed URLs. OAuth approval remains a
+human merchant action.
 
 Production: [attune-webmcp.vercel.app](https://attune-webmcp.vercel.app)
 
 Challenge reviewers begin at
-[attune-webmcp.vercel.app/judge](https://attune-webmcp.vercel.app/judge). The protected control
-center links the clean demo workspace, Buyer Requests, Maker Requests, and the scoped reset. It
+[attune-webmcp.vercel.app/judge](https://attune-webmcp.vercel.app/judge). The protected review
+session opens on the dashboard with the seeded project and a state-aware route through the design,
+Buyer Requests, Maker Requests, orders, Shopify handoff, and the scoped reset. It
 contains no credentials.
 
 Public repository: [github.com/kunal-phalak/attune](https://github.com/kunal-phalak/attune)

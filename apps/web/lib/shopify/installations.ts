@@ -89,8 +89,7 @@ async function usableAccessToken(installation: ShopifyInstallation): Promise<str
         ? encryptShopifyToken(refreshed.refreshToken)
         : installation.encryptedOfflineRefreshToken,
       accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
-      refreshTokenExpiresAt:
-        refreshed.refreshTokenExpiresAt ?? installation.refreshTokenExpiresAt,
+      refreshTokenExpiresAt: refreshed.refreshTokenExpiresAt ?? installation.refreshTokenExpiresAt,
       updatedAt: now,
     });
     return refreshed.accessToken;
@@ -139,6 +138,6 @@ export async function registerShopifyUninstallWebhook(
   );
   return Boolean(
     result.webhookSubscriptionCreate.webhookSubscription?.id &&
-      result.webhookSubscriptionCreate.userErrors.length === 0,
+    result.webhookSubscriptionCreate.userErrors.length === 0,
   );
 }

@@ -1,8 +1,4 @@
-import type {
-  BuyerCommerceProfile,
-  CommerceAddress,
-  ShopifyCustomerBinding,
-} from '@attune/domain';
+import type { BuyerCommerceProfile, CommerceAddress, ShopifyCustomerBinding } from '@attune/domain';
 
 import { createAdminClient } from './admin-client';
 import { coreConfigurationFromEnvironment, CUSTOMER_WRITE_ADMIN_SCOPES } from './config';
@@ -129,8 +125,7 @@ async function requireCustomerScopes(admin: GraphqlClient): Promise<void> {
   const granted = new Set(data.currentAppInstallation.accessScopes.map(({ handle }) => handle));
   const missing = CUSTOMER_WRITE_ADMIN_SCOPES.filter(
     (scope) =>
-      !granted.has(scope) &&
-      !(scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`)),
+      !granted.has(scope) && !(scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`)),
   );
   if (missing.length) {
     throw new ShopifyIntegrationError(

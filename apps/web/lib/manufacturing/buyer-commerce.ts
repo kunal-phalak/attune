@@ -15,7 +15,7 @@ function parseAddress(value: unknown, label: string): CommerceAddress {
   if (typeof value !== 'object' || value === null) {
     throw new TypeError(`${label} is required.`);
   }
-  const object = value as Record<string, unknown>;
+  const object = Object.fromEntries(Object.entries(value));
   const countryCode = requiredString(object.countryCode, `${label} country`).toUpperCase();
   if (!/^[A-Z]{2}$/.test(countryCode)) {
     throw new TypeError(`${label} country must use a two-letter country code.`);
@@ -44,7 +44,7 @@ export function parseBuyerCommerceProfile(
   if (typeof value !== 'object' || value === null) {
     throw new TypeError('Buyer details are required.');
   }
-  const object = value as Record<string, unknown>;
+  const object = Object.fromEntries(Object.entries(value));
   const email = requiredString(object.email, 'Email').toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new TypeError('Enter a valid email address.');
@@ -70,14 +70,14 @@ export function buyerCommerceProfileComplete(
 ): profile is BuyerCommerceProfile {
   return Boolean(
     profile?.firstName &&
-      profile.lastName &&
-      profile.email &&
-      profile.shippingAddress.firstName &&
-      profile.shippingAddress.lastName &&
-      profile.shippingAddress.address1 &&
-      profile.shippingAddress.city &&
-      profile.shippingAddress.countryCode &&
-      profile.shippingAddress.postalCode &&
-      (profile.billingSameAsShipping || profile.billingAddress),
+    profile.lastName &&
+    profile.email &&
+    profile.shippingAddress.firstName &&
+    profile.shippingAddress.lastName &&
+    profile.shippingAddress.address1 &&
+    profile.shippingAddress.city &&
+    profile.shippingAddress.countryCode &&
+    profile.shippingAddress.postalCode &&
+    (profile.billingSameAsShipping || profile.billingAddress),
   );
 }

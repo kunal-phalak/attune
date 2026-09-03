@@ -28,7 +28,9 @@ export function conflictBlockers(context: CompilerContext) {
 export function requestBlockers(context: CompilerContext) {
   const { valid, workspace } = context;
   const currentRequest = workspace.manufacturingRequests.some((request) => {
-    const version = workspace.savedVersions.find(({ versionId }) => versionId === request.versionId);
+    const version = workspace.savedVersions.find(
+      ({ versionId }) => versionId === request.versionId,
+    );
     return (
       version?.sourceDraftVersion === workspace.draftVersion &&
       request.status !== 'STALE' &&
@@ -51,10 +53,29 @@ export function requestBlockers(context: CompilerContext) {
   ];
 }
 
+export function requestChangeBlockers(context: CompilerContext) {
+  const activeRequest = context.workspace.manufacturingRequests.some(
+    ({ status }) => status !== 'SUPERSEDED',
+  );
+  return [
+    ...requireRole(context, ['buyer']),
+    ...(!activeRequest
+      ? [
+          blocker(
+            'MANUFACTURING_REQUEST_MISSING',
+            'A manufacturing request must exist before requesting changes.',
+          ),
+        ]
+      : []),
+  ];
+}
+
 export function quoteBlockers(context: CompilerContext) {
   const { authority, workspace } = context;
   const activeRequest = workspace.manufacturingRequests.findLast(({ status }) =>
-    ['REQUESTED', 'UNDER_REVIEW', 'PROVIDER_REVIEW_REQUESTED', 'CHANGES_REQUESTED'].includes(status),
+    ['REQUESTED', 'UNDER_REVIEW', 'PROVIDER_REVIEW_REQUESTED', 'CHANGES_REQUESTED'].includes(
+      status,
+    ),
   );
   const activeQuote = activeRequest
     ? workspace.quotes.some(

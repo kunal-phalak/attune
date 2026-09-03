@@ -7,9 +7,7 @@ export interface ManufacturingAccess {
   readonly finalizeQuote: boolean;
 }
 
-export function manufacturingAccessForRoles(
-  roles: readonly AttuneRole[],
-): ManufacturingAccess {
+export function manufacturingAccessForRoles(roles: readonly AttuneRole[]): ManufacturingAccess {
   const roleSet = new Set(roles);
   return {
     browseMarketplace:

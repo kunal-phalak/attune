@@ -1,5 +1,5 @@
-import type { ProviderCapabilityProfile } from '@attune/domain';
 import type { ShopifyInstallation } from '@attune/database';
+import type { ProviderCapabilityProfile } from '@attune/domain';
 import {
   inspectShopifyProvider,
   type ShopifyLocation,
@@ -11,6 +11,15 @@ import { inspectShopifyInstallation } from '../shopify/installations';
 interface ConnectionCache {
   expiresAt: number;
   value: Promise<ShopifyProviderConnection>;
+}
+
+export function isMarketplaceInstallationListed(
+  installation: Pick<ShopifyInstallation, 'marketplaceListed' | 'makerProfile'>,
+): boolean {
+  return (
+    installation.marketplaceListed ||
+    Boolean(installation.makerProfile && installation.makerProfile.marketplaceListed !== false)
+  );
 }
 
 let connectionCache: ConnectionCache | undefined;

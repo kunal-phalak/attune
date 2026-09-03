@@ -12,6 +12,7 @@ import {
   executeAgentCommand,
   executeAgentSemanticCommand,
   executeCommerceMaterialization,
+  finalizeProviderQuoteForAgent,
   inspectAgentContext,
   inspectForDelegatedAgent,
 } from '../../../../lib/attune-runtime';
@@ -64,6 +65,15 @@ export async function POST(request: Request) {
           workspaceId,
           role,
           parseMaterializationExecutionInput(body),
+        ),
+      );
+    }
+    if (type === 'freeze_and_quote_revision') {
+      return noStoreJson(
+        await finalizeProviderQuoteForAgent(
+          workspaceId,
+          role,
+          parseCommandExecutionInput(body, ['freeze_and_quote_revision']),
         ),
       );
     }

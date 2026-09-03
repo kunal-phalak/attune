@@ -120,7 +120,7 @@ export async function GET(request: Request) {
               createJudgeProviderCapabilityProfile(),
             )
           : null),
-      marketplaceListed: existing?.marketplaceListed,
+      marketplaceListed: existing?.marketplaceListed ?? true,
       installedAt: existing?.installedAt ?? now,
       updatedAt: now,
     });

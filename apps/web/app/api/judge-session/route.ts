@@ -1,4 +1,4 @@
-import { ensureJudgeWorkspace, JUDGE_WORKSPACE_ID } from '@attune/database';
+import { ensureJudgeWorkspace } from '@attune/database';
 import { NextResponse } from 'next/server';
 
 import { establishJudgeSession } from '../../../lib/auth/session';
@@ -30,5 +30,5 @@ export async function POST(request: Request) {
     return noStoreRedirect(request, '/judge?error=invalid-code');
   }
   await ensureJudgeWorkspace();
-  return noStoreRedirect(request, `/workspace/${encodeURIComponent(JUDGE_WORKSPACE_ID)}`);
+  return noStoreRedirect(request, '/dashboard');
 }

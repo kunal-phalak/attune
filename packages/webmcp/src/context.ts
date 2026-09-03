@@ -140,6 +140,7 @@ export interface AgentMutationResult {
   readonly changedSemanticRefs: readonly string[];
   readonly delegation: AgentContextSnapshot['delegation'];
   readonly availableCapabilities: readonly CapabilityId[];
+  readonly availableAuthorityCapabilities: readonly CapabilityId[];
   readonly solver: ForecastConsequence['solver'];
   readonly recipeProvenance: AgentContextSnapshot['recipes'];
   readonly rebase: {
@@ -466,6 +467,7 @@ export function compileAgentMutationResult(
   result: CommandResult,
   context: AgentContextSnapshot,
   capabilityIds: readonly CapabilityId[] = result.capabilities.map(({ id }) => id),
+  authorityCapabilityIds: readonly CapabilityId[] = capabilityIds,
 ): AgentMutationResult {
   const changedSemanticRefs = new Set(result.receipt.affectedEntities);
   return {
@@ -484,6 +486,7 @@ export function compileAgentMutationResult(
     changedSemanticRefs: result.receipt.affectedEntities,
     delegation: context.delegation,
     availableCapabilities: capabilityIds,
+    availableAuthorityCapabilities: authorityCapabilityIds,
     solver: result.forecast.solver,
     recipeProvenance: context.recipes.filter(
       ({ sourceRef, groupId }) =>

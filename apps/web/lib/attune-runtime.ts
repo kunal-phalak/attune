@@ -363,6 +363,21 @@ async function ensureVersionPreview(
   });
 }
 
+async function ensurePendingVersionPreviews(
+  workspaceId: string,
+  bundle: WorkspaceBundle,
+): Promise<WorkspaceBundle> {
+  const pending = bundle.workspace.savedVersions.filter(
+    ({ preview }) => preview.status === 'PENDING',
+  );
+  if (pending.length === 0) return bundle;
+  await pending.reduce(
+    (previous, version) => previous.then(() => ensureVersionPreview(workspaceId, version)),
+    Promise.resolve(),
+  );
+  return readWorkspaceBundle(workspaceId);
+}
+
 function versionForCommand(
   workspace: AttuneWorkspace,
   command: AttuneCommand,
@@ -507,6 +522,7 @@ async function viewForBundle(
         (candidate): candidate is Extract<AttuneRole, 'buyer' | 'provider'> =>
           candidate === 'buyer' || candidate === 'provider',
       ),
+      possessedCapabilityIds: capabilityIdsForWorkspaceAuthority(bundle.workspace, authorityRoles),
       capabilityIds: authorityCapabilityIds,
       authorityEpoch: bundle.workspace.authorityEpoch,
     },
@@ -594,8 +610,11 @@ async function inspectHuman(workspaceId: string, role: AttuneRole, timing?: Serv
   const identity = await measureServerPhase(timing, 'auth', () =>
     requireWorkspaceIdentity(workspaceId, role),
   );
-  const bundle = await measureServerPhase(timing, 'neon_workspace_load', () =>
+  let bundle = await measureServerPhase(timing, 'neon_workspace_load', () =>
     readWorkspaceBundle(workspaceId, undefined, undefined, timing),
+  );
+  bundle = await measureServerPhase(timing, 'version_preview_backfill', () =>
+    ensurePendingVersionPreviews(workspaceId, bundle),
   );
   const access = await accessForIdentity(identity, bundle);
   return viewForBundle(
@@ -945,6 +964,10 @@ export async function executeSemanticCommand(
       ({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id),
     )
     .map(({ id }) => id);
+  const authorityCapabilityIds = availableCapabilityIdsForWorkspaceAuthority(
+    result.workspace,
+    context.authorityRoles ?? [perspective],
+  ).filter((id) => !context.delegation || context.delegation.capabilityIds.includes(id));
   const changedEntityIds = result.receipt.affectedEntities
     .filter((id) => result.workspace.sketchDocument.entities.some((entity) => entity.id === id))
     .slice(0, 16);
@@ -962,7 +985,12 @@ export async function executeSemanticCommand(
   return {
     result,
     nextContext,
-    mutation: compileAgentMutationResult(result, nextContext, capabilityIds),
+    mutation: compileAgentMutationResult(
+      result,
+      nextContext,
+      capabilityIds,
+      authorityCapabilityIds,
+    ),
   };
 }
 
@@ -1103,9 +1131,12 @@ export async function synchronizeProviderProfile(
   return inspectForHuman(workspaceId);
 }
 
-export async function executeProviderCommand(workspaceId: string, input: CommandExecutionInput) {
+async function executeProviderCommandWithContext(
+  workspaceId: string,
+  input: CommandExecutionInput,
+  context: TrustedExecutionContext,
+) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
-  const context = await trustedHumanContext(workspaceId, 'provider');
   const current = await readWorkspaceBundle(workspaceId);
   let liveblocksVersionId: string | undefined;
   try {
@@ -1122,13 +1153,25 @@ export async function executeProviderCommand(workspaceId: string, input: Command
   return executeWithContext(workspaceId, input, context, liveblocksVersionId);
 }
 
-export async function finalizeProviderQuote(workspaceId: string, input: CommandExecutionInput) {
+export async function executeProviderCommand(workspaceId: string, input: CommandExecutionInput) {
+  return executeProviderCommandWithContext(
+    workspaceId,
+    input,
+    await trustedHumanContext(workspaceId, 'provider'),
+  );
+}
+
+async function finalizeProviderQuoteWithContext(
+  workspaceId: string,
+  input: CommandExecutionInput,
+  context: TrustedExecutionContext,
+) {
   if (input.command.type !== 'freeze_and_quote_revision') {
     throw new TypeError('Provider quote finalization requires quote terms.');
   }
   let stage = 'quote persistence';
   try {
-    const quotedView = await executeProviderCommand(workspaceId, input);
+    const quotedView = await executeProviderCommandWithContext(workspaceId, input, context);
     const quote = quotedView.workspace.quotes.at(-1);
     const request = quote
       ? quotedView.workspace.manufacturingRequests.find(
@@ -1224,7 +1267,12 @@ export async function finalizeProviderQuote(workspaceId: string, input: CommandE
       subjectId: `quote:${quote.quoteId}`,
       route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
     }).catch(() => undefined);
-    return inspectForProvider(workspaceId);
+    return context.path === 'webmcp'
+      ? inspectForDelegatedAgent(
+          workspaceId,
+          context.perspective === 'buyer' ? 'buyer' : 'provider',
+        )
+      : inspectForProvider(workspaceId);
   } catch (error) {
     const detail = error instanceof Error ? `${error.name}: ${error.message}` : 'Unknown error';
     process.stderr.write(`[attune] Provider quote failed during ${stage}: ${detail}\n`);
@@ -1234,6 +1282,26 @@ export async function finalizeProviderQuote(workspaceId: string, input: CommandE
       `Provider quote failed during ${stage}.`,
     );
   }
+}
+
+export async function finalizeProviderQuote(workspaceId: string, input: CommandExecutionInput) {
+  return finalizeProviderQuoteWithContext(
+    workspaceId,
+    input,
+    await trustedHumanContext(workspaceId, 'provider'),
+  );
+}
+
+export async function finalizeProviderQuoteForAgent(
+  workspaceId: string,
+  perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
+  input: CommandExecutionInput,
+) {
+  return finalizeProviderQuoteWithContext(
+    workspaceId,
+    input,
+    await trustedDelegatedContext(workspaceId, perspective, 'freeze_and_quote_revision'),
+  );
 }
 
 export async function executeCommerceMaterialization(

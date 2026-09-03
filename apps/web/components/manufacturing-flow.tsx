@@ -83,6 +83,8 @@ function DesignPreview({
       <img
         className="manufacturing-design-preview"
         src={preview.url}
+        data-preview-source="cloudflare-r2"
+        referrerPolicy="no-referrer"
         alt={`Exact preview of Version ${version?.versionNumber ?? ''}`.trim()}
       />
     );

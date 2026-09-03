@@ -65,16 +65,12 @@ async function main() {
     quantity: 2,
     toleranceMm: typeof profile.toleranceMm === 'number' ? profile.toleranceMm : 0.2,
   };
-  const requested = await json(
-    `/api/attune/human?workspace_id=${encodeURIComponent(workspaceId)}`,
-    cookie,
-    {
-      method: 'POST',
-      body: JSON.stringify(
-        envelope(marketplace.view, { type: 'request_quote', configuration }, 'verify-request'),
-      ),
-    },
-  );
+  await json(`/api/attune/human?workspace_id=${encodeURIComponent(workspaceId)}`, cookie, {
+    method: 'POST',
+    body: JSON.stringify(
+      envelope(marketplace.view, { type: 'request_quote', configuration }, 'verify-request'),
+    ),
+  });
   const currency = profile.shopify?.currency ?? marketplace.connection.shop.currencyCode;
   const validUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
   const providerReady = await json(
@@ -146,7 +142,7 @@ async function main() {
   ) {
     throw new Error('The accepted manufacturing order failed exact conformance checks.');
   }
-  console.log(
+  process.stdout.write(
     JSON.stringify(
       {
         connectedProvider: {
@@ -181,7 +177,7 @@ async function main() {
       },
       null,
       2,
-    ),
+    ) + '\n',
   );
 }
 

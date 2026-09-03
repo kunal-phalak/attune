@@ -1,6 +1,6 @@
 # Attune release convergence — 2026-09-03
 
-This record covers the local release candidate on top of `cd1bfdb`. It contains no credentials,
+This record covers the final release candidate on top of `995507d`. It contains no credentials,
 access tokens, signed object URLs, customer addresses, or hidden model reasoning.
 
 ## Checkpoints
@@ -11,15 +11,16 @@ access tokens, signed object URLs, customer addresses, or hidden model reasoning
 
 ## Automated verification
 
-| Gate | Result |
-| --- | --- |
-| Focused OAuth, customer, media, manufacturing, version, permission, WebMCP, and eval tests | 68 passed |
-| Full repository test suite | 209 passed, 1 live test skipped by its opt-in guard |
-| Web TypeScript | Passed |
-| Database and domain TypeScript | Passed |
-| Scoped lint | No errors; existing complexity/size warnings remain |
-| Production build | Passed |
-| Live R2 exact-preview round trip | Passed: render, upload, HEAD, signed GET, PNG read |
+| Gate                                                                          | Result                                              |
+| ----------------------------------------------------------------------------- | --------------------------------------------------- |
+| Focused WebMCP, Shopify Draft Order, OAuth, R2 preview, and marketplace tests | 24 passed                                           |
+| Full repository test suite                                                    | 219 passed, 1 live test skipped by its opt-in guard |
+| Web TypeScript                                                                | Passed                                              |
+| Database and domain TypeScript                                                | Passed                                              |
+| Scoped lint                                                                   | No errors; existing complexity/size warnings remain |
+| Production build                                                              | Passed                                              |
+| Shopify Admin GraphQL schema validation                                       | Passed                                              |
+| Live R2 exact-preview round trip                                              | Passed: render, upload, HEAD, signed GET, PNG read  |
 
 The structured WebMCP catalog contains 22 unique scenarios: 3 design, 9 manufacturing, 5
 authority, 4 customer, and 1 conflict. Its runner records selected tools, arguments, observable
@@ -30,9 +31,10 @@ customer addresses. Catalog structure and the observable-trace rubric pass autom
 
 - Public landing and authentication surfaces passed desktop and mobile inspection.
 - A synthetic normal account passed dashboard, workspace, Settings, and maker-marketplace access.
-- The normal workspace exposed zero Attune WebMCP tools and no Judge mode frame.
-- Real Mapbox GL loaded with tiles and two demo markers. Card selection updated the selected marker
-  location, and reduced-motion behavior remains implemented.
+- Unauthenticated review pages expose zero privileged WebMCP tools.
+- Mapbox GL is bundled from the pinned npm package; runtime CDN script injection was removed.
+- Stored exact-version images use short-lived Cloudflare R2 URLs; pending judge versions are
+  backfilled before the human workspace view is compiled.
 - Shopify Settings showed the disconnected multi-store state and strict `.myshopify.com` validation.
 - An authenticated OAuth start redirected to `/admin/oauth/authorize` with `client_id`, `scope`,
   `redirect_uri`, and `state`; values were not recorded.
@@ -40,20 +42,20 @@ customer addresses. Catalog structure and the observable-trace rubric pass autom
 
 ## Live service status
 
-- Connected Shopify OAuth installations in the configured database: **0**.
-- Store A and Store B installation, identity, locations, granted scopes, customer binding, Draft
-  Order reread, and optional product-image verification therefore remain blocked on merchant OAuth.
-- Judge native discovery/execution and natural-language browser-agent evaluation remain blocked on
-  an authenticated judge session.
+- Connected, marketplace-listed Shopify Makers are discovered across accounts. Installation
+  management, Draft Orders, and checkout handoff remain restricted to the installation owner.
+- Authenticated judge execution still requires the submission access code and was not automated in
+  this evidence run.
 - The linked Vercel Production target has Mapbox, R2, Shopify app credentials, database, auth, and
   Liveblocks variable names. Preview currently has only database, auth, Liveblocks, and judge
   variables, so a green Preview deployment requires explicit authorization to copy the release
   integration credentials.
 - The stable callback to allow-list in the Shopify Dev Dashboard is
-  `https://attune-webmcp.vercel.app/api/shopify/oauth/callback`. The matching Vercel callback/app URL
-  variable is not currently present.
+  `https://attune-webmcp.vercel.app/api/shopify/oauth/callback`. `NEXT_PUBLIC_APP_URL` is configured
+  for the Production target.
 
 ## Deployment status
 
-No release Preview or Production deployment was created by this verification run. Deployment is
-held until the required Preview integration variables exist and the Shopify callback is allow-listed.
+Production deployment `dpl_63sVss19SHEQfe7n7X4FyPijYR7Y` reached `READY` and was aliased to
+`https://attune-webmcp.vercel.app`. The public landing page and judge entry rendered without browser
+console errors, and `/api/build-status` returned HTTP 200 with all Shopify server inputs present.

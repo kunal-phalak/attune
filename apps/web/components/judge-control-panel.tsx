@@ -12,12 +12,15 @@ import {
   UserCircleCheckIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react';
+import { track } from '@vercel/analytics';
 import { useState } from 'react';
 
+import { isAttuneApiView, type AttuneApiView } from '../lib/attune-view';
+import { AttuneWebMcp, type AttuneWebMcpStatus } from './attune-webmcp';
+import { JudgeReviewPath } from './judge-review-path';
+
 interface JudgeControlPanelProps {
-  readonly workspaceId: string;
-  readonly projectName: string;
-  readonly agentAccessOn: boolean;
+  readonly initialView: AttuneApiView;
   readonly buyerReady: boolean;
   readonly makerName: string;
   readonly makerConnected: boolean;
@@ -27,9 +30,7 @@ interface JudgeControlPanelProps {
 }
 
 export function JudgeControlPanel({
-  workspaceId,
-  projectName,
-  agentAccessOn,
+  initialView,
   buyerReady,
   makerName,
   makerConnected,
@@ -41,7 +42,10 @@ export function JudgeControlPanel({
   const [resetting, setResetting] = useState(false);
   const [resetComplete, setResetComplete] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
-  const workspaceHref = `/workspace/${encodeURIComponent(workspaceId)}`;
+  const [view, setView] = useState(initialView);
+  const [agentStatus, setAgentStatus] = useState<AttuneWebMcpStatus | null>(null);
+  const agentRegistered = agentStatus?.registration === 'registered';
+  const agentUnsupported = agentStatus?.registration === 'unsupported';
 
   const resetDemo = async () => {
     setResetting(true);
@@ -62,6 +66,10 @@ export function JudgeControlPanel({
             : null;
         throw new Error(typeof message === 'string' ? message : 'The demo could not be reset.');
       }
+      if (isAttuneApiView(payload)) {
+        setView(payload);
+        window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: payload }));
+      }
       setResetComplete(true);
       setResetOpen(false);
     } catch (error) {
@@ -79,7 +87,7 @@ export function JudgeControlPanel({
             <span className="manufacturing-eyebrow">Devpost WebMCP challenge</span>
             <h1>Judge control center</h1>
             <p>
-              Review the complete buyer-to-maker workflow using one authorized challenge account.
+              Check review readiness here, then start from the dashboard and follow the gated flow.
             </p>
           </div>
           <Badge variant="success" appearance="dot">
@@ -108,14 +116,25 @@ export function JudgeControlPanel({
                 <span>Browser agent</span>
                 <h2>WebMCP</h2>
               </div>
-              <Badge variant={agentAccessOn ? 'success' : 'warning'} appearance="dot">
-                Agent {agentAccessOn ? 'On' : 'Off'}
+              <Badge
+                variant={agentRegistered ? 'success' : agentUnsupported ? 'secondary' : 'warning'}
+                appearance="dot"
+              >
+                {agentRegistered ? 'On' : agentUnsupported ? 'Unsupported' : 'Detecting'}
               </Badge>
             </div>
             <p>
-              Contextual tools are registered from the signed-in account&apos;s current workspace
-              capabilities.
+              {agentUnsupported
+                ? 'This browser does not expose document.modelContext. The full human flow remains available.'
+                : 'Supported browsers register the current capability-derived tools automatically on every Attune surface.'}
             </p>
+            <AttuneWebMcp
+              workspaceId={view.product.workspaceId}
+              perspective="buyer"
+              surface="review_control_center"
+              initialView={view}
+              onStatus={setAgentStatus}
+            />
           </LayerCard>
 
           <LayerCard render={<article />} className="judge-status-card">
@@ -160,27 +179,38 @@ export function JudgeControlPanel({
           </LayerCard>
         </section>
 
+        <section className="judge-flow-section" aria-labelledby="judge-flow-title">
+          <div className="judge-flow-heading">
+            <span className="manufacturing-eyebrow">Access order</span>
+            <h2 id="judge-flow-title">When to open each workspace—and why</h2>
+            <p>Locked steps become available only when the exact preceding decision exists.</p>
+            <p>
+              Seeded means the demo already contains that workflow record; it does not mean you
+              reviewed the step.
+            </p>
+          </div>
+          <JudgeReviewPath view={view} location="control-center" />
+        </section>
+
         <LayerCard render={<section />} className="judge-workspace-card">
           <div>
-            <span className="manufacturing-eyebrow">Demo workspace</span>
-            <h2>{projectName}</h2>
-            <p>Start with the design, then follow the persistent buyer and maker workflow cues.</p>
+            <span className="manufacturing-eyebrow">Review entry</span>
+            <h2>Seeded project dashboard</h2>
+            <p>
+              Start with the project overview, then return here whenever you need the review order
+              and rationale.
+            </p>
           </div>
           <div className="judge-workspace-actions">
-            <LinkButton href={workspaceHref} variant="primary" icon={<ArrowRightIcon size={16} />}>
-              Open demo workspace
-            </LinkButton>
             <LinkButton
-              href={`${workspaceHref}?perspective=buyer&surface=buyer_requests`}
-              variant="secondary"
+              onClick={() => {
+                track('Judge Open Dashboard');
+              }}
+              href="/dashboard"
+              variant="primary"
+              icon={<ArrowRightIcon size={16} />}
             >
-              Open Buyer requests
-            </LinkButton>
-            <LinkButton
-              href={`${workspaceHref}?perspective=provider&surface=provider_requests`}
-              variant="secondary"
-            >
-              Open Maker requests
+              Open dashboard
             </LinkButton>
             <Button type="button" variant="ghost" onClick={() => setResetOpen(true)}>
               Reset demo

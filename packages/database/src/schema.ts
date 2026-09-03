@@ -102,10 +102,7 @@ export const shopifyCustomerBindings = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.buyerPrincipalId, table.shopDomain] }),
-    uniqueIndex('shopify_customer_bindings_customer_unique').on(
-      table.shopDomain,
-      table.customerId,
-    ),
+    uniqueIndex('shopify_customer_bindings_customer_unique').on(table.shopDomain, table.customerId),
   ],
 );
 
@@ -140,10 +137,7 @@ export const shopifyInstallations = pgTable(
     uninstalledAt: timestamp('uninstalled_at', { mode: 'string', withTimezone: true }),
   },
   (table) => [
-    uniqueIndex('shopify_installations_owner_shop_unique').on(
-      table.ownerPrincipalId,
-      table.shopId,
-    ),
+    uniqueIndex('shopify_installations_owner_shop_unique').on(table.ownerPrincipalId, table.shopId),
     index('shopify_installations_owner_index').on(table.ownerPrincipalId),
     index('shopify_installations_domain_index').on(table.shopDomain),
   ],

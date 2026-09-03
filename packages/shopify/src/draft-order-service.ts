@@ -44,6 +44,115 @@ interface DraftOrderNode {
   };
 }
 
+interface RecentDraftOrderNode {
+  readonly id: string;
+  readonly name: string;
+  readonly status: string;
+  readonly invoiceUrl?: string | null;
+  readonly invoiceSentAt?: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly order?: { readonly id: string; readonly name: string } | null;
+  readonly customAttributes: readonly { readonly key: string; readonly value: string }[];
+}
+
+export interface ShopifyDraftOrderSummary {
+  readonly externalId: string;
+  readonly name: string;
+  readonly status: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly invoiceSent: boolean;
+  readonly checkoutAvailable: boolean;
+  readonly convertedOrderName?: string;
+  readonly attuneBinding?: {
+    readonly requestId?: string;
+    readonly versionId?: string;
+    readonly versionNumber?: string;
+    readonly revisionId?: string;
+    readonly specificationHash?: string;
+  };
+}
+
+const RECENT_DRAFT_ORDERS = `#graphql
+  query AttuneRecentDraftOrders($first: Int!) {
+    draftOrders(first: $first, reverse: true, sortKey: UPDATED_AT) {
+      nodes {
+        id
+        name
+        status
+        invoiceUrl
+        invoiceSentAt
+        createdAt
+        updatedAt
+        order { id name }
+        customAttributes { key value }
+      }
+    }
+  }
+`;
+
+function attuneBinding(node: RecentDraftOrderNode): ShopifyDraftOrderSummary['attuneBinding'] {
+  const attributes = Object.fromEntries(
+    node.customAttributes.map(({ key, value }) => [key, value]),
+  );
+  if (!attributes.attune_request_id) return undefined;
+  return {
+    requestId: attributes.attune_request_id,
+    versionId: attributes.attune_version_id,
+    versionNumber: attributes.attune_version_number,
+    revisionId: attributes.attune_revision,
+    specificationHash: attributes.attune_spec_hash,
+  };
+}
+
+export async function listRecentDraftOrdersWithAdmin(
+  admin: GraphqlClient,
+  first = 12,
+): Promise<readonly ShopifyDraftOrderSummary[]> {
+  await requireDraftOrderScope(admin);
+  const count = Math.min(20, Math.max(1, Math.trunc(first)));
+  const data = await admin<{
+    readonly draftOrders: { readonly nodes: readonly RecentDraftOrderNode[] };
+  }>(RECENT_DRAFT_ORDERS, { first: count }, 'List recent Draft Orders');
+  // oxlint-disable-next-line no-map-spread -- Optional GraphQL fields are omitted from the public summary.
+  return data.draftOrders.nodes.map((node) => {
+    const binding = attuneBinding(node);
+    return {
+      externalId: node.id,
+      name: node.name,
+      status: node.status,
+      createdAt: node.createdAt,
+      updatedAt: node.updatedAt,
+      invoiceSent: Boolean(node.invoiceSentAt),
+      checkoutAvailable: Boolean(node.invoiceUrl),
+      ...(node.order?.name ? { convertedOrderName: node.order.name } : {}),
+      ...(binding ? { attuneBinding: binding } : {}),
+    };
+  });
+}
+
+export async function customerCheckoutHandoffWithAdmin(
+  admin: GraphqlClient,
+  draftOrderId: string,
+): Promise<{ readonly name: string; readonly invoiceUrl: string }> {
+  await requireDraftOrderScope(admin);
+  const data = await admin<{ readonly draftOrder: DraftOrderNode | null }>(
+    DRAFT_ORDER_REREAD,
+    { id: draftOrderId },
+    'Read Draft Order checkout handoff',
+  );
+  const node = data.draftOrder;
+  const attributes = node ? attributeMap(node) : {};
+  if (!node?.invoiceUrl || !attributes.attune_request_id) {
+    throw new ShopifyIntegrationError(
+      'CONFORMANCE_FAILED',
+      'No Attune-managed customer checkout is available for this Draft Order.',
+    );
+  }
+  return { name: node.name, invoiceUrl: node.invoiceUrl };
+}
+
 async function requireDraftOrderScope(admin: GraphqlClient): Promise<void> {
   const data = await admin<{
     currentAppInstallation: { accessScopes: readonly { handle: string }[] };

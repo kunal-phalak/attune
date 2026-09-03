@@ -1,4 +1,9 @@
-import type { BuyerCommerceProfile, CommerceAddress, ManufacturingRequest, Quote } from '@attune/domain';
+import type {
+  BuyerCommerceProfile,
+  CommerceAddress,
+  ManufacturingRequest,
+  Quote,
+} from '@attune/domain';
 
 import { ShopifyIntegrationError } from './errors';
 

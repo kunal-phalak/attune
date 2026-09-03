@@ -1,3 +1,4 @@
+import { judgeReviewFlow } from '../judge-review-flow';
 import type { AgentContextFocus, ToolRuntime } from './runtime';
 import {
   CONSTRAINT_SCHEMA,
@@ -9,6 +10,26 @@ import {
   RECIPE_PLACEMENT_SCHEMA,
   VERSIONED_TARGET_SCHEMA,
 } from './schemas';
+
+export type WorkspaceToolSurface =
+  | 'dashboard'
+  | 'review_control_center'
+  | 'settings'
+  | 'design'
+  | 'marketplace'
+  | 'buyer_requests'
+  | 'buyer_orders'
+  | 'provider_requests'
+  | 'provider_jobs'
+  | 'provider_profile';
+
+export interface WorkspaceToolScope {
+  readonly surface: WorkspaceToolSurface;
+  readonly checkoutAvailable?: boolean;
+  readonly judgeMode?: boolean;
+}
+
+const DEFAULT_TOOL_SCOPE: WorkspaceToolScope = { surface: 'design' };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -304,7 +325,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'inspect_context',
       title: 'Inspect semantic sketch context',
       description:
-        'Use before editing when you need authoritative IDs, versions, nearby geometry, solver state, unseen human changes, or the exact request/quote/order chain. Set include_manufacturing only when commerce context is relevant. Do not use it to mutate design or commerce state.',
+        'Use before editing to read authoritative IDs, versions, nearby geometry, solver state, and unseen human changes. Set include_manufacturing when the request, quote, and Draft Order chain is relevant.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -377,7 +398,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'forecast_change',
       title: 'Forecast a semantic sketch change',
       description:
-        'Use to preview the solver, validation, and capability consequences of one proposed semantic command before committing it. Do not use when the user has already asked to apply the change; this tool never mutates the design.',
+        'Use to preview the solver, validation, and capability consequences of one proposed semantic command before committing it. The result is read-only.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -410,7 +431,7 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'check_design',
       title: 'Check semantic sketch design',
       description:
-        'Use after an edit or when asked whether the current design is valid to read solver status, conflicts, degrees of freedom, and available actions. Do not use it to change geometry or manufacturing state.',
+        'Use after an edit or when asked whether the current design is valid to read solver status, conflicts, degrees of freedom, and available next actions.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: {
         readOnlyHint: true,
@@ -435,7 +456,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'modify_geometry',
       title: 'Batch modify semantic geometry',
       description:
-        'Use to commit a requested geometry creation, recipe instantiation/update, move, trim, transform, construction change, grouping change, or deletion. Prefer instantiate_recipe for common mechanical structures. Do not use for constraints, read-only inspection, or manufacturing actions; this mutates the draft and can invalidate an open quote.',
+        'Use to commit a requested geometry creation, recipe update, move, trim, transform, construction change, grouping change, or deletion. Prefer instantiate_recipe for common mechanical structures. This mutates the draft and can invalidate an open quote.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -538,7 +559,7 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'constrain_geometry',
       title: 'Batch constrain semantic geometry',
       description:
-        'Use to commit requested constraints or dimensions, including tangency between versioned targets. Do not use for ordinary geometry edits or merely checking solver state. Removing constraints is destructive; unsupported projections return diagnostics without committing.',
+        'Use to commit requested constraints or dimensions, including tangency between versioned targets. Removing constraints is destructive; unsupported projections return diagnostics without committing.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -653,7 +674,11 @@ function requireCapability(capabilityIds: ReadonlySet<string>, capabilityId: str
 }
 
 function hasBuyerAuthority(capabilityIds: ReadonlySet<string>): boolean {
-  return capabilityIds.has('request_quote') || capabilityIds.has('accept_revision');
+  return (
+    capabilityIds.has('request_quote') ||
+    capabilityIds.has('request_changes') ||
+    capabilityIds.has('accept_revision')
+  );
 }
 
 function hasMakerAuthority(capabilityIds: ReadonlySet<string>): boolean {
@@ -662,8 +687,12 @@ function hasMakerAuthority(capabilityIds: ReadonlySet<string>): boolean {
   );
 }
 
-function navigationDestinations(capabilityIds: ReadonlySet<string>): readonly string[] {
+function navigationDestinations(
+  capabilityIds: ReadonlySet<string>,
+  judgeMode = false,
+): readonly string[] {
   return [
+    ...(judgeMode ? ['dashboard', 'review_control_center'] : []),
     'design',
     'find_makers',
     ...(hasBuyerAuthority(capabilityIds) ? ['buyer_requests', 'buyer_orders'] : []),
@@ -672,17 +701,39 @@ function navigationDestinations(capabilityIds: ReadonlySet<string>): readonly st
   ];
 }
 
+function manufacturingOperations(
+  capabilityIds: ReadonlySet<string>,
+  surface: WorkspaceToolSurface,
+): readonly string[] {
+  const buyerRequestSetup = surface === 'design' || surface === 'marketplace';
+  const buyerRequestReview = surface === 'buyer_requests' || surface === 'buyer_orders';
+  const makerRequestReview = surface === 'provider_requests';
+  return [
+    ...(buyerRequestSetup && capabilityIds.has('request_quote')
+      ? ['configure', 'select_version', 'submit']
+      : []),
+    ...(buyerRequestReview && capabilityIds.has('request_changes') ? ['request_changes'] : []),
+    ...(makerRequestReview && capabilityIds.has('freeze_and_quote_revision')
+      ? ['prepare_quote', 'finalize_quote']
+      : []),
+    ...(buyerRequestReview && capabilityIds.has('accept_revision') ? ['accept_quote'] : []),
+  ];
+}
+
 function manufacturingTools(
   runtime: ToolRuntime,
   capabilityIds: ReadonlySet<string>,
+  scope: WorkspaceToolScope,
+  authorityIds: ReadonlySet<string>,
 ): readonly WebMcpTool[] {
-  const destinations = navigationDestinations(capabilityIds);
+  const destinations = navigationDestinations(authorityIds, scope.judgeMode);
+  const operations = manufacturingOperations(capabilityIds, scope.surface);
   const tools: WebMcpTool[] = [
     {
       name: 'find_makers',
       title: 'Find makers for this design',
       description:
-        'Use when the user asks who can manufacture the actual currently selected or saved design. It reads live Shopify-connected maker identity, locations, capability boundaries, and deterministic fit, with demo profiles explicitly labeled. Do not use it to submit a request or imply that demo data is live.',
+        'Use when the user asks who can manufacture the currently selected or saved design. It reads live Shopify-connected maker identity, locations, capability boundaries, and deterministic fit, with demo profiles explicitly labeled.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -728,7 +779,7 @@ function manufacturingTools(
       name: 'navigate_workspace',
       title: 'Navigate the Attune workspace',
       description:
-        'Use only when the user asks to open a named Attune surface. Do not use a role argument or choose authority: the destination determines the perspective and the server revalidates existing capabilities. Navigation is reversible and never grants authority.',
+        'Use when the user asks to open a named Attune surface. The destination determines the perspective, the server revalidates existing capabilities, and navigation never grants authority.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -762,22 +813,13 @@ function manufacturingTools(
     {
       name: 'manage_manufacturing_request',
       title: 'Manage a manufacturing request',
-      description:
-        'Use for the typed manufacturing operations configure, select_version, submit, request_changes, prepare_quote, finalize_quote, or accept_quote. Do not use for maker discovery or navigation. Submission binds an immutable version; Maker Send quote remains a human action, and acceptance requires explicit Buyer confirmation.',
+      description: `Use for the currently available manufacturing operations: ${operations.join(', ')}. The schema changes with the visible surface and authoritative workflow state. Quote finalization and acceptance require explicit user confirmation.`,
       inputSchema: {
         type: 'object',
         properties: {
           operation: {
             type: 'string',
-            enum: [
-              'configure',
-              'select_version',
-              'submit',
-              'request_changes',
-              'prepare_quote',
-              'finalize_quote',
-              'accept_quote',
-            ],
+            enum: operations,
           },
           configuration: {
             type: 'object',
@@ -885,7 +927,7 @@ function manufacturingTools(
             ['operation', 'request_id', 'note', 'configuration'],
             'request_changes input',
           );
-          requireCapability(capabilityIds, 'request_quote');
+          requireCapability(capabilityIds, 'request_changes');
           const result = await runtime.execute(
             {
               type: 'request_changes',
@@ -902,11 +944,11 @@ function manufacturingTools(
           return withToolDispatchTiming(result, startedAt);
         }
 
-        if (operation === 'prepare_quote' || operation === 'finalize_quote') {
+        if (operation === 'prepare_quote') {
           exact(
             value,
             ['operation', 'amount_minor', 'currency', 'lead_time_days', 'valid_until'],
-            `${operation} input`,
+            'prepare_quote input',
           );
           requireCapability(capabilityIds, 'freeze_and_quote_revision');
           const view = await runtime.current(execution?.signal);
@@ -923,10 +965,40 @@ function manufacturingTools(
               versionNumber: request.versionNumber,
               specificationHash: request.specHash,
               quoteTerms: quoteTerms(value),
-              nextAction: 'Open Maker requests and have the Maker explicitly select Send quote.',
+              nextAction: 'Ask the Maker to confirm these exact terms before finalizing the quote.',
             },
             startedAt,
           );
+        }
+
+        if (operation === 'finalize_quote') {
+          exact(
+            value,
+            [
+              'operation',
+              'amount_minor',
+              'currency',
+              'lead_time_days',
+              'valid_until',
+              'user_confirmed',
+            ],
+            'finalize_quote input',
+          );
+          requireCapability(capabilityIds, 'freeze_and_quote_revision');
+          if (value.user_confirmed !== true) {
+            return withToolDispatchTiming(
+              {
+                status: 'USER_CONFIRMATION_REQUIRED',
+                nextAction: 'Ask the Maker to explicitly confirm the exact quote terms.',
+              },
+              startedAt,
+            );
+          }
+          const result = await runtime.execute(
+            { type: 'freeze_and_quote_revision', ...quoteTerms(value) },
+            execution?.signal,
+          );
+          return withToolDispatchTiming(result, startedAt);
         }
 
         if (operation === 'accept_quote') {
@@ -961,11 +1033,118 @@ function manufacturingTools(
     },
   ];
   return tools.filter(
-    ({ name }) =>
-      name !== 'manage_manufacturing_request' ||
-      hasBuyerAuthority(capabilityIds) ||
-      hasMakerAuthority(capabilityIds),
+    ({ name }) => name !== 'manage_manufacturing_request' || operations.length > 0,
   );
+}
+
+function commerceTools(runtime: ToolRuntime, scope: WorkspaceToolScope): readonly WebMcpTool[] {
+  const tools: WebMcpTool[] = [
+    {
+      name: 'inspect_commerce_pipeline',
+      title: 'Inspect the commerce pipeline',
+      description:
+        'Use on Requests, Orders, or Jobs to read the exact Attune request, quote, acceptance, and Shopify Draft Order chain. Returns no customer contact details or checkout URL.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        untrustedContentHint: true,
+      },
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        empty(input);
+        if (!runtime.current) throw new Error('Commerce inspection is unavailable.');
+        const view = await runtime.current(execution?.signal);
+        return withToolDispatchTiming(
+          {
+            project: {
+              workspaceId: view.product.workspaceId,
+              name: view.product.projectName,
+            },
+            requests: view.workspace.manufacturingRequests.slice(-8).map((request) => ({
+              requestId: request.requestId,
+              status: request.status,
+              versionId: request.versionId,
+              versionNumber: request.versionNumber,
+              specificationHash: request.specHash,
+              configuration: request.configuration,
+              provider: request.provider,
+              requestedAt: request.requestedAt,
+              updatedAt: request.updatedAt,
+            })),
+            quotes: view.workspace.quotes.slice(-8),
+            acceptances: view.workspace.acceptances.slice(-8),
+            shopifyDraftOrders: view.workspace.externalCommerceRecords.slice(-8).map((order) => ({
+              externalId: order.externalId,
+              name: order.name,
+              status: order.status,
+              requestId: order.requestId,
+              versionId: order.versionId,
+              versionNumber: order.versionNumber,
+              specificationHash: order.specHash,
+              amountMinor: order.amountMinor,
+              currency: order.currency,
+              checkoutAvailable: Boolean(order.invoiceUrl),
+              updatedAt: order.updatedAt,
+            })),
+          },
+          startedAt,
+        );
+      },
+    },
+  ];
+  if (!scope.checkoutAvailable) return tools;
+  tools.push({
+    name: 'prepare_customer_checkout',
+    title: 'Prepare the customer checkout',
+    description:
+      'Use after explicit merchant or buyer confirmation to retrieve the verified Shopify Draft Order checkout URL for the latest Attune order. This prepares a handoff; it does not message the customer.',
+    inputSchema: {
+      type: 'object',
+      properties: { user_confirmed: { type: 'boolean' } },
+      required: ['user_confirmed'],
+      additionalProperties: false,
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      untrustedContentHint: false,
+    },
+    async execute(input, execution) {
+      const startedAt = performance.now();
+      const value = object(input, 'prepare_customer_checkout input');
+      exact(value, ['user_confirmed'], 'prepare_customer_checkout input');
+      if (value.user_confirmed !== true) {
+        return withToolDispatchTiming(
+          {
+            status: 'USER_CONFIRMATION_REQUIRED',
+            nextAction: 'Ask before revealing the customer checkout handoff URL.',
+          },
+          startedAt,
+        );
+      }
+      if (!runtime.current) throw new Error('Commerce inspection is unavailable.');
+      const view = await runtime.current(execution?.signal);
+      const order = view.workspace.externalCommerceRecords.findLast(({ invoiceUrl }) =>
+        Boolean(invoiceUrl),
+      );
+      if (!order?.invoiceUrl) throw new Error('No verified customer checkout is available.');
+      return withToolDispatchTiming(
+        {
+          status: 'CHECKOUT_HANDOFF_READY',
+          draftOrder: order.name ?? order.externalId,
+          checkoutUrl: order.invoiceUrl,
+          nextAction: 'Share only through the merchant-approved customer channel.',
+        },
+        startedAt,
+      );
+    },
+  });
+  return tools;
 }
 
 const COMMERCE_ADDRESS_SCHEMA = {
@@ -1005,7 +1184,7 @@ function accountTools(
       name: 'manage_account',
       title: 'Inspect or update Attune setup',
       description:
-        'Use to inspect setup completeness, update explicitly provided Buyer details, start Shopify authorization, select a manufacturing location, or update a Maker listing. Do not use it to infer private address fields, enter merchant credentials, approve Shopify permissions, or claim OAuth completed before the callback.',
+        'Use to inspect setup completeness, update explicitly provided Buyer details, start Shopify authorization, select a manufacturing location, or update a Maker listing. Merchant approval completes Shopify authorization in the browser.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1102,26 +1281,143 @@ function accountTools(
   ];
 }
 
-export function toolsForCapabilities(
-  runtime: ToolRuntime,
-  capabilityIds: ReadonlySet<string>,
-): readonly WebMcpTool[] {
+function reviewTools(runtime: ToolRuntime): readonly WebMcpTool[] {
   return [
-    ...semanticTools(runtime),
-    ...(capabilityIds.has('edit_draft') ? editingTools(runtime) : []),
-    ...manufacturingTools(runtime, capabilityIds),
-    ...accountTools(runtime, capabilityIds),
+    {
+      name: 'inspect_review_flow',
+      title: 'Inspect the judge review flow',
+      description:
+        'Use to understand which seeded review step is available now, when later Buyer, Maker, order, and Shopify surfaces unlock, and why each surface matters. This inspection never changes workspace state.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: true,
+      },
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        empty(input);
+        if (!runtime.current) throw new Error('Review flow inspection is unavailable.');
+        const view = await runtime.current(execution?.signal);
+        return withToolDispatchTiming(
+          {
+            project: view.product.projectName,
+            validation: view.validation.valid ? 'valid' : 'needs_attention',
+            ...judgeReviewFlow(view),
+          },
+          startedAt,
+        );
+      },
+    },
+    {
+      name: 'reset_judge_workspace',
+      title: 'Reset the seeded judge workspace',
+      description:
+        'Use only after the judge explicitly confirms that the seeded workspace should return to its clean starting state. Reset clears workflow records while preserving account and connection setup.',
+      inputSchema: {
+        type: 'object',
+        properties: { user_confirmed: { type: 'boolean' } },
+        required: ['user_confirmed'],
+        additionalProperties: false,
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+        untrustedContentHint: false,
+      },
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        const value = object(input, 'reset_judge_workspace input');
+        exact(value, ['user_confirmed'], 'reset_judge_workspace input');
+        if (value.user_confirmed !== true) {
+          return withToolDispatchTiming(
+            {
+              status: 'USER_CONFIRMATION_REQUIRED',
+              nextAction: 'Ask the judge to confirm that workflow records may be cleared.',
+            },
+            startedAt,
+          );
+        }
+        if (!runtime.resetReview) throw new Error('Judge workspace reset is unavailable.');
+        const view = await runtime.resetReview(execution?.signal);
+        return withToolDispatchTiming(
+          {
+            status: 'RESET_COMPLETE',
+            workspaceSequence: view.workspace.workspaceSeq,
+            draftVersion: view.workspace.draftVersion,
+            reviewFlow: judgeReviewFlow(view),
+          },
+          startedAt,
+        );
+      },
+    },
   ];
 }
 
-export function toolNamesForCapabilities(capabilityIds: ReadonlySet<string>): readonly string[] {
-  const names = ['inspect_context', 'forecast_change', 'check_design'];
-  if (capabilityIds.has('edit_draft')) names.push('modify_geometry', 'constrain_geometry');
-  names.push('find_makers', 'navigate_workspace', 'manage_account');
-  if (hasBuyerAuthority(capabilityIds) || hasMakerAuthority(capabilityIds)) {
-    names.push('manage_manufacturing_request');
-  }
-  return names;
+export function toolsForCapabilities(
+  runtime: ToolRuntime,
+  capabilityIds: ReadonlySet<string>,
+  scope: WorkspaceToolScope = DEFAULT_TOOL_SCOPE,
+  authorityIds: ReadonlySet<string> = capabilityIds,
+): readonly WebMcpTool[] {
+  const commerceSurface = [
+    'buyer_requests',
+    'buyer_orders',
+    'provider_requests',
+    'provider_jobs',
+  ].includes(scope.surface);
+  const designSurface = scope.surface === 'design';
+  const marketplaceSurface = scope.surface === 'marketplace';
+  const workflowSurface = commerceSurface || designSurface || marketplaceSurface;
+  return [
+    ...(designSurface
+      ? semanticTools(runtime)
+      : marketplaceSurface
+        ? semanticTools(runtime).filter(({ name }) => name !== 'forecast_change')
+        : []),
+    ...(designSurface && capabilityIds.has('edit_draft') ? editingTools(runtime) : []),
+    ...manufacturingTools(runtime, capabilityIds, scope, authorityIds).filter(({ name }) => {
+      if (name === 'navigate_workspace') return true;
+      if (name === 'find_makers') return designSurface || marketplaceSurface;
+      return workflowSurface;
+    }),
+    ...(commerceSurface ? commerceTools(runtime, scope) : []),
+    ...([
+      'settings',
+      'design',
+      'marketplace',
+      'buyer_requests',
+      'buyer_orders',
+      'provider_requests',
+      'provider_profile',
+    ].includes(scope.surface)
+      ? accountTools(runtime, authorityIds)
+      : []),
+    ...(scope.judgeMode ? reviewTools(runtime) : []),
+  ];
+}
+
+export function toolNamesForCapabilities(
+  capabilityIds: ReadonlySet<string>,
+  scope: WorkspaceToolScope = DEFAULT_TOOL_SCOPE,
+  authorityIds: ReadonlySet<string> = capabilityIds,
+): readonly string[] {
+  const runtime: ToolRuntime = {
+    observe: async () => {
+      throw new Error('Tool name inspection does not execute tools.');
+    },
+    execute: async () => {
+      throw new Error('Tool name inspection does not execute tools.');
+    },
+    forecast: async () => {
+      throw new Error('Tool name inspection does not execute tools.');
+    },
+  };
+  return toolsForCapabilities(runtime, capabilityIds, scope, authorityIds).map(({ name }) => name);
 }
 
 export async function registerAttuneTools(
@@ -1129,9 +1425,11 @@ export async function registerAttuneTools(
   runtime: ToolRuntime,
   capabilityIds: ReadonlySet<string>,
   signal: AbortSignal,
+  scope: WorkspaceToolScope = DEFAULT_TOOL_SCOPE,
+  authorityIds: ReadonlySet<string> = capabilityIds,
 ): Promise<void> {
   await Promise.all(
-    toolsForCapabilities(runtime, capabilityIds).map((tool) =>
+    toolsForCapabilities(runtime, capabilityIds, scope, authorityIds).map((tool) =>
       Promise.resolve(context.registerTool(tool, { signal })),
     ),
   );

@@ -12,7 +12,11 @@ import {
   type CapabilityRole,
 } from '../lib/attune-view';
 import { createToolRuntime, type RuntimeStatus } from '../lib/webmcp/runtime';
-import { registerAttuneTools, toolNamesForCapabilities } from '../lib/webmcp/tools';
+import {
+  registerAttuneTools,
+  toolNamesForCapabilities,
+  type WorkspaceToolSurface,
+} from '../lib/webmcp/tools';
 import { AppIcons } from './ui/app-icons';
 
 export type RegistrationState = 'checking' | 'registered' | 'unsupported' | 'failed';
@@ -31,11 +35,13 @@ export interface AttuneWebMcpStatus {
 export function AttuneWebMcp({
   workspaceId,
   perspective,
+  surface,
   initialView,
   onStatus,
 }: {
   readonly workspaceId: string;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
+  readonly surface: WorkspaceToolSurface;
   readonly initialView?: AttuneApiView;
   readonly onStatus?: (status: AttuneWebMcpStatus) => void;
 }) {
@@ -58,15 +64,35 @@ export function AttuneWebMcp({
     );
     updateView(next);
   }, [perspective, updateView, workspaceId]);
-  const authorityCapabilityKey = view
+  const availableAuthorityKey = view
     ? (view.authority?.capabilityIds ?? view.capabilities.map(({ id }) => id)).toSorted().join('|')
     : '';
-  const capabilityKey = view?.delegation.status === 'active' ? authorityCapabilityKey : '';
+  const possessedAuthorityKey = view
+    ? (view.authority?.possessedCapabilityIds ?? view.authority?.capabilityIds ?? [])
+        .toSorted()
+        .join('|')
+    : '';
+  const capabilityKey = view?.delegation.status === 'active' ? availableAuthorityKey : '';
+  const authorityKey = view?.delegation.status === 'active' ? possessedAuthorityKey : '';
   const capabilityIds = useMemo(
     () => new Set(capabilityKey ? capabilityKey.split('|') : []),
     [capabilityKey],
   );
-  const availableTools = useMemo(() => toolNamesForCapabilities(capabilityIds), [capabilityIds]);
+  const authorityIds = useMemo(
+    () => new Set(authorityKey ? authorityKey.split('|') : []),
+    [authorityKey],
+  );
+  const checkoutAvailable =
+    view?.workspace.externalCommerceRecords.some(({ invoiceUrl }) => Boolean(invoiceUrl)) ?? false;
+  const judgeMode = view?.product.judgeMode === true;
+  const toolScope = useMemo(
+    () => ({ surface, checkoutAvailable, judgeMode }),
+    [checkoutAvailable, judgeMode, surface],
+  );
+  const availableTools = useMemo(
+    () => toolNamesForCapabilities(capabilityIds, toolScope, authorityIds),
+    [authorityIds, capabilityIds, toolScope],
+  );
   const workspaceReady = view !== null;
   const toolsEnabled = view?.product.agentToolsEnabled === true;
 
@@ -103,12 +129,27 @@ export function AttuneWebMcp({
       report: setExecution,
     });
     setRegistration('checking');
-    void registerAttuneTools(context, runtime, capabilityIds, lifecycle.signal).then(
+    void registerAttuneTools(
+      context,
+      runtime,
+      capabilityIds,
+      lifecycle.signal,
+      toolScope,
+      authorityIds,
+    ).then(
       () => setRegistration('registered'),
       () => setRegistration('failed'),
     );
     return () => lifecycle.abort();
-  }, [capabilityIds, toolsEnabled, updateView, workspaceId, workspaceReady]);
+  }, [
+    authorityIds,
+    capabilityIds,
+    toolScope,
+    toolsEnabled,
+    updateView,
+    workspaceId,
+    workspaceReady,
+  ]);
 
   useEffect(() => {
     onStatus?.({
@@ -124,6 +165,7 @@ export function AttuneWebMcp({
 
   const delegation = view?.delegation;
   const enabled = delegation?.status === 'active';
+  const unsupported = registration === 'unsupported';
   const updateAgentAccess = async () => {
     const response = await fetch(
       attuneWorkspaceEndpoint('/api/attune/webmcp/delegation', workspaceId, { perspective }),
@@ -148,10 +190,14 @@ export function AttuneWebMcp({
               variant="ghost"
               size="sm"
               icon={<AppIcons.Agent size={18} />}
-              aria-label={`Agent access ${enabled ? 'on' : 'off'}`}
-              data-active={enabled || undefined}
+              aria-label={
+                unsupported
+                  ? 'WebMCP unavailable in this browser'
+                  : `Agent access ${enabled ? 'on' : 'off'}`
+              }
+              data-active={(enabled && !unsupported) || undefined}
             >
-              Agent access: {enabled ? 'On' : 'Off'}
+              Agent access: {unsupported ? 'Unavailable' : enabled ? 'On' : 'Off'}
             </Button>
           }
         />
@@ -164,26 +210,30 @@ export function AttuneWebMcp({
         >
           <Popover.Title className="workspace-agent-popover-title">Agent access</Popover.Title>
           <p>
-            {delegation?.status === 'revalidation_required'
-              ? 'Workspace authority changed. Revalidate access before the agent mutates the design.'
-              : enabled
-                ? 'Short-lived browser-agent delegation is active for your current workspace authority.'
-                : 'Enable a short-lived browser-agent delegation for capabilities you already possess.'}
+            {unsupported
+              ? 'This browser does not expose document.modelContext, so Attune cannot register browser-agent tools here.'
+              : delegation?.status === 'revalidation_required'
+                ? 'Workspace authority changed. Revalidate access before the agent mutates the design.'
+                : enabled
+                  ? 'Short-lived browser-agent delegation is active for your current workspace authority.'
+                  : 'Enable a short-lived browser-agent delegation for capabilities you already possess.'}
           </p>
           <div className="workspace-agent-popover-footer">
-            <Button
-              type="button"
-              variant={enabled ? 'secondary' : 'primary'}
-              size="sm"
-              className="workspace-agent-popover-action"
-              onClick={() => void updateAgentAccess()}
-            >
-              {enabled
-                ? 'Disable agent'
-                : delegation?.status === 'revalidation_required'
-                  ? 'Revalidate agent'
-                  : 'Enable agent'}
-            </Button>
+            {unsupported ? null : (
+              <Button
+                type="button"
+                variant={enabled ? 'secondary' : 'primary'}
+                size="sm"
+                className="workspace-agent-popover-action"
+                onClick={() => void updateAgentAccess()}
+              >
+                {enabled
+                  ? 'Disable agent'
+                  : delegation?.status === 'revalidation_required'
+                    ? 'Revalidate agent'
+                    : 'Enable agent'}
+              </Button>
+            )}
           </div>
         </Popover.Content>
       </Popover>

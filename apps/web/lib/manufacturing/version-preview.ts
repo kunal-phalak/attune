@@ -71,11 +71,7 @@ function bounds(version: SavedDesignVersion) {
     if ('end' in entity) points.push(entity.end);
     if ('center' in entity) {
       const radius =
-        'radius' in entity
-          ? entity.radius
-          : 'majorRadius' in entity
-            ? entity.majorRadius
-            : 1;
+        'radius' in entity ? entity.radius : 'majorRadius' in entity ? entity.majorRadius : 1;
       points.push(
         { x: entity.center.x - radius, y: entity.center.y - radius },
         { x: entity.center.x + radius, y: entity.center.y + radius },
@@ -158,14 +154,8 @@ export async function renderVersionPreview(version: SavedDesignVersion): Promise
     } else if (entity.kind === 'ellipse') {
       const segments = 180;
       const rotate = (x: number, y: number) => ({
-        x:
-          entity.center.x +
-          x * Math.cos(entity.rotation) -
-          y * Math.sin(entity.rotation),
-        y:
-          entity.center.y +
-          x * Math.sin(entity.rotation) +
-          y * Math.cos(entity.rotation),
+        x: entity.center.x + x * Math.cos(entity.rotation) - y * Math.sin(entity.rotation),
+        y: entity.center.y + x * Math.sin(entity.rotation) + y * Math.cos(entity.rotation),
       });
       for (let index = 0; index < segments; index += 1) {
         const first = (Math.PI * 2 * index) / segments;
@@ -173,9 +163,7 @@ export async function renderVersionPreview(version: SavedDesignVersion): Promise
         line(
           pixels,
           map(rotate(Math.cos(first) * entity.majorRadius, Math.sin(first) * entity.minorRadius)),
-          map(
-            rotate(Math.cos(second) * entity.majorRadius, Math.sin(second) * entity.minorRadius),
-          ),
+          map(rotate(Math.cos(second) * entity.majorRadius, Math.sin(second) * entity.minorRadius)),
           ink,
           1,
         );

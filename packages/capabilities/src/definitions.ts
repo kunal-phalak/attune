@@ -7,6 +7,7 @@ import {
   editBlockers,
   navigationBlockers,
   quoteBlockers,
+  requestChangeBlockers,
   requestBlockers,
 } from './blockers';
 import type { CapabilityDefinition } from './types';
@@ -48,6 +49,16 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     predictedConsequences: ({ authority }) => [`Binds the request to ${authority.specHash}.`],
     blockers: requestBlockers,
     reason: () => 'The current specification is buildable and has no current quote authority.',
+  },
+  {
+    id: 'request_changes',
+    description: () => 'Create a new exact-version revision of an existing manufacturing request.',
+    predictedConsequences: () => [
+      'Preserves the prior request and any accepted commitment.',
+      'Creates a new immutable version for maker review.',
+    ],
+    blockers: requestChangeBlockers,
+    reason: () => 'An existing manufacturing request can be revised by its buyer.',
   },
   {
     id: 'freeze_and_quote_revision',

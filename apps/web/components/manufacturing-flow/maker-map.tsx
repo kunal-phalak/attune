@@ -1,39 +1,10 @@
 'use client';
 
 import { MapPinIcon } from '@phosphor-icons/react';
-import { useEffect, useRef } from 'react';
+import mapboxgl from 'mapbox-gl';
+import { useEffect, useRef, useState } from 'react';
 
 import type { MarketplaceProvider } from './types';
-
-interface MapboxMapInstance {
-  flyTo(options: { center: [number, number]; zoom: number; essential: boolean }): void;
-  remove(): void;
-}
-
-interface MapboxMarkerInstance {
-  setLngLat(coordinates: [number, number]): MapboxMarkerInstance;
-  addTo(map: MapboxMapInstance): MapboxMarkerInstance;
-  getElement(): HTMLElement;
-  remove(): void;
-}
-
-interface MapboxRuntime {
-  accessToken: string;
-  Map: new (options: {
-    container: HTMLElement;
-    style: string;
-    center: [number, number];
-    zoom: number;
-    attributionControl: boolean;
-  }) => MapboxMapInstance;
-  Marker: new (options: { element: HTMLElement; anchor: string }) => MapboxMarkerInstance;
-}
-
-declare global {
-  interface Window {
-    mapboxgl?: MapboxRuntime;
-  }
-}
 
 export function MakerMap({
   providers,
@@ -45,20 +16,22 @@ export function MakerMap({
   readonly onSelect: (id: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<MapboxMapInstance | null>(null);
-  const markersRef = useRef<MapboxMarkerInstance[]>([]);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const markersRef = useRef<mapboxgl.Marker[]>([]);
   const providersRef = useRef(providers);
   const onSelectRef = useRef(onSelect);
   const syncMarkersRef = useRef<() => void>(() => undefined);
+  const [mapFailed, setMapFailed] = useState(false);
   const token = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
   const selected = providers.find(({ id }) => id === selectedId);
 
   providersRef.current = providers;
   onSelectRef.current = onSelect;
   syncMarkersRef.current = () => {
-    if (!mapRef.current || !window.mapboxgl) return;
+    const map = mapRef.current;
+    if (!map) return;
     markersRef.current.forEach((marker) => marker.remove());
-    markersRef.current = providers.flatMap((maker) => {
+    markersRef.current = providersRef.current.flatMap((maker) => {
       if (typeof maker.longitude !== 'number' || typeof maker.latitude !== 'number') return [];
       const element = document.createElement('button');
       element.type = 'button';
@@ -83,52 +56,39 @@ export function MakerMap({
       }
       element.addEventListener('click', () => onSelectRef.current(maker.id));
       return [
-        new window.mapboxgl!.Marker({ element, anchor: 'bottom' })
+        new mapboxgl.Marker({ element, anchor: 'bottom' })
           .setLngLat([maker.longitude, maker.latitude])
-          .addTo(mapRef.current!),
+          .addTo(map),
       ];
     });
   };
 
   useEffect(() => {
     if (!token || !rootRef.current) return undefined;
-    let cancelled = false;
-    let script = document.querySelector<HTMLScriptElement>('script[data-attune-mapbox]');
-    let stylesheet = document.querySelector<HTMLLinkElement>('link[data-attune-mapbox]');
-    if (!stylesheet) {
-      stylesheet = document.createElement('link');
-      stylesheet.rel = 'stylesheet';
-      stylesheet.href = 'https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.css';
-      stylesheet.dataset.attuneMapbox = '';
-      document.head.append(stylesheet);
-    }
-    const initialize = () => {
-      if (cancelled || !rootRef.current || !window.mapboxgl || mapRef.current) return;
-      window.mapboxgl.accessToken = token;
+    setMapFailed(false);
+    try {
+      mapboxgl.accessToken = token;
       const first = providersRef.current.find(
         (maker) => typeof maker.longitude === 'number' && typeof maker.latitude === 'number',
       );
-      const map = new window.mapboxgl.Map({
+      const map = new mapboxgl.Map({
         container: rootRef.current,
         style: 'mapbox://styles/mapbox/light-v11',
         center: [first?.longitude ?? 78.9629, first?.latitude ?? 20.5937],
         zoom: first ? 8 : 4,
         attributionControl: false,
       });
+      map.on('error', () => setMapFailed(true));
+      map.on('load', () => {
+        setMapFailed(false);
+        syncMarkersRef.current();
+      });
       mapRef.current = map;
       syncMarkersRef.current();
-    };
-    if (window.mapboxgl) initialize();
-    else {
-      script = document.createElement('script');
-      script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.15.0/mapbox-gl.js';
-      script.async = true;
-      script.dataset.attuneMapbox = '';
-      script.addEventListener('load', initialize, { once: true });
-      document.head.append(script);
+    } catch {
+      setMapFailed(true);
     }
     return () => {
-      cancelled = true;
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current = [];
       mapRef.current?.remove();
@@ -164,6 +124,12 @@ export function MakerMap({
           <MapPinIcon size={24} />
           <strong>Map unavailable in this environment</strong>
           <span>Add the public Mapbox token to load geographic tiles and maker coordinates.</span>
+        </div>
+      ) : mapFailed ? (
+        <div className="maker-map-fallback">
+          <MapPinIcon size={24} />
+          <strong>Map tiles could not load</strong>
+          <span>The maker list remains available. Check the Mapbox token URL restrictions.</span>
         </div>
       ) : null}
       <div className="maker-map-caption">

@@ -1,10 +1,12 @@
 'use client';
 
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
 import { Input } from '@cloudflare/kumo/components/input';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
+import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { Loader } from '@cloudflare/kumo/components/loader';
 import { Sidebar, useSidebar } from '@cloudflare/kumo/components/sidebar';
 import { Surface } from '@cloudflare/kumo/components/surface';
@@ -12,17 +14,10 @@ import { LiveblocksProvider, RoomProvider } from '@liveblocks/react';
 import { AvatarStack } from '@liveblocks/react-ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
 import { DASHBOARD_CHROME, dashboardChromeCssVariables } from '../lib/dashboard/dashboard-chrome';
+import type { JudgeReviewFlow } from '../lib/judge-review-flow';
 import { workspaceUserResolver } from '../lib/liveblocks/resolve-users';
 import {
   filterLibraryProjects,
@@ -31,11 +26,82 @@ import {
   type SketchTemplate,
 } from '../lib/projects/library';
 import { attuneToastManager } from './attune-ui-provider';
+import { DashboardNotifications } from './dashboard-notifications';
+import { DashboardWebMcp, type DashboardAgentProject } from './dashboard-webmcp';
 import { AppIcons } from './ui/app-icons';
 import { AttuneBrandmark } from './ui/attune-brandmark';
 import { AttuneEmptyState } from './ui/attune-empty-state';
 
 export type AttuneLibraryFile = LibraryProject;
+
+function commerceDestination(project: DashboardAgentProject): string {
+  const provider = project.roles.includes('provider');
+  const surface =
+    project.draftOrder || project.accepted
+      ? provider
+        ? 'provider_jobs'
+        : 'buyer_orders'
+      : project.quote
+        ? 'buyer_requests'
+        : provider
+          ? 'provider_requests'
+          : 'buyer_requests';
+  const perspective = surface.startsWith('provider_') ? '&perspective=provider' : '';
+  return `/workspace/${encodeURIComponent(project.workspaceId)}?surface=${surface}${perspective}`;
+}
+
+function commerceLabel(project: DashboardAgentProject): string {
+  if (project.draftOrder) return 'Draft Order ready';
+  if (project.accepted) return 'Accepted job';
+  if (project.quote) return 'Quote ready';
+  return project.roles.includes('provider') ? 'Incoming request' : 'Request sent';
+}
+
+function DashboardCommerceInbox({
+  projects,
+}: {
+  readonly projects: readonly DashboardAgentProject[];
+}) {
+  const commerce = projects.filter(({ request }) => request).slice(0, 4);
+  if (!commerce.length) return null;
+  return (
+    <section className="dashboard-commerce-inbox" aria-labelledby="dashboard-commerce-title">
+      <div className="dashboard-commerce-heading">
+        <div>
+          <span className="manufacturing-eyebrow">Commerce</span>
+          <h2 id="dashboard-commerce-title">Requests and orders</h2>
+        </div>
+        <Badge variant="secondary">{commerce.length} active</Badge>
+      </div>
+      <div className="dashboard-commerce-list">
+        {commerce.map((project) => (
+          <LayerCard
+            render={<article />}
+            className="dashboard-commerce-row"
+            key={project.workspaceId}
+          >
+            <span className="dashboard-commerce-icon" aria-hidden>
+              <AppIcons.Commerce size={18} />
+            </span>
+            <div>
+              <strong>{project.projectName}</strong>
+              <small>
+                Version {project.request?.versionNumber} · {commerceLabel(project)}
+                {project.quote
+                  ? ` · ${new Intl.NumberFormat('en-IN', {
+                      style: 'currency',
+                      currency: project.quote.currency,
+                    }).format(project.quote.amountMinor / 100)}`
+                  : ''}
+              </small>
+            </div>
+            <Link href={commerceDestination(project)}>Review</Link>
+          </LayerCard>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 const navigation: readonly { readonly id: LibraryFilter; readonly label: string }[] = [
   { id: 'recents', label: 'Recents' },
@@ -775,7 +841,7 @@ function DashboardSidebar({
         </Sidebar.Group>
         {operationalWorkspaceId ? (
           <Sidebar.Group>
-            <Sidebar.GroupLabel>Manufacturing</Sidebar.GroupLabel>
+            <Sidebar.GroupLabel>Workspace</Sidebar.GroupLabel>
             <Sidebar.Menu>
               <Sidebar.MenuButton
                 itemId="dashboard-orders"
@@ -832,7 +898,9 @@ export function DashboardLibrary({
   user,
   filter,
   canCreate,
-  headerAction,
+  showNotifications,
+  agentProjects,
+  judgeFlow,
   operationalWorkspaceId,
 }: {
   readonly files: readonly AttuneLibraryFile[];
@@ -840,7 +908,9 @@ export function DashboardLibrary({
   readonly user: { readonly id: string; readonly name: string };
   readonly filter: LibraryFilter;
   readonly canCreate: boolean;
-  readonly headerAction?: ReactNode;
+  readonly showNotifications: boolean;
+  readonly agentProjects: readonly DashboardAgentProject[];
+  readonly judgeFlow?: JudgeReviewFlow;
   readonly operationalWorkspaceId?: string;
 }) {
   const router = useRouter();
@@ -895,10 +965,16 @@ export function DashboardLibrary({
             <h1>{activeLabel}</h1>
           </div>
           <div className="flex items-center gap-2">
-            {headerAction}
+            <DashboardWebMcp
+              projects={agentProjects}
+              canCreate={canCreate}
+              reviewFlow={judgeFlow}
+            />
+            {showNotifications ? <DashboardNotifications /> : null}
             <NewProjectDialog canCreate={canCreate} />
           </div>
         </header>
+        <DashboardCommerceInbox projects={agentProjects} />
         {visibleFiles.length > 0 ? (
           <div className="dashboard-project-grid">
             {visibleFiles.map((project) => (

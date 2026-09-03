@@ -13,8 +13,7 @@ import type { ShopifyLocation, ShopifyProviderConnection, ShopifyShopIdentity } 
 function hasEvery(granted: ReadonlySet<string>, required: readonly string[]): boolean {
   return required.every(
     (scope) =>
-      granted.has(scope) ||
-      (scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`)),
+      granted.has(scope) || (scope.startsWith('read_') && granted.has(`write_${scope.slice(5)}`)),
   );
 }
 

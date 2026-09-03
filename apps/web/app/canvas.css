@@ -136,6 +136,15 @@
     justify-content: flex-start;
   }
 
+  .workspace-agent-popover > .workspace-agent-popover-footer > span {
+    overflow: hidden;
+    color: var(--color-kumo-subtle);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .workspace-share-dialog {
     display: grid;
     width: min(520px, calc(100vw - 24px));
@@ -399,8 +408,7 @@
     pointer-events: none;
     transition:
       opacity var(--editor-motion-duration) var(--editor-motion-ease),
-      width var(--editor-motion-duration) var(--editor-motion-ease)
-      !important;
+      width var(--editor-motion-duration) var(--editor-motion-ease) !important;
     border-radius: var(--editor-panel-radius);
     backdrop-filter: blur(14px);
   }
@@ -480,17 +488,11 @@
     position: absolute;
     z-index: var(--attune-layer-controls);
 
-    top: calc(
-      var(--editor-header-height) +
-      var(--editor-viewport-gap) +
-      10px
-    );
+    top: calc(var(--editor-header-height) + var(--editor-viewport-gap) + 10px);
 
     pointer-events: none;
 
-    transition:
-      right var(--editor-motion-duration)
-      var(--editor-motion-ease);
+    transition: right var(--editor-motion-duration) var(--editor-motion-ease);
   }
 
   .sketch-orientation-gizmo {
@@ -965,6 +967,90 @@
     margin: 0;
     font-size: 1.15rem;
     font-weight: 600;
+  }
+
+  .dashboard-commerce-inbox {
+    width: min(100%, var(--dashboard-content-max));
+    margin-top: 20px;
+    padding: 18px;
+    border-radius: 12px;
+    background: color-mix(in oklch, var(--color-kumo-base) 96%, var(--color-kumo-tint));
+    box-shadow: 0 0 0 1px var(--color-kumo-line);
+  }
+
+  .dashboard-commerce-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .dashboard-commerce-heading h2 {
+    margin: 3px 0 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .dashboard-commerce-list {
+    display: grid;
+    gap: 1px;
+    margin-top: 14px;
+    overflow: hidden;
+    border-radius: 10px;
+    background: var(--color-kumo-line);
+    box-shadow: 0 0 0 1px var(--color-kumo-line);
+  }
+
+  .dashboard-commerce-row {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 0;
+    border-radius: 0;
+    background: var(--color-kumo-base);
+  }
+
+  .dashboard-commerce-row > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .dashboard-commerce-row strong,
+  .dashboard-commerce-row small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dashboard-commerce-row strong {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .dashboard-commerce-row small {
+    color: var(--color-kumo-subtle);
+    font-size: 0.75rem;
+  }
+
+  .dashboard-commerce-row > a {
+    color: var(--color-kumo-interact);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .dashboard-commerce-icon {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border-radius: 8px;
+    color: var(--color-kumo-subtle);
+    background: var(--color-kumo-tint);
   }
 
   .dashboard-project-grid {

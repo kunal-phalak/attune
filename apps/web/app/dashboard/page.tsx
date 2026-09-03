@@ -19,8 +19,10 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashboard-library';
-import { DashboardNotifications } from '../../components/dashboard-notifications';
+import type { DashboardAgentProject } from '../../components/dashboard-webmcp';
+import { inspectForHuman } from '../../lib/attune-runtime';
 import { currentAttuneUser } from '../../lib/auth/session';
+import { judgeReviewFlow } from '../../lib/judge-review-flow';
 import { liveblocksConfigured, liveblocksRoomIdsForUser } from '../../lib/liveblocks/server';
 import {
   mergeLibraryProjects,
@@ -30,9 +32,11 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-function toLibraryFile(
-  row: Awaited<ReturnType<typeof listProjectsForUser>>[number],
-): AttuneLibraryFile {
+type LibraryRow =
+  | Awaited<ReturnType<typeof listProjectsForUser>>[number]
+  | Awaited<ReturnType<typeof listProjectsForLiveblocksRooms>>[number];
+
+function toLibraryFile(row: LibraryRow): AttuneLibraryFile {
   return {
     workspaceId: row.workspaceId,
     roomId: row.liveblocksRoomId,
@@ -43,6 +47,58 @@ function toLibraryFile(
     canManage: row.canManage,
     template: row.template,
     thumbnail: thumbnailForSketch(row.sketchDocument),
+  };
+}
+
+function toAgentProject(
+  row: Awaited<ReturnType<typeof listProjectsForUser>>[number],
+): DashboardAgentProject {
+  const request = row.workspace.manufacturingRequests.findLast(
+    ({ status }) => status !== 'SUPERSEDED',
+  );
+  const quote = request
+    ? row.workspace.quotes.findLast(({ requestId }) => requestId === request.requestId)
+    : undefined;
+  const acceptance = request
+    ? row.workspace.acceptances.findLast(({ requestId }) => requestId === request.requestId)
+    : undefined;
+  const draftOrder = request
+    ? row.workspace.externalCommerceRecords.findLast(
+        ({ requestId }) => requestId === request.requestId,
+      )
+    : undefined;
+  return {
+    workspaceId: row.workspaceId,
+    projectName: row.projectName,
+    updatedAt: row.updatedAt,
+    draftVersion: row.draftVersion,
+    roles: row.roles,
+    request: request
+      ? {
+          requestId: request.requestId,
+          status: request.status,
+          versionNumber: request.versionNumber,
+          updatedAt: request.updatedAt,
+        }
+      : null,
+    quote: quote
+      ? {
+          quoteId: quote.quoteId,
+          status: quote.status,
+          amountMinor: quote.amountMinor,
+          currency: quote.currency,
+          ...(quote.leadTimeDays ? { leadTimeDays: quote.leadTimeDays } : {}),
+        }
+      : null,
+    accepted: Boolean(acceptance),
+    draftOrder: draftOrder
+      ? {
+          ...(draftOrder.name ? { name: draftOrder.name } : {}),
+          status: draftOrder.status,
+          updatedAt: draftOrder.updatedAt,
+          checkoutAvailable: Boolean(draftOrder.invoiceUrl),
+        }
+      : null,
   };
 }
 
@@ -131,11 +187,13 @@ export default async function DashboardPage({
   if (!user) redirect('/sign-in');
   if (user.judge) await ensureJudgeWorkspace();
   const collaboration = liveblocksConfigured();
-  const [membershipRows, hasProjectCreatePermission, accessibleRoomIds] = await Promise.all([
-    listProjectsForUser(user.userId),
-    canCreateProjectsForUser(user.userId),
-    collaboration ? liveblocksRoomIdsForUser(user.userId) : Promise.resolve([]),
-  ]);
+  const [membershipRows, hasProjectCreatePermission, accessibleRoomIds, judgeView] =
+    await Promise.all([
+      listProjectsForUser(user.userId),
+      canCreateProjectsForUser(user.userId),
+      collaboration ? liveblocksRoomIdsForUser(user.userId) : Promise.resolve([]),
+      user.judge ? inspectForHuman(JUDGE_WORKSPACE_ID, 'buyer') : Promise.resolve(undefined),
+    ]);
   const roomRows = collaboration ? await listProjectsForLiveblocksRooms(accessibleRoomIds) : [];
   const ownedFiles = membershipRows.filter((row) => row.access === 'owned').map(toLibraryFile);
   const liveblocksFiles = roomRows.map(toLibraryFile);
@@ -149,7 +207,9 @@ export default async function DashboardPage({
       user={{ id: user.userId, name: user.displayName }}
       filter={filter}
       canCreate={hasProjectCreatePermission && collaboration}
-      headerAction={collaboration ? <DashboardNotifications key="dashboard-notifications" /> : null}
+      agentProjects={membershipRows.map(toAgentProject)}
+      judgeFlow={judgeView ? judgeReviewFlow(judgeView) : undefined}
+      showNotifications={collaboration}
       operationalWorkspaceId={user.judge ? JUDGE_WORKSPACE_ID : undefined}
     />
   );

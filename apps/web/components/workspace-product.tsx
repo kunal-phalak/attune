@@ -253,31 +253,31 @@ function WorkspaceTools({
       </Toolbar>
       {canEdit ? (
         <Toolbar
-        orientation="vertical"
-        className="workspace-tool-island is-left is-geometry"
-        aria-label="Geometry tools"
-      >
-        {(
-          [
-            ['line', 'Line', 'L', AppIcons.Line],
-            ['rectangle', 'Rectangle', 'R', AppIcons.Rectangle],
-            ['circle', 'Circle', 'C', AppIcons.Circle],
-            ['arc', 'Arc', 'A', AppIcons.Arc],
-            ['ellipse', 'Ellipse', 'E', AppIcons.Ellipse],
-            ['bspline', 'B-spline', 'B', AppIcons.BSpline],
-            ['trim', 'Trim', 'T', AppIcons.Trim],
-          ] as const
-        ).map(([geometryTool, label, keybind, Icon]) => (
-          <ToolButton
-            key={geometryTool}
-            label={label}
-            keybind={keybind}
-            showLabel={showLabels}
-            active={canvasTool === geometryTool}
-            icon={<Icon size={20} weight="regular" />}
-            onClick={() => onCanvasTool(geometryTool)}
-          />
-        ))}
+          orientation="vertical"
+          className="workspace-tool-island is-left is-geometry"
+          aria-label="Geometry tools"
+        >
+          {(
+            [
+              ['line', 'Line', 'L', AppIcons.Line],
+              ['rectangle', 'Rectangle', 'R', AppIcons.Rectangle],
+              ['circle', 'Circle', 'C', AppIcons.Circle],
+              ['arc', 'Arc', 'A', AppIcons.Arc],
+              ['ellipse', 'Ellipse', 'E', AppIcons.Ellipse],
+              ['bspline', 'B-spline', 'B', AppIcons.BSpline],
+              ['trim', 'Trim', 'T', AppIcons.Trim],
+            ] as const
+          ).map(([geometryTool, label, keybind, Icon]) => (
+            <ToolButton
+              key={geometryTool}
+              label={label}
+              keybind={keybind}
+              showLabel={showLabels}
+              active={canvasTool === geometryTool}
+              icon={<Icon size={20} weight="regular" />}
+              onClick={() => onCanvasTool(geometryTool)}
+            />
+          ))}
         </Toolbar>
       ) : null}
       <Toolbar
@@ -296,83 +296,83 @@ function WorkspaceTools({
       </Toolbar>
       {canEdit ? (
         <Toolbar
-        orientation="vertical"
-        className="workspace-tool-island is-right is-constraints"
-        aria-label="Constraint tools"
-      >
-        {(
-          [
+          orientation="vertical"
+          className="workspace-tool-island is-right is-constraints"
+          aria-label="Constraint tools"
+        >
+          {(
             [
-              'coincident',
-              'Coincident',
-              AppIcons.Coincident,
-              'Choose two points, or a point and line',
-            ],
-            ['horizontal', 'Horizontal', AppIcons.Horizontal, 'Choose a line'],
-            ['vertical', 'Vertical', AppIcons.Vertical, 'Choose a line'],
-            ['parallel', 'Parallel', AppIcons.Parallel, 'Choose two lines'],
-            ['perpendicular', 'Perpendicular', AppIcons.Perpendicular, 'Choose two lines'],
-            ['tangent', 'Tangent', AppIcons.Tangent, 'Choose two compatible curves'],
-            ['concentric', 'Concentric', AppIcons.Concentric, 'Choose two circles or arcs'],
-            ['equal', 'Equal', AppIcons.Equal, 'Choose two lines, or two circles/arcs'],
-            ['fixed', 'Fix / Unfix', AppIcons.Fixed, 'Choose geometry'],
-          ] as const
-        ).map(([type, label, Icon, instruction]) => (
-          <Tooltip
-            key={type}
-            side="left"
-            content={`${label} — ${instruction.toLowerCase()}`}
-            render={
-              <Toolbar.Button
-                type="button"
-                shape={showLabels ? 'base' : 'square'}
-                className={showLabels ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
-                icon={<Icon size={20} weight="regular" />}
-                aria-label={`${label} — ${instruction}`}
-                aria-pressed={constraintTool === type}
-                data-active={constraintTool === type || undefined}
-                onClick={() => onConstraintTool(constraintTool === type ? null : type)}
-              >
-                {showLabels ? <span className="workspace-tool-label">{label}</span> : null}
-              </Toolbar.Button>
-            }
-          />
-        ))}
+              [
+                'coincident',
+                'Coincident',
+                AppIcons.Coincident,
+                'Choose two points, or a point and line',
+              ],
+              ['horizontal', 'Horizontal', AppIcons.Horizontal, 'Choose a line'],
+              ['vertical', 'Vertical', AppIcons.Vertical, 'Choose a line'],
+              ['parallel', 'Parallel', AppIcons.Parallel, 'Choose two lines'],
+              ['perpendicular', 'Perpendicular', AppIcons.Perpendicular, 'Choose two lines'],
+              ['tangent', 'Tangent', AppIcons.Tangent, 'Choose two compatible curves'],
+              ['concentric', 'Concentric', AppIcons.Concentric, 'Choose two circles or arcs'],
+              ['equal', 'Equal', AppIcons.Equal, 'Choose two lines, or two circles/arcs'],
+              ['fixed', 'Fix / Unfix', AppIcons.Fixed, 'Choose geometry'],
+            ] as const
+          ).map(([type, label, Icon, instruction]) => (
+            <Tooltip
+              key={type}
+              side="left"
+              content={`${label} — ${instruction.toLowerCase()}`}
+              render={
+                <Toolbar.Button
+                  type="button"
+                  shape={showLabels ? 'base' : 'square'}
+                  className={showLabels ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
+                  icon={<Icon size={20} weight="regular" />}
+                  aria-label={`${label} — ${instruction}`}
+                  aria-pressed={constraintTool === type}
+                  data-active={constraintTool === type || undefined}
+                  onClick={() => onConstraintTool(constraintTool === type ? null : type)}
+                >
+                  {showLabels ? <span className="workspace-tool-label">{label}</span> : null}
+                </Toolbar.Button>
+              }
+            />
+          ))}
         </Toolbar>
       ) : null}
       {canEdit ? (
         <Toolbar
-        orientation="vertical"
-        className="workspace-tool-island is-right is-dimensions"
-        aria-label="Dimension tools"
-      >
-        {(
-          [
-            ['distance', 'Distance', AppIcons.Dimension, 'Choose a line'],
-            ['radius', 'Radius', AppIcons.Radius, 'Choose a circle or arc'],
-            ['diameter', 'Diameter', AppIcons.Dimension, 'Choose a circle or arc'],
-          ] as const
-        ).map(([type, label, Icon, instruction]) => (
-          <Tooltip
-            key={type}
-            side="left"
-            content={`${label} — ${instruction.toLowerCase()}`}
-            render={
-              <Toolbar.Button
-                type="button"
-                shape={showLabels ? 'base' : 'square'}
-                className={showLabels ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
-                icon={<Icon size={20} weight="regular" />}
-                aria-label={`${label} — ${instruction}`}
-                aria-pressed={constraintTool === type}
-                data-active={constraintTool === type || undefined}
-                onClick={() => onConstraintTool(constraintTool === type ? null : type)}
-              >
-                {showLabels ? <span className="workspace-tool-label">{label}</span> : null}
-              </Toolbar.Button>
-            }
-          />
-        ))}
+          orientation="vertical"
+          className="workspace-tool-island is-right is-dimensions"
+          aria-label="Dimension tools"
+        >
+          {(
+            [
+              ['distance', 'Distance', AppIcons.Dimension, 'Choose a line'],
+              ['radius', 'Radius', AppIcons.Radius, 'Choose a circle or arc'],
+              ['diameter', 'Diameter', AppIcons.Dimension, 'Choose a circle or arc'],
+            ] as const
+          ).map(([type, label, Icon, instruction]) => (
+            <Tooltip
+              key={type}
+              side="left"
+              content={`${label} — ${instruction.toLowerCase()}`}
+              render={
+                <Toolbar.Button
+                  type="button"
+                  shape={showLabels ? 'base' : 'square'}
+                  className={showLabels ? 'workspace-tool-button px-2' : 'workspace-tool-button'}
+                  icon={<Icon size={20} weight="regular" />}
+                  aria-label={`${label} — ${instruction}`}
+                  aria-pressed={constraintTool === type}
+                  data-active={constraintTool === type || undefined}
+                  onClick={() => onConstraintTool(constraintTool === type ? null : type)}
+                >
+                  {showLabels ? <span className="workspace-tool-label">{label}</span> : null}
+                </Toolbar.Button>
+              }
+            />
+          ))}
         </Toolbar>
       ) : null}
     </TooltipProvider>
@@ -721,6 +721,7 @@ function WorkspaceShell({
                 <AttuneWebMcp
                   workspaceId={workspaceId}
                   perspective={perspective}
+                  surface={manufacturingSurface}
                   initialView={initialView}
                 />
               ) : null}

@@ -18,6 +18,7 @@ import { assertMarketplaceRouteAccess } from '../../../../lib/manufacturing/acce
 import { withGeocodedShopifyLocation } from '../../../../lib/manufacturing/geocoding';
 import {
   DEMO_MARKETPLACE_PROVIDERS,
+  isMarketplaceInstallationListed,
   oauthShopifyProviderConnection,
   shopifyProviderConnection,
   shopifyProviderProfile,
@@ -160,7 +161,7 @@ async function marketplace(
           shopDomain === bundle.workspace.providerCapabilityProfile.shopify?.shopDomain,
       ) ??
       ownerInstallations.find(({ connectionStatus }) => connectionStatus === 'connected') ??
-      connectedInstallations.find(({ marketplaceListed }) => marketplaceListed) ??
+      connectedInstallations.find(isMarketplaceInstallationListed) ??
       null;
   }
 
@@ -233,7 +234,10 @@ async function marketplace(
   const listed = (
     await Promise.all(
       connectedInstallations
-        .filter(({ marketplaceListed, makerProfile }) => marketplaceListed && makerProfile)
+        .filter(
+          (installation) =>
+            isMarketplaceInstallationListed(installation) && installation.makerProfile,
+        )
         .map((installation) =>
           inspectedInstallation(installation, installation.makerProfile!, refresh),
         ),

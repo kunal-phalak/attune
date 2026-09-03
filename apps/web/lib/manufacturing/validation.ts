@@ -73,7 +73,12 @@ export function validateProviderCapability(
   const clearanceMinimum = profile.minimums.edgeClearanceMm;
   return [
     ...(envelopeExceeded
-      ? [{ id: 'provider_work_envelope', message: 'The design exceeds the declared work envelope.' }]
+      ? [
+          {
+            id: 'provider_work_envelope',
+            message: 'The design exceeds the declared work envelope.',
+          },
+        ]
       : []),
     ...(Array.isArray(profile.materials) && !material
       ? [

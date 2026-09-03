@@ -1,6 +1,9 @@
-import type { Metadata } from 'next';
+import { Analytics } from '@vercel/analytics/next';
 
+import 'mapbox-gl/dist/mapbox-gl.css';
 import './globals.css';
+
+import type { Metadata } from 'next';
 
 import { AttuneUiProvider } from '../components/attune-ui-provider';
 
@@ -15,6 +18,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body className="isolate min-h-dvh bg-kumo-canvas text-kumo-contrast antialiased">
         <AttuneUiProvider>{children}</AttuneUiProvider>
+        <Analytics />
       </body>
     </html>
   );

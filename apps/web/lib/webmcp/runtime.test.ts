@@ -38,6 +38,7 @@ function mutationResult() {
     specificationHash: 'b'.repeat(64),
     changedEntities: ['sketch:hub:bore'],
     availableCapabilities: ['edit_draft'],
+    availableAuthorityCapabilities: ['edit_draft'],
     solver: {
       status: 'success',
       conflicts: [],

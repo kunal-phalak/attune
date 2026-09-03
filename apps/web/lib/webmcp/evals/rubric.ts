@@ -46,14 +46,17 @@ function containsHiddenReasoning(input: unknown): boolean {
   );
 }
 
-export function scoreWebMcpEval(testCase: WebMcpEvalCase, trace: WebMcpEvalTrace): WebMcpEvalResult {
+export function scoreWebMcpEval(
+  testCase: WebMcpEvalCase,
+  trace: WebMcpEvalTrace,
+): WebMcpEvalResult {
   const failures: string[] = [];
-  const names = trace.calls.map(({ tool }) => tool);
+  const names = new Set(trace.calls.map(({ tool }) => tool));
   for (const expected of testCase.expectedTools) {
-    if (!names.includes(expected)) failures.push(`Missing expected tool: ${expected}`);
+    if (!names.has(expected)) failures.push(`Missing expected tool: ${expected}`);
   }
   for (const forbidden of testCase.forbiddenTools) {
-    if (names.includes(forbidden)) failures.push(`Used forbidden tool: ${forbidden}`);
+    if (names.has(forbidden)) failures.push(`Used forbidden tool: ${forbidden}`);
   }
   if (trace.calls.length > testCase.maxToolCalls) {
     failures.push(`Used ${trace.calls.length} tools; maximum is ${testCase.maxToolCalls}.`);

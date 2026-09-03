@@ -151,9 +151,7 @@ function parseRequestQuoteCommand(value: Record<string, unknown>): AttuneCommand
     ...(value.configuration
       ? { configuration: parseManufacturingConfiguration(value.configuration) }
       : {}),
-    ...(value.versionId
-      ? { versionId: requiredIdentifier(value.versionId, 'versionId') }
-      : {}),
+    ...(value.versionId ? { versionId: requiredIdentifier(value.versionId, 'versionId') } : {}),
   };
 }
 
@@ -166,11 +164,7 @@ function parseSaveVersionCommand(value: Record<string, unknown>): AttuneCommand 
 }
 
 function parseRequestChangesCommand(value: Record<string, unknown>): AttuneCommand {
-  assertExactKeys(
-    value,
-    ['type', 'requestId', 'note', 'configuration'],
-    'request_changes command',
-  );
+  assertExactKeys(value, ['type', 'requestId', 'note', 'configuration'], 'request_changes command');
   return {
     type: 'request_changes',
     requestId: requiredIdentifier(value.requestId, 'requestId'),

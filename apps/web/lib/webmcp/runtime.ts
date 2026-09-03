@@ -37,6 +37,7 @@ export interface ToolRuntime {
   readonly current?: (signal?: AbortSignal) => Promise<AttuneApiView>;
   readonly marketplace?: (versionId?: string, signal?: AbortSignal) => Promise<unknown>;
   readonly navigate?: (surface: string, signal?: AbortSignal) => Promise<unknown>;
+  readonly resetReview?: (signal?: AbortSignal) => Promise<AttuneApiView>;
   readonly observe: (
     focus?: AgentContextFocus,
     signal?: AbortSignal,
@@ -121,6 +122,11 @@ function patchObservation(view: AttuneApiView, mutation: AgentMutationResult): A
     ...view,
     specHash: mutation.specificationHash,
     capabilities: view.capabilities.filter(({ id }) => available.has(id)),
+    authority: {
+      ...view.authority,
+      capabilityIds: mutation.availableAuthorityCapabilities,
+      authorityEpoch: mutation.authorityEpoch,
+    },
     workspace: {
       ...view.workspace,
       workspaceSeq: mutation.workspaceSequence,
@@ -427,19 +433,26 @@ export function createToolRuntime(input: {
     }
   };
   const navigate: ToolRuntime['navigate'] = async (surface, signal) => {
+    const currentPath = window.location.pathname ?? '';
     const currentSurface = new URLSearchParams(window.location.search).get('surface') ?? 'design';
     const fromSurface =
-      currentSurface === 'marketplace'
-        ? 'find_makers'
-        : currentSurface === 'buyer_requests'
-          ? 'buyer_requests'
-          : currentSurface === 'provider_requests'
-            ? 'maker_requests'
-            : currentSurface === 'provider_jobs'
-              ? 'maker_jobs'
-              : currentSurface === 'provider_profile'
-                ? 'maker_profile'
-                : currentSurface;
+      currentPath === '/dashboard'
+        ? 'dashboard'
+        : currentPath === '/judge'
+          ? 'review_control_center'
+          : currentPath === '/settings'
+            ? 'settings'
+            : currentSurface === 'marketplace'
+              ? 'find_makers'
+              : currentSurface === 'buyer_requests'
+                ? 'buyer_requests'
+                : currentSurface === 'provider_requests'
+                  ? 'maker_requests'
+                  : currentSurface === 'provider_jobs'
+                    ? 'maker_jobs'
+                    : currentSurface === 'provider_profile'
+                      ? 'maker_profile'
+                      : currentSurface;
     const currentPerspective = perspective();
     const requiredPerspective =
       surface === 'buyer_requests' || surface === 'buyer_orders'
@@ -461,6 +474,20 @@ export function createToolRuntime(input: {
         throw new TypeError('Attune returned an invalid navigation authority response.');
       }
       signal?.throwIfAborted();
+      if (surface === 'dashboard' || surface === 'review_control_center') {
+        if (surface === 'review_control_center' && !authorizedView.product.judgeMode) {
+          throw new Error('The review control center requires an authorized judge session.');
+        }
+        window.location.assign(surface === 'dashboard' ? '/dashboard' : '/judge');
+        input.report({ execution: 'completed', lastAction: action });
+        return {
+          status: 'NAVIGATION_INITIATED',
+          fromSurface,
+          toSurface: surface,
+          perspective: requiredPerspective,
+          authorityUnchanged: true,
+        };
+      }
       const pageSurface =
         surface === 'find_makers'
           ? 'marketplace'
@@ -495,6 +522,30 @@ export function createToolRuntime(input: {
         perspective: requiredPerspective,
         authorityUnchanged: true,
       };
+    } catch (error) {
+      input.report({ execution: 'failed', lastAction: action });
+      throw error;
+    }
+  };
+  const resetReview: ToolRuntime['resetReview'] = async (signal) => {
+    const action = 'reset_judge_workspace';
+    input.report({ execution: 'executing', lastAction: action });
+    try {
+      const response = await fetch('/api/attune/reset', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal,
+      });
+      const next = await responseJson(response);
+      if (!isAttuneApiView(next)) {
+        throw new TypeError('Attune returned an invalid reset workspace view.');
+      }
+      input.viewRef.current = next;
+      input.updateView(next);
+      window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: next }));
+      input.report({ execution: 'completed', lastAction: action });
+      return next;
     } catch (error) {
       input.report({ execution: 'failed', lastAction: action });
       throw error;
@@ -692,5 +743,5 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
-  return { account, current, execute, forecast, marketplace, navigate, observe };
+  return { account, current, execute, forecast, marketplace, navigate, observe, resetReview };
 }

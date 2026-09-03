@@ -51,9 +51,7 @@ export default async function JudgeAccessPage({
 
     return (
       <JudgeControlPanel
-        workspaceId={JUDGE_WORKSPACE_ID}
-        projectName={view.product.projectName}
-        agentAccessOn={view.delegation.status === 'active'}
+        initialView={view}
         buyerReady={buyerCommerceProfileComplete(profile)}
         makerName={makerName}
         makerConnected={Boolean(installation)}
@@ -81,9 +79,9 @@ export default async function JudgeAccessPage({
             is submitted once in the request body and is never placed in the URL.
           </p>
           <ol aria-label="Attune review sequence">
-            <li>Open the clean manufacturing design</li>
-            <li>Discover contextual WebMCP tools</li>
-            <li>Follow Buyer requests through Maker jobs</li>
+            <li>Start in the dashboard with the seeded project</li>
+            <li>Use automatically registered contextual WebMCP tools</li>
+            <li>Follow the guided Buyer-to-Maker state path</li>
           </ol>
         </div>
         <LayerCard render={<div />} className="judge-form-panel">
@@ -111,7 +109,7 @@ export default async function JudgeAccessPage({
                 </p>
               ) : null}
               <Button type="submit" variant="primary">
-                Open review control center
+                Open review dashboard
               </Button>
             </form>
           ) : (

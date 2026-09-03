@@ -617,11 +617,10 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
     savedVersions.find(
       (version) => version.specHash === specHash || `r${version.sourceDraftVersion}` === revisionId,
     );
-  const manufacturingRequests = Array.isArray(storedManufacturingRequests)
+  const workspaceManufacturingRequests = Array.isArray(storedManufacturingRequests)
     ? storedManufacturingRequests.map((request, index) => {
         const version = versionFor(request.specRevision, request.specHash);
-        return {
-          ...request,
+        return Object.assign({}, request, {
           versionId:
             Reflect.get(request, 'versionId') ??
             version?.versionId ??
@@ -629,7 +628,7 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
           versionNumber:
             Reflect.get(request, 'versionNumber') ?? version?.versionNumber ?? index + 1,
           requestRevision: Reflect.get(request, 'requestRevision') ?? 1,
-        };
+        });
       })
     : [];
   return {
@@ -672,7 +671,7 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       provider: Reflect.get(quote, 'provider') ?? provider,
       requestId:
         Reflect.get(quote, 'requestId') ??
-        manufacturingRequests.find(
+        workspaceManufacturingRequests.find(
           (request) =>
             request.specRevision === quote.revisionId && request.specHash === quote.specHash,
         )?.requestId ??
@@ -696,7 +695,7 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       quoteId: acceptance.quoteId,
       requestId:
         Reflect.get(acceptance, 'requestId') ??
-        manufacturingRequests.find(
+        workspaceManufacturingRequests.find(
           (request) =>
             request.specRevision === acceptance.revisionId &&
             request.specHash === acceptance.specHash,
@@ -715,21 +714,20 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
       provider: Reflect.get(acceptance, 'provider') ?? provider,
       acceptedAt: acceptance.acceptedAt,
     })),
-    manufacturingRequests,
+    manufacturingRequests: workspaceManufacturingRequests,
     changeRequests: Array.isArray(storedChangeRequests) ? storedChangeRequests : [],
     externalCommerceRecords: Array.isArray(storedExternalCommerceRecords)
       ? storedExternalCommerceRecords.map((record) => {
-          const request = manufacturingRequests.find(
+          const request = workspaceManufacturingRequests.find(
             ({ requestId }) => requestId === record.requestId,
           );
-          return {
-            ...record,
+          return Object.assign({}, record, {
             versionId:
               Reflect.get(record, 'versionId') ??
               request?.versionId ??
               `version:legacy:${record.specRevision}`,
             versionNumber: Reflect.get(record, 'versionNumber') ?? request?.versionNumber ?? 1,
-          };
+          });
         })
       : [],
   };
@@ -1499,6 +1497,7 @@ export async function grantShopifyMakerAuthority(userId: string): Promise<void> 
     for (const membership of organizationRows) {
       const next = rolesAfterShopifyConnection(membership.roles);
       if (!next.changed) continue;
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Transaction writes are intentionally ordered.
       await transaction
         .update(organizationMemberships)
         .set({ roles: [...next.roles] })
@@ -1530,6 +1529,7 @@ export async function grantShopifyMakerAuthority(userId: string): Promise<void> 
     for (const membership of workspaceRows) {
       const next = rolesAfterShopifyConnection(membership.roles);
       if (!next.changed) continue;
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Membership must update before its authority epoch.
       await transaction
         .update(workspaceMemberships)
         .set({ roles: [...next.roles] })
@@ -1539,6 +1539,7 @@ export async function grantShopifyMakerAuthority(userId: string): Promise<void> 
             eq(workspaceMemberships.userId, userId),
           ),
         );
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Authority epoch follows the membership write.
       await transaction
         .update(workspaces)
         .set({
@@ -1740,6 +1741,7 @@ export async function listProjectsForUser(userId: string) {
         workspaceSeq: workspaces.workspaceSeq,
         draftVersion: workspaces.draftVersion,
         capabilityEpoch: workspaces.capabilityEpoch,
+        roles: workspaceMemberships.roles,
         specification: workspaces.currentSpecification,
         updatedAt: workspaces.updatedAt,
       })
@@ -1755,25 +1757,30 @@ export async function listProjectsForUser(userId: string) {
       .where(eq(organizationMemberships.userId, userId)),
   ]);
   const ownedOrganizations = new Set(organizationRows.map(({ organizationId }) => organizationId));
-  return projectRows.map((row) => ({
-    projectId: row.projectId,
-    projectName: row.projectName,
-    projectCode: row.projectCode,
-    organizationId: row.organizationId,
-    workspaceId: row.workspaceId,
-    workspaceName: row.workspaceName,
-    fileName: row.fileName,
-    fileKind: row.fileKind,
-    liveblocksRoomId: row.liveblocksRoomId,
-    workspaceSeq: row.workspaceSeq,
-    draftVersion: row.draftVersion,
-    capabilityEpoch: row.capabilityEpoch,
-    sketchDocument: workspaceWithCurrentContract(row.specification).sketchDocument,
-    updatedAt: row.updatedAt,
-    access: ownedOrganizations.has(row.organizationId) ? ('owned' as const) : ('shared' as const),
-    canManage: ownedOrganizations.has(row.organizationId) && row.fileKind.startsWith('sketch:'),
-    template: row.fileKind === 'sketch:blank' ? ('blank' as const) : ('spoke' as const),
-  }));
+  return projectRows.map((row) => {
+    const workspace = workspaceWithCurrentContract(row.specification);
+    return {
+      projectId: row.projectId,
+      projectName: row.projectName,
+      projectCode: row.projectCode,
+      organizationId: row.organizationId,
+      workspaceId: row.workspaceId,
+      workspaceName: row.workspaceName,
+      fileName: row.fileName,
+      fileKind: row.fileKind,
+      liveblocksRoomId: row.liveblocksRoomId,
+      workspaceSeq: row.workspaceSeq,
+      draftVersion: row.draftVersion,
+      capabilityEpoch: row.capabilityEpoch,
+      roles: row.roles,
+      workspace,
+      sketchDocument: workspace.sketchDocument,
+      updatedAt: row.updatedAt,
+      access: ownedOrganizations.has(row.organizationId) ? ('owned' as const) : ('shared' as const),
+      canManage: ownedOrganizations.has(row.organizationId) && row.fileKind.startsWith('sketch:'),
+      template: row.fileKind === 'sketch:blank' ? ('blank' as const) : ('spoke' as const),
+    };
+  });
 }
 
 export async function listProjectsForLiveblocksRooms(roomIds: readonly string[]) {

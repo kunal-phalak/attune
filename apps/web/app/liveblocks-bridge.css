@@ -80,12 +80,7 @@
   }
 
   #attune-overlay-root
-    :where(
-      .lb-tooltip,
-      .lb-composer-suggestions,
-      .lb-emoji-picker,
-      .lb-reaction-picker
-    ) {
+    :where(.lb-tooltip, .lb-composer-suggestions, .lb-emoji-picker, .lb-reaction-picker) {
     z-index: var(--attune-layer-popups);
   }
 

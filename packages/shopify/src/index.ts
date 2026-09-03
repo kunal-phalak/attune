@@ -33,6 +33,12 @@ export {
   DRAFT_ORDER_WEBHOOK_TOPICS,
   prepareDraftOrderInput,
 } from './draft-orders';
-export { createAndVerifyDraftOrder, createAndVerifyDraftOrderWithAdmin } from './draft-order-service';
+export {
+  createAndVerifyDraftOrder,
+  createAndVerifyDraftOrderWithAdmin,
+  customerCheckoutHandoffWithAdmin,
+  listRecentDraftOrdersWithAdmin,
+} from './draft-order-service';
+export type { ShopifyDraftOrderSummary } from './draft-order-service';
 export { materializeRevision } from './materialize';
 export { attachExactVersionPreview } from './product-media';

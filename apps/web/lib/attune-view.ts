@@ -17,6 +17,7 @@ export interface AttuneApiView {
   readonly perspective: CapabilityRole;
   readonly authority: {
     readonly perspectives: readonly Extract<CapabilityRole, 'buyer' | 'provider'>[];
+    readonly possessedCapabilityIds: readonly string[];
     readonly capabilityIds: readonly string[];
     readonly authorityEpoch: number;
   };

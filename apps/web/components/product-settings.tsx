@@ -8,6 +8,7 @@ import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import { Select } from '@cloudflare/kumo/components/select';
 import {
   ArrowClockwiseIcon,
+  ArrowSquareOutIcon,
   FactoryIcon,
   IdentificationCardIcon,
   PlugsConnectedIcon,
@@ -19,8 +20,9 @@ import {
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 import { BuyerProfileDialog } from './manufacturing-flow/buyer-profile-dialog';
+import { SettingsWebMcp, type ShopifyOrdersEnvelope } from './settings-webmcp';
 
-interface InstallationLocation {
+export interface InstallationLocation {
   readonly id: string;
   readonly name: string;
   readonly isActive: boolean;
@@ -35,7 +37,7 @@ interface InstallationLocation {
   } | null;
 }
 
-interface ShopifyInstallationView {
+export interface ShopifyInstallationView {
   readonly id: string;
   readonly shopDomain: string;
   readonly shopName: string;
@@ -50,7 +52,7 @@ interface ShopifyInstallationView {
   readonly makerProfile?: object | null;
 }
 
-interface InstallationsEnvelope {
+export interface InstallationsEnvelope {
   readonly configured: boolean;
   readonly redirectUri?: string | null;
   readonly installations: readonly ShopifyInstallationView[];
@@ -62,6 +64,16 @@ function isInstallationsEnvelope(value: unknown): value is InstallationsEnvelope
     value !== null &&
     typeof Reflect.get(value, 'configured') === 'boolean' &&
     Array.isArray(Reflect.get(value, 'installations'))
+  );
+}
+
+function isShopifyOrdersEnvelope(value: unknown): value is ShopifyOrdersEnvelope {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof Reflect.get(value, 'store') === 'object' &&
+    Reflect.get(value, 'store') !== null &&
+    Array.isArray(Reflect.get(value, 'draftOrders'))
   );
 }
 
@@ -109,6 +121,8 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
   const [envelope, setEnvelope] = useState<InstallationsEnvelope | null>(null);
   const [integrationError, setIntegrationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [ordersBusyId, setOrdersBusyId] = useState<string | null>(null);
+  const [orders, setOrders] = useState<Readonly<Record<string, ShopifyOrdersEnvelope>>>({});
 
   const loadInstallations = useCallback(async () => {
     setIntegrationError(null);
@@ -122,6 +136,44 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
       setIntegrationError(error instanceof Error ? error.message : 'Shopify is unavailable.');
     }
   }, []);
+
+  const ordersLoaded = useCallback((installationId: string, payload: ShopifyOrdersEnvelope) => {
+    setOrders((current) => ({ ...current, [installationId]: payload }));
+  }, []);
+
+  const loadOrders = useCallback(
+    async (installationId: string) => {
+      setOrdersBusyId(installationId);
+      setIntegrationError(null);
+      try {
+        const response = await fetch(
+          `/api/shopify/draft-orders?installation_id=${encodeURIComponent(installationId)}`,
+          { cache: 'no-store', headers: { Accept: 'application/json' } },
+        );
+        const payload: unknown = await response.json().catch(() => null);
+        if (
+          !response.ok ||
+          typeof payload !== 'object' ||
+          payload === null ||
+          !isShopifyOrdersEnvelope(payload)
+        ) {
+          const message =
+            typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'error') : null;
+          throw new Error(
+            typeof message === 'string' ? message : 'Shopify Draft Orders are unavailable.',
+          );
+        }
+        ordersLoaded(installationId, payload);
+      } catch (error) {
+        setIntegrationError(
+          error instanceof Error ? error.message : 'Shopify Draft Orders are unavailable.',
+        );
+      } finally {
+        setOrdersBusyId(null);
+      }
+    },
+    [ordersLoaded],
+  );
 
   useEffect(() => {
     void loadInstallations();
@@ -167,6 +219,9 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
       });
       if (!response.ok) throw new Error('The Shopify store could not be disconnected.');
       await loadInstallations();
+      setOrders((current) =>
+        Object.fromEntries(Object.entries(current).filter(([id]) => id !== installationId)),
+      );
     } catch (error) {
       setIntegrationError(
         error instanceof Error ? error.message : 'The store could not be disconnected.',
@@ -251,9 +306,18 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
           <h1>Settings</h1>
           <p>Manage delivery details, store connections, and manufacturing capability.</p>
         </div>
-        <LinkButton href="/dashboard" variant="secondary">
-          Back to projects
-        </LinkButton>
+        <div className="product-settings-actions">
+          <SettingsWebMcp
+            workspaceId={workspaceId}
+            envelope={envelope}
+            orders={orders}
+            onInstallationsChanged={loadInstallations}
+            onOrdersLoaded={ordersLoaded}
+          />
+          <LinkButton href="/dashboard" variant="secondary">
+            Back to projects
+          </LinkButton>
+        </div>
       </header>
       <nav className="product-settings-nav" aria-label="Settings sections">
         <a href="#profile">Profile</a>
@@ -397,6 +461,15 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
                         </Select>
                       ) : null}
                       <div className="shopify-installation-actions">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          icon={<StorefrontIcon size={17} />}
+                          loading={ordersBusyId === installation.id}
+                          onClick={() => void loadOrders(installation.id)}
+                        >
+                          {orders[installation.id] ? 'Refresh Draft Orders' : 'View Draft Orders'}
+                        </Button>
                         {workspaceId ? (
                           <LinkButton
                             href={`/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_profile&installation=${encodeURIComponent(installation.id)}`}
@@ -431,6 +504,69 @@ export function ProductSettings({ workspaceId }: { readonly workspaceId?: string
                           Disconnect
                         </Button>
                       </div>
+                      {orders[installation.id] ? (
+                        <div className="shopify-order-disclosure" aria-live="polite">
+                          <div className="shopify-order-disclosure-heading">
+                            <div>
+                              <h4>Recent Draft Orders</h4>
+                              <p>
+                                Customer details stay in Shopify. Attune shows only status and exact
+                                revision bindings.
+                              </p>
+                            </div>
+                            <Badge variant="secondary">
+                              {orders[installation.id].draftOrders.length} recent
+                            </Badge>
+                          </div>
+                          {orders[installation.id].draftOrders.length ? (
+                            <div className="shopify-order-list">
+                              {orders[installation.id].draftOrders.map((order) => (
+                                <article className="shopify-order-row" key={order.externalId}>
+                                  <div>
+                                    <div className="shopify-order-title">
+                                      <strong>{order.name}</strong>
+                                      <Badge
+                                        variant={
+                                          order.attuneBinding
+                                            ? 'success'
+                                            : order.status === 'OPEN'
+                                              ? 'warning'
+                                              : 'secondary'
+                                        }
+                                        appearance="dot"
+                                      >
+                                        {order.attuneBinding ? 'Attune verified' : order.status}
+                                      </Badge>
+                                    </div>
+                                    <small>
+                                      Updated{' '}
+                                      {new Intl.DateTimeFormat('en', {
+                                        dateStyle: 'medium',
+                                        timeStyle: 'short',
+                                      }).format(new Date(order.updatedAt))}
+                                      {order.attuneBinding?.versionNumber
+                                        ? ` · Version ${order.attuneBinding.versionNumber}`
+                                        : ''}
+                                      {order.checkoutAvailable ? ' · Checkout ready' : ''}
+                                    </small>
+                                  </div>
+                                  <LinkButton
+                                    href={order.adminUrl}
+                                    target="_blank"
+                                    variant="ghost"
+                                    size="sm"
+                                    icon={<ArrowSquareOutIcon size={16} />}
+                                  >
+                                    Open in Shopify
+                                  </LinkButton>
+                                </article>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="shopify-order-empty">No Draft Orders in this store.</p>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

@@ -92,8 +92,7 @@ export function createAdminClientForAccessToken(
   adminVersion: string,
   accessToken: string,
 ): GraphqlClient {
-  return graphqlClient(
-    `https://${shopDomain}/admin/api/${adminVersion}/graphql.json`,
-    { 'X-Shopify-Access-Token': accessToken },
-  );
+  return graphqlClient(`https://${shopDomain}/admin/api/${adminVersion}/graphql.json`, {
+    'X-Shopify-Access-Token': accessToken,
+  });
 }

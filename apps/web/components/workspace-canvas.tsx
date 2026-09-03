@@ -2,7 +2,6 @@
 
 import {
   addToSelection,
-  applySketchCommand,
   arcPoint,
   bsplineCreation,
   chooseSnapCandidateWithHysteresis,
@@ -1453,16 +1452,7 @@ export const WorkspaceCanvas = forwardRef<
     committingRef.current += 1;
     setInteractionState('committing');
     setInteractionMessage(null);
-    const optimisticBase = displayDocumentRef.current ?? authoritativeRef.current;
-    if (!preserveCurrentPreview && optimisticBase) {
-      try {
-        displayDocumentRef.current = applySketchCommand(optimisticBase, command).document;
-        authoritativeRef.current = displayDocumentRef.current;
-        redraw();
-      } catch {
-        // The authority remains responsible for validation; unsupported local previews stay put.
-      }
-    } else if (displayDocumentRef.current) {
+    if (preserveCurrentPreview && displayDocumentRef.current) {
       authoritativeRef.current = displayDocumentRef.current;
     }
     try {
@@ -1775,25 +1765,8 @@ export const WorkspaceCanvas = forwardRef<
       reportConstraintIssue(applicability.message);
       return;
     }
-    try {
-      const preview = applySketchCommand(sketch, {
-        type: 'apply_constraint',
-        constraints: [constraint],
-      }).document;
-      const analysis = await getBrowserPlaneGcsPreviewRuntime().analyze(preview);
-      if (analysis.conflicts.length > 0) {
-        reportConstraintIssue(
-          `${constraintToolApplicabilityMessage(activeTool).split(' — ')[0]} conflicts with the selected geometry.`,
-        );
-        return;
-      }
-      const accepted = await commitCommand({ type: 'apply_constraint', constraints: [constraint] });
-      if (accepted) onConstraintToolChange?.(null);
-    } catch (error) {
-      reportConstraintIssue(
-        error instanceof Error ? error.message : 'That constraint cannot be applied here.',
-      );
-    }
+    const accepted = await commitCommand({ type: 'apply_constraint', constraints: [constraint] });
+    if (accepted) onConstraintToolChange?.(null);
   };
 
   const stableSnap = (

@@ -8,7 +8,6 @@ export * from './intent/selection-set';
 export * from './intent/snap';
 export * from './sketch/geometry';
 export * from './sketch/primitives';
-export { applySketchCommand } from './sketch/commands';
 export type { SketchCommand } from './sketch/commands';
 export { geometryIntersections, trimSegmentAtPoint } from './sketch/trim';
 export { moveSketchNode } from './sketch/document';

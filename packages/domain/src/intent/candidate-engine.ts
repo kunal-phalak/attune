@@ -153,6 +153,29 @@ export function rankConstraintCandidates(
           );
         }
       }
+      const line = first.kind === 'line' ? first : second.kind === 'line' ? second : undefined;
+      const curve =
+        first.kind === 'circle' || first.kind === 'arc'
+          ? first
+          : second.kind === 'circle' || second.kind === 'arc'
+            ? second
+            : undefined;
+      if (line && curve) {
+        const explicitlySelected =
+          context.selectedEntityIds.includes(line.id) &&
+          context.selectedEntityIds.includes(curve.id);
+        results.push(
+          candidate(
+            'tangent',
+            [{ entityId: line.id }, { entityId: curve.id }],
+            explicitlySelected ? 0.995 : 0.74,
+            explicitlySelected
+              ? 'The selected line and analytic curve are tangent-compatible.'
+              : 'A nearby line and analytic curve are tangent-compatible.',
+            'Makes the line tangent to the circle or arc while preserving analytic geometry.',
+          ),
+        );
+      }
     }
   }
 

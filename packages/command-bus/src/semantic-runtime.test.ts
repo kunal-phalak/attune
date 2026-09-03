@@ -255,8 +255,10 @@ describe('footprint-aware semantic concurrency', () => {
 
     expect(() => bus.execute(agentCommand, staleAgentEnvelope, agent)).toThrowError(
       expect.objectContaining({
-        code: 'REVALIDATION_REQUIRED',
+        code: 'CONTEXT_CHANGED',
         changedEntities: [agentCommand.entities[0].id],
+        latestVersions: { [agentCommand.entities[0].id]: 2 },
+        canRetry: false,
       }),
     );
   });

@@ -1,5 +1,14 @@
 import type { AgentContextFocus, ToolRuntime } from './runtime';
-import { CONSTRAINT_SCHEMA, DIMENSION_SCHEMA, GEOMETRY_SCHEMA, GROUP_SCHEMA } from './schemas';
+import {
+  CONSTRAINT_SCHEMA,
+  DESIGN_REQUEST_SCHEMA,
+  DIMENSION_SCHEMA,
+  GEOMETRY_SCHEMA,
+  GROUP_SCHEMA,
+  RECIPE_PARAMETERS_SCHEMA,
+  RECIPE_PLACEMENT_SCHEMA,
+  VERSIONED_TARGET_SCHEMA,
+} from './schemas';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -55,6 +64,18 @@ function finite(candidate: unknown, name: string): number {
   return candidate;
 }
 
+function withToolDispatchTiming(result: unknown, startedAt: number): unknown {
+  if (typeof result !== 'object' || result === null) return result;
+  const existing = Reflect.get(result, 'timings');
+  return {
+    ...result,
+    timings: {
+      ...(typeof existing === 'object' && existing !== null ? existing : {}),
+      tool_dispatch: Math.max(0, performance.now() - startedAt),
+    },
+  };
+}
+
 function focus(input: unknown): AgentContextFocus {
   if (input === undefined || input === null) return {};
   const value = object(input, 'inspect_context input');
@@ -102,6 +123,46 @@ function focus(input: unknown): AgentContextFocus {
 export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<string, unknown>> {
   const value = object(input, 'modify_geometry input');
   const operation = value.operation;
+  if (operation === 'instantiate_recipe') {
+    exact(
+      value,
+      ['operation', 'recipe', 'parameters', 'placement', 'design_spec'],
+      'instantiate_recipe input',
+    );
+    return {
+      type: operation,
+      sourceRef: `recipe:${string(value.recipe, 'recipe')}:${crypto.randomUUID()}`,
+      recipe: value.recipe,
+      parameters: object(value.parameters, 'parameters'),
+      ...(value.placement !== undefined ? { placement: object(value.placement, 'placement') } : {}),
+      ...(value.design_spec !== undefined
+        ? { designRequest: object(value.design_spec, 'design_spec') }
+        : {}),
+    };
+  }
+  if (operation === 'update_recipe_parameters') {
+    exact(
+      value,
+      ['operation', 'source_ref', 'expected_version', 'changes'],
+      'update_recipe_parameters input',
+    );
+    return {
+      type: operation,
+      sourceRef: string(value.source_ref, 'source_ref'),
+      ...(value.expected_version !== undefined
+        ? { expectedVersion: finite(value.expected_version, 'expected_version') }
+        : {}),
+      changes: object(value.changes, 'changes'),
+    };
+  }
+  if (operation === 'set_radius') {
+    exact(value, ['operation', 'target', 'radius'], 'set_radius input');
+    return {
+      type: operation,
+      target: object(value.target, 'target'),
+      radius: finite(value.radius, 'radius'),
+    };
+  }
   if (operation === 'create_geometry') {
     exact(
       value,
@@ -195,6 +256,16 @@ export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<st
 
 function constraintCommand(input: unknown): Readonly<Record<string, unknown>> {
   const value = object(input, 'constrain_geometry input');
+  if (value.operation === 'set_tangent') {
+    exact(value, ['operation', 'targets'], 'set_tangent input');
+    const targets = collection(value.targets, 'targets');
+    if (targets.length !== 2) throw new TypeError('set_tangent requires exactly two targets.');
+    return {
+      type: value.operation,
+      targets: targets.map((target) => object(target, 'target')),
+      constraintId: `constraint:tangent:${crypto.randomUUID()}`,
+    };
+  }
   if (value.operation === 'apply_constraint') {
     exact(value, ['operation', 'constraints'], 'apply_constraint input');
     return {
@@ -257,8 +328,10 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true, untrustedContentHint: true },
-      execute(input, execution) {
-        return runtime.observe(focus(input), execution?.signal);
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        const result = await runtime.observe(focus(input), execution?.signal);
+        return withToolDispatchTiming(result, startedAt);
       },
     },
     {
@@ -280,10 +353,12 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true, untrustedContentHint: true },
-      execute(input, execution) {
+      async execute(input, execution) {
+        const startedAt = performance.now();
         const value = object(input, 'forecast_change input');
         exact(value, ['command'], 'forecast_change input');
-        return runtime.forecast(object(value.command, 'command'), execution?.signal);
+        const result = await runtime.forecast(object(value.command, 'command'), execution?.signal);
+        return withToolDispatchTiming(result, startedAt);
       },
     },
     {
@@ -293,9 +368,11 @@ function semanticTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         'Return compact current solver status, conflicts, degrees of freedom, constraint candidates, and available semantic actions without mutation.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: true },
-      execute(input, execution) {
+      async execute(input, execution) {
+        const startedAt = performance.now();
         empty(input);
-        return runtime.observe({}, execution?.signal);
+        const result = await runtime.observe({}, execution?.signal);
+        return withToolDispatchTiming(result, startedAt);
       },
     },
   ];
@@ -307,13 +384,16 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
       name: 'modify_geometry',
       title: 'Batch modify semantic geometry',
       description:
-        'Create, transform, trim, edit, or delete semantic geometry, move a shared topology node, or create/move sections and groups. One request forecasts, solves, safely rebases disjoint edits, and commits through the command bus.',
+        'Instantiate or update deterministic mechanical recipes, set a circle or arc radius by stable versioned target, or batch lower-level semantic geometry edits. Prefer instantiate_recipe for common mechanical structures; one request generates analytic Attune geometry, solves, safely rebases disjoint edits, and commits.',
       inputSchema: {
         type: 'object',
         properties: {
           operation: {
             type: 'string',
             enum: [
+              'instantiate_recipe',
+              'update_recipe_parameters',
+              'set_radius',
               'create_geometry',
               'edit_geometry',
               'move_node',
@@ -326,6 +406,27 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
               'move_to_group',
             ],
           },
+          recipe: {
+            type: 'string',
+            enum: [
+              'round_plate',
+              'annular_ring',
+              'rounded_rectangle_plate',
+              'mounting_plate',
+              'bolt_circle',
+              'slotted_plate',
+              'spoked_wheel',
+              'radial_pattern',
+            ],
+          },
+          parameters: RECIPE_PARAMETERS_SCHEMA,
+          placement: RECIPE_PLACEMENT_SCHEMA,
+          design_spec: DESIGN_REQUEST_SCHEMA,
+          source_ref: { type: 'string' },
+          expected_version: { type: 'integer', minimum: 0 },
+          changes: { type: 'object', additionalProperties: true },
+          target: VERSIONED_TARGET_SCHEMA,
+          radius: { type: 'number', exclusiveMinimum: 0 },
           entities: { type: 'array', minItems: 1, maxItems: 200, items: GEOMETRY_SCHEMA },
           constraints: { type: 'array', minItems: 1, maxItems: 200, items: CONSTRAINT_SCHEMA },
           entity_ids: { type: 'array', minItems: 1, maxItems: 200, items: { type: 'string' } },
@@ -367,21 +468,38 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
-      execute(input, execution) {
-        return runtime.execute(parseModifyGeometryToolInput(input), execution?.signal);
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        const result = await runtime.execute(
+          parseModifyGeometryToolInput(input),
+          execution?.signal,
+        );
+        return withToolDispatchTiming(result, startedAt);
       },
     },
     {
       name: 'constrain_geometry',
       title: 'Batch constrain semantic geometry',
       description:
-        'Apply/remove deterministic constraints or set dimensions in one typed batch. Unsupported PlaneGCS projections return diagnostics and do not commit.',
+        'Apply/remove deterministic constraints, set dimensions, or make one selected line tangent to one selected circle or arc using versioned targets. Unsupported PlaneGCS projections return diagnostics and do not commit.',
       inputSchema: {
         type: 'object',
         properties: {
           operation: {
             type: 'string',
-            enum: ['apply_constraint', 'remove_constraint', 'set_dimension', 'remove_dimension'],
+            enum: [
+              'set_tangent',
+              'apply_constraint',
+              'remove_constraint',
+              'set_dimension',
+              'remove_dimension',
+            ],
+          },
+          targets: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 2,
+            items: VERSIONED_TARGET_SCHEMA,
           },
           constraints: {
             type: 'array',
@@ -412,8 +530,10 @@ function editingTools(runtime: ToolRuntime): readonly WebMcpTool[] {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: false, untrustedContentHint: true },
-      execute(input, execution) {
-        return runtime.execute(constraintCommand(input), execution?.signal);
+      async execute(input, execution) {
+        const startedAt = performance.now();
+        const result = await runtime.execute(constraintCommand(input), execution?.signal);
+        return withToolDispatchTiming(result, startedAt);
       },
     },
   ];

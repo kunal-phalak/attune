@@ -1,3 +1,12 @@
+import type { DesignRecipeProvenance } from '../recipes/types';
+
+export interface MakerModelGroupSourceRef {
+  readonly kind: 'maker-model';
+  readonly routeKey: string;
+  readonly route: readonly string[];
+  readonly layer?: string;
+}
+
 export interface SketchGroup {
   readonly id: string;
   readonly version: number;
@@ -6,12 +15,7 @@ export interface SketchGroup {
   readonly parentGroupId?: string;
   readonly entityIds: readonly string[];
   readonly childGroupIds?: readonly string[];
-  readonly sourceRef?: {
-    readonly kind: 'maker-model';
-    readonly routeKey: string;
-    readonly route: readonly string[];
-    readonly layer?: string;
-  };
+  readonly sourceRef?: MakerModelGroupSourceRef | DesignRecipeProvenance;
 }
 
 export type GroupInput = Omit<SketchGroup, 'version'>;

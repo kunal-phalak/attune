@@ -13,6 +13,7 @@ export * from './judge-authority';
 export * from './maker/makerjs-adapter';
 export * from './model';
 export * from './notifications';
+export * from './recipes/types';
 export * from './sketch/commands';
 export * from './sketch/constraints';
 export * from './sketch/dimensions';

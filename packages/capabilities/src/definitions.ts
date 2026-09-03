@@ -26,7 +26,7 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     id: 'apply_deterministic_repair',
     description: () => 'Apply one exact predicted repair.',
     predictedConsequences: () => [
-      'Resolves slot clearance while preserving all four buyer-locked mounts.',
+      'Resolves the selected hard geometry conflict while preserving locked requirements.',
       'Increments draft version and capability epoch.',
     ],
     blockers: conflictBlockers,
@@ -34,13 +34,13 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
   },
   {
     id: 'edit_draft',
-    description: () => 'Move an editable feature in the current draft.',
+    description: () => 'Edit semantic geometry in the current draft.',
     predictedConsequences: () => [
       'Increments draft version and capability epoch.',
       'Revokes authority tied to the previous specification.',
     ],
     blockers: editBlockers,
-    reason: () => 'The slot is editable by the current principal.',
+    reason: () => 'The current principal can edit this draft.',
   },
   {
     id: 'request_quote',

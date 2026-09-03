@@ -152,8 +152,85 @@ describe('one-request WebMCP semantic mutation runtime', () => {
         code: 'DELEGATION_REQUIRED',
         message: 'Enable agent access for this workspace.',
         semanticRefs: [],
+        latestVersions: {},
+        whatChanged: 'Enable agent access for this workspace.',
+        canRetry: false,
       },
       delegation: { status: 'required', authorityEpoch: 0 },
     });
+  });
+
+  it('refreshes and retries one safe stale observation exactly once', async () => {
+    const initial = bootstrapView();
+    const target = initial.workspace.sketchDocument.entities.find(({ kind }) => kind === 'circle')!;
+    const refreshed: AttuneApiView = {
+      ...initial,
+      specHash: 'c'.repeat(64),
+      workspace: {
+        ...initial.workspace,
+        workspaceSeq: 2,
+        sketchDocument: {
+          ...initial.workspace.sketchDocument,
+          entities: initial.workspace.sketchDocument.entities.map((entity) =>
+            entity.id === target.id ? { ...entity, version: 7 } : entity,
+          ),
+        },
+      },
+    };
+    let calls = 0;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) {
+        return Response.json(
+          {
+            error: {
+              code: 'CONTEXT_CHANGED',
+              message: 'The observation snapshot expired.',
+              changedEntities: ['sketch:document'],
+              latestVersions: { 'sketch:document': 0 },
+              canRetry: true,
+            },
+          },
+          { status: 409 },
+        );
+      }
+      if (calls === 2) return Response.json(refreshed);
+      return Response.json(mutationResult(), {
+        headers: { 'Server-Timing': 'recipe_instantiation;dur=2.4, plane_gcs;dur=3.1' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const viewRef = { current: initial };
+    const runtime = createToolRuntime({
+      workspaceId: 'workspace:at-1042',
+      perspective: 'buyer',
+      viewRef,
+      updateView: (view) => {
+        viewRef.current = view;
+      },
+      report: () => undefined,
+    });
+
+    const result = await runtime.execute({
+      type: 'set_radius',
+      target: { entityId: target.id, expectedVersion: target.version },
+      radius: 12,
+    });
+    const retryRequestBody = fetchMock.mock.calls[2]?.[1]?.body;
+    if (typeof retryRequestBody !== 'string') throw new TypeError('Missing retry request body.');
+    const retryBody = JSON.parse(retryRequestBody);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(retryBody.command.target).toEqual({ entityId: target.id, expectedVersion: 7 });
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'APPLIED',
+        timings: expect.objectContaining({
+          automatic_retries: 1,
+          recipe_instantiation: 2.4,
+          plane_gcs: 3.1,
+        }),
+      }),
+    );
   });
 });

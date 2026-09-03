@@ -62,7 +62,7 @@ describe('compact AgentContextSnapshot', () => {
     );
     expect(context.nearbySemanticRefs).toEqual(expect.arrayContaining([entity.id]));
     expect(context.relevantActions).toEqual(
-      expect.arrayContaining(['modify_geometry', 'constrain_geometry', 'continue_line']),
+      expect.arrayContaining(['move_endpoint', 'trim_geometry', 'continue_line']),
     );
     expect(context.unseenChanges).toEqual([
       {
@@ -75,6 +75,14 @@ describe('compact AgentContextSnapshot', () => {
     expect(context.availableActions).toEqual(
       expect.arrayContaining(['modify_geometry', 'constrain_geometry']),
     );
+    expect(context.geometry[0]).toEqual(
+      expect.objectContaining({
+        semanticRole: expect.any(String),
+        parentGroup: expect.objectContaining({ id: group.id }),
+        relevantActions: expect.arrayContaining(['move_endpoint']),
+      }),
+    );
+    expect(context.geometry[0]).not.toHaveProperty('sourceRef');
     expect(context.delegation.status).toBe('active');
     expect(context).not.toHaveProperty('receipts');
     expect(context).not.toHaveProperty('commerceLinks');

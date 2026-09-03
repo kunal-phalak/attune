@@ -84,7 +84,9 @@ function computeWorkspaceForecast(input: {
   readonly role: AttuneRole;
   readonly metadata: TransitionMetadata;
   readonly solver?: ConstraintSolver;
+  readonly timing?: (name: string, durationMs: number) => void;
 }): WorkspaceForecast {
+  const forecastStartedAt = performance.now();
   const before = structuredClone(input.workspace);
   const beforeHash = hashCanonical(before);
   let workspaceAfter: AttuneWorkspace;
@@ -98,8 +100,17 @@ function computeWorkspaceForecast(input: {
 
   if (isSketchCommand(input.command)) {
     if (!input.solver) throw new TypeError('A ConstraintSolver is required for sketch commands.');
+    const applicationStartedAt = performance.now();
     const application = applySketchCommand(before.sketchDocument, input.command);
+    if (
+      input.command.type === 'instantiate_recipe' ||
+      input.command.type === 'update_recipe_parameters'
+    ) {
+      input.timing?.('recipe_instantiation', performance.now() - applicationStartedAt);
+    }
+    const solverStartedAt = performance.now();
     const solution = input.solver.solve(application.document);
+    input.timing?.('plane_gcs', performance.now() - solverStartedAt);
     const solvedDocument = normalizeSolvedVersions(before.sketchDocument, solution.document);
     const transition = transitionWorkspace(before, input.command, input.metadata, {
       solvedSketchDocument: solvedDocument,
@@ -131,16 +142,12 @@ function computeWorkspaceForecast(input: {
       solverDiagnostics.length === 0);
   const providerValidation = validateWorkspace(workspaceAfter);
   const warnings = isSketchCommand(input.command)
-    ? providerValidation.valid
-      ? []
-      : [
-          'The existing provider panel projection remains invalid; it is not yet derived from this semantic spoke sketch.',
-        ]
+    ? []
     : providerValidation.valid
       ? []
       : providerValidation.issues.map(({ message }) => message);
 
-  return {
+  const result = {
     consequence: {
       valid: isSketchCommand(input.command) ? semanticSolverValid : providerValidation.valid,
       beforeHash,
@@ -164,6 +171,8 @@ function computeWorkspaceForecast(input: {
     workspaceAfter,
     affectedEntities,
   };
+  input.timing?.('forecast', performance.now() - forecastStartedAt);
+  return result;
 }
 
 export function forecastWorkspaceChange(input: {
@@ -172,6 +181,7 @@ export function forecastWorkspaceChange(input: {
   readonly role: AttuneRole;
   readonly metadata: TransitionMetadata;
   readonly solver?: ConstraintSolver;
+  readonly timing?: (name: string, durationMs: number) => void;
 }): WorkspaceForecast {
   if (!isSketchCommand(input.command)) return computeWorkspaceForecast(input);
   const key = semanticForecastKey(input);

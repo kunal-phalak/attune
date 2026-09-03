@@ -20,6 +20,10 @@ const MAX_COMPILED_FRONTIERS = 128;
 const compiledFrontiers = new Map<string, readonly CapabilityFrontierEntry[]>();
 
 const COMMAND_CAPABILITY: Readonly<Partial<Record<AttuneCommandType, CapabilityId>>> = {
+  instantiate_recipe: 'edit_draft',
+  update_recipe_parameters: 'edit_draft',
+  set_radius: 'edit_draft',
+  set_tangent: 'edit_draft',
   create_geometry: 'edit_draft',
   edit_geometry: 'edit_draft',
   move_node: 'edit_draft',

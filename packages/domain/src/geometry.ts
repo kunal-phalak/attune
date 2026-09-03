@@ -182,7 +182,7 @@ export function validateProviderCapability(
             id: 'slot_clearance' as const,
             severity: 'hard' as const,
             source: 'provider' as const,
-            message: `Slot clearance ${observedMm} mm is below ${profile.providerName}'s required ${requiredMm} mm.`,
+            message: `Edge clearance ${observedMm} mm is below ${profile.providerName}'s required ${requiredMm} mm.`,
             observedMm,
             requiredMm,
             affectedEntities: ['slot:connector', 'panel:right-edge'],

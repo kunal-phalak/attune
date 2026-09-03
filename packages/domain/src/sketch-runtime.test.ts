@@ -31,10 +31,10 @@ describe('semantic spoke seed', () => {
     expect(first.nodes).toEqual(second.nodes);
     expect(first.entities.every((entity) => entity.sourceRef?.kind === 'maker-path')).toBe(true);
     expect(first.groups[0]).toEqual(
-      expect.objectContaining({ id: 'maker:group:root', name: 'Maker.js source' }),
+      expect.objectContaining({ id: 'maker:group:root', name: 'Imported geometry' }),
     );
     expect(first.groups.map(({ name }) => name)).toEqual(
-      expect.arrayContaining(['wedge0', 'wedge5', 'ring2']),
+      expect.arrayContaining(['Spoke 1', 'Spoke 6', 'Outer rim']),
     );
     expect(first.source).toEqual(
       expect.objectContaining({

@@ -44,7 +44,15 @@ const navigation: readonly { readonly id: LibraryFilter; readonly label: string 
 
 const DASHBOARD_SIDEBAR_STORAGE_KEY = 'attune:dashboard-sidebar-open';
 
-function ProjectThumbnail({ template }: { readonly template: SketchTemplate }) {
+function ProjectThumbnail({
+  template,
+  thumbnail,
+  id = template,
+}: {
+  readonly template: SketchTemplate;
+  readonly thumbnail?: LibraryProject['thumbnail'];
+  readonly id?: string;
+}) {
   const spokes = Array.from({ length: 6 }, (_, index) => {
     const angle = (index * Math.PI) / 3;
     return {
@@ -59,11 +67,13 @@ function ProjectThumbnail({ template }: { readonly template: SketchTemplate }) {
     <svg
       viewBox="0 0 320 188"
       preserveAspectRatio="xMidYMid slice"
-      aria-label={template === 'spoke' ? 'Spoke sketch thumbnail' : 'Blank sketch thumbnail'}
+      aria-label={
+        thumbnail?.entities.length ? 'Current design thumbnail' : 'Blank sketch thumbnail'
+      }
     >
       <defs>
         <pattern
-          id={`project-thumbnail-grid-${template}`}
+          id={`project-thumbnail-grid-${id.replaceAll(/[^a-zA-Z0-9_-]/g, '-')}`}
           width="16"
           height="16"
           patternUnits="userSpaceOnUse"
@@ -76,16 +86,63 @@ function ProjectThumbnail({ template }: { readonly template: SketchTemplate }) {
         className="spoke-thumbnail-grid"
         width="320"
         height="188"
-        fill={`url(#project-thumbnail-grid-${template})`}
+        fill={`url(#project-thumbnail-grid-${id.replaceAll(/[^a-zA-Z0-9_-]/g, '-')})`}
       />
-      {template === 'spoke' ? (
+      {thumbnail && thumbnail.entities.length > 0 ? (
+        <g
+          className="spoke-thumbnail-geometry"
+          transform={`translate(160 94) scale(${148 / Math.max(1, thumbnail.bounds.maxX - thumbnail.bounds.minX, thumbnail.bounds.maxY - thumbnail.bounds.minY)} ${-148 / Math.max(1, thumbnail.bounds.maxX - thumbnail.bounds.minX, thumbnail.bounds.maxY - thumbnail.bounds.minY)}) translate(${-(thumbnail.bounds.minX + thumbnail.bounds.maxX) / 2} ${-(thumbnail.bounds.minY + thumbnail.bounds.maxY) / 2})`}
+        >
+          {thumbnail.entities.map((entity) => {
+            if (entity.kind === 'line') {
+              return (
+                <line
+                  key={entity.id}
+                  x1={entity.start.x}
+                  y1={entity.start.y}
+                  x2={entity.end.x}
+                  y2={entity.end.y}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            }
+            if (entity.kind === 'circle') {
+              return (
+                <circle
+                  key={entity.id}
+                  cx={entity.center.x}
+                  cy={entity.center.y}
+                  r={entity.radius}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            }
+            if (entity.kind === 'arc') {
+              return (
+                <path
+                  key={entity.id}
+                  d={`M${entity.start.x} ${entity.start.y}A${entity.radius} ${entity.radius} 0 ${entity.largeArc ? 1 : 0} 1 ${entity.end.x} ${entity.end.y}`}
+                  vectorEffect="non-scaling-stroke"
+                />
+              );
+            }
+            return (
+              <polyline
+                key={entity.id}
+                points={entity.points.map(({ x, y }) => `${x},${y}`).join(' ')}
+                vectorEffect="non-scaling-stroke"
+              />
+            );
+          })}
+        </g>
+      ) : template === 'spoke' ? (
         <g className="spoke-thumbnail-geometry">
           <circle cx="160" cy="94" r="82" />
           <circle cx="160" cy="94" r="75" />
           <circle cx="160" cy="94" r="31" />
           <circle cx="160" cy="94" r="13" />
-          {spokes.map(({ id, ...spoke }) => (
-            <line key={id} {...spoke} />
+          {spokes.map(({ id: spokeId, ...spoke }) => (
+            <line key={spokeId} {...spoke} />
           ))}
         </g>
       ) : null}
@@ -299,7 +356,11 @@ function ProjectCardBody({
   return (
     <Surface render={<article />} className="dashboard-project-card">
       <Link className="dashboard-project-thumbnail" href={workspaceHref}>
-        <ProjectThumbnail template={project.template} />
+        <ProjectThumbnail
+          template={project.template}
+          thumbnail={project.thumbnail}
+          id={project.workspaceId}
+        />
       </Link>
       <div className="dashboard-project-meta">
         <div className="dashboard-project-identity">
@@ -485,7 +546,7 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
               <ProjectThumbnail template="spoke" />
             </span>
             <span>
-              <strong>Spoke example</strong>
+              <strong>Straight-spoke wheel</strong>
               <small>Parametric sketch example</small>
             </span>
           </Button>
@@ -555,7 +616,7 @@ function EmptyLibrary({
     <AttuneEmptyState
       media={<AppIcons.Sketch size={24} />}
       title="Start your first sketch"
-      description="Create a blank project or open the Spoke example."
+      description="Create a blank project or open a straight-spoke wheel."
       actions={
         canCreate ? (
           <>
@@ -563,7 +624,7 @@ function EmptyLibrary({
               Create blank project
             </Button>
             <Button type="button" variant="secondary" onClick={() => onCreate('spoke')}>
-              Open Spoke example
+              Open straight-spoke wheel
             </Button>
           </>
         ) : undefined

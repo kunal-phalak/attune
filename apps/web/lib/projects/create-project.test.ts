@@ -6,7 +6,7 @@ describe('project creation', () => {
   it('creates stable blank and spoke project plans', () => {
     expect(createSketchProjectPlan('blank', () => 'abc').name).toBe('Untitled sketch');
     const spoke = createSketchProjectPlan('spoke', () => 'def');
-    expect(spoke.name).toBe('Spoke example');
+    expect(spoke.name).toBe('Straight-spoke wheel');
     expect(spoke.roomId).toBe('attune:workspace:def');
   });
 

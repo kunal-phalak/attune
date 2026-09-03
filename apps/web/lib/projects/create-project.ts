@@ -23,7 +23,7 @@ export function createSketchProjectPlan(
   createId: () => string,
 ): SketchProjectPlan {
   const id = createId();
-  const name = template === 'spoke' ? 'Spoke example' : 'Untitled sketch';
+  const name = template === 'spoke' ? 'Straight-spoke wheel' : 'Untitled sketch';
   return {
     projectId: `project:${id}`,
     workspaceId: `workspace:${id}`,

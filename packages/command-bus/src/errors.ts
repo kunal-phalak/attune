@@ -21,6 +21,8 @@ export class AttuneCommandError extends Error {
     readonly code: AttuneCommandErrorCode,
     message: string,
     readonly changedEntities: readonly string[] = [],
+    readonly latestVersions: Readonly<Record<string, number>> = {},
+    readonly canRetry = false,
   ) {
     super(message);
     this.name = 'AttuneCommandError';

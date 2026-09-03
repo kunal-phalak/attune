@@ -2,12 +2,15 @@ import type {
   AttuneCommand,
   ConstraintInput,
   ConstraintType,
+  DesignRequestContext,
   DimensionInput,
   GeometryAnchor,
   GeometryInput,
   GeometryPatch,
   GeometryReference,
   GroupInput,
+  MechanicalRecipeId,
+  RecipeParameterValues,
   SketchCommandType,
   SketchSnapshotInput,
 } from '@attune/domain';
@@ -46,6 +49,146 @@ function number(value: unknown, name: string): number {
     throw new TypeError(`${name} must be a finite number.`);
   }
   return value;
+}
+
+function nonNegativeInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative integer.`);
+  }
+  return value;
+}
+
+function recipeId(value: unknown): MechanicalRecipeId {
+  if (
+    value === 'round_plate' ||
+    value === 'annular_ring' ||
+    value === 'rounded_rectangle_plate' ||
+    value === 'mounting_plate' ||
+    value === 'bolt_circle' ||
+    value === 'slotted_plate' ||
+    value === 'spoked_wheel' ||
+    value === 'radial_pattern'
+  ) {
+    return value;
+  }
+  throw new TypeError('recipe must identify a supported mechanical design recipe.');
+}
+
+function recipeParameters(value: unknown, name: string): RecipeParameterValues {
+  const input = object(value, name);
+  const result: Record<string, unknown> = {};
+  for (const [key, candidate] of Object.entries(input)) {
+    if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key)) {
+      throw new TypeError(`${name} contains an invalid parameter name.`);
+    }
+    if (typeof candidate === 'number') {
+      result[key] = number(candidate, `${name}.${key}`);
+    } else if (typeof candidate === 'boolean' || typeof candidate === 'string') {
+      result[key] = candidate;
+    } else {
+      result[key] = recipeParameters(candidate, `${name}.${key}`);
+    }
+  }
+  return result;
+}
+
+function recipePlacement(value: unknown) {
+  const input = object(value, 'placement');
+  exact(input, ['center', 'rotationDegrees'], 'placement');
+  return {
+    center: point(input.center, 'placement.center'),
+    ...(input.rotationDegrees !== undefined
+      ? { rotationDegrees: number(input.rotationDegrees, 'placement.rotationDegrees') }
+      : {}),
+  };
+}
+
+function conciseText(candidate: unknown, name: string): string {
+  if (typeof candidate !== 'string' || !candidate.trim() || candidate.length > 500) {
+    throw new TypeError(`${name} must be a concise non-empty string.`);
+  }
+  return candidate.trim();
+}
+
+function designRequest(value: unknown): DesignRequestContext {
+  const input = object(value, 'designRequest');
+  exact(
+    input,
+    [
+      'purpose',
+      'overallEnvelope',
+      'criticalDimensions',
+      'materialIntent',
+      'quantity',
+      'manufacturingProcessPreference',
+    ],
+    'designRequest',
+  );
+  const envelope =
+    input.overallEnvelope === undefined
+      ? undefined
+      : object(input.overallEnvelope, 'designRequest.overallEnvelope');
+  if (envelope) {
+    exact(envelope, ['width', 'height', 'diameter', 'thickness'], 'designRequest.overallEnvelope');
+  }
+  const criticalDimensions = input.criticalDimensions;
+  if (criticalDimensions !== undefined && !Array.isArray(criticalDimensions)) {
+    throw new TypeError('designRequest.criticalDimensions must be an array.');
+  }
+  return {
+    ...(input.purpose !== undefined
+      ? { purpose: conciseText(input.purpose, 'designRequest.purpose') }
+      : {}),
+    ...(envelope
+      ? {
+          overallEnvelope: Object.fromEntries(
+            Object.entries(envelope).map(([key, candidate]) => [
+              key,
+              number(candidate, `designRequest.overallEnvelope.${key}`),
+            ]),
+          ),
+        }
+      : {}),
+    ...(Array.isArray(criticalDimensions)
+      ? {
+          criticalDimensions: criticalDimensions.map((candidate, index) => {
+            const item = object(candidate, `designRequest.criticalDimensions[${index}]`);
+            exact(item, ['name', 'value', 'unit'], 'critical dimension');
+            if (item.unit !== 'mm' && item.unit !== 'deg' && item.unit !== 'unitless') {
+              throw new TypeError('A critical dimension unit must be mm, deg, or unitless.');
+            }
+            return {
+              name: conciseText(item.name, 'critical dimension name'),
+              value: number(item.value, 'critical dimension value'),
+              unit: item.unit,
+            };
+          }),
+        }
+      : {}),
+    ...(input.materialIntent !== undefined
+      ? { materialIntent: conciseText(input.materialIntent, 'designRequest.materialIntent') }
+      : {}),
+    ...(input.quantity !== undefined
+      ? { quantity: nonNegativeInteger(input.quantity, 'designRequest.quantity') }
+      : {}),
+    ...(input.manufacturingProcessPreference !== undefined
+      ? {
+          manufacturingProcessPreference: conciseText(
+            input.manufacturingProcessPreference,
+            'designRequest.manufacturingProcessPreference',
+          ),
+        }
+      : {}),
+  };
+}
+
+function versionedTarget(value: unknown, name: string) {
+  const input = object(value, name);
+  exact(input, ['entityId', 'expectedVersion'], name);
+  return {
+    entityId: id(input.entityId, `${name}.entityId`),
+    expectedVersion: nonNegativeInteger(input.expectedVersion, `${name}.expectedVersion`),
+  };
 }
 
 function point(value: unknown, name: string) {
@@ -297,6 +440,10 @@ function snapshot(value: unknown): SketchSnapshotInput {
 
 export function isSketchCommandType(type: string): type is SketchCommandType {
   return [
+    'instantiate_recipe',
+    'update_recipe_parameters',
+    'set_radius',
+    'set_tangent',
     'create_geometry',
     'edit_geometry',
     'move_node',
@@ -317,6 +464,57 @@ export function isSketchCommandType(type: string): type is SketchCommandType {
 
 export function parseSketchCommand(value: Record<string, unknown>): AttuneCommand {
   switch (value.type) {
+    case 'instantiate_recipe':
+      exact(
+        value,
+        ['type', 'sourceRef', 'recipe', 'parameters', 'placement', 'designRequest'],
+        'instantiate_recipe command',
+      );
+      return {
+        type: value.type,
+        sourceRef: id(value.sourceRef, 'sourceRef'),
+        recipe: recipeId(value.recipe),
+        parameters: recipeParameters(value.parameters, 'parameters'),
+        ...(value.placement !== undefined ? { placement: recipePlacement(value.placement) } : {}),
+        ...(value.designRequest !== undefined
+          ? { designRequest: designRequest(value.designRequest) }
+          : {}),
+      };
+    case 'update_recipe_parameters':
+      exact(
+        value,
+        ['type', 'sourceRef', 'expectedVersion', 'changes'],
+        'update_recipe_parameters command',
+      );
+      return {
+        type: value.type,
+        sourceRef: id(value.sourceRef, 'sourceRef'),
+        ...(value.expectedVersion !== undefined
+          ? { expectedVersion: nonNegativeInteger(value.expectedVersion, 'expectedVersion') }
+          : {}),
+        changes: recipeParameters(value.changes, 'changes'),
+      };
+    case 'set_radius':
+      exact(value, ['type', 'target', 'radius'], 'set_radius command');
+      return {
+        type: value.type,
+        target: versionedTarget(value.target, 'target'),
+        radius: number(value.radius, 'radius'),
+      };
+    case 'set_tangent': {
+      exact(value, ['type', 'targets', 'constraintId'], 'set_tangent command');
+      if (!Array.isArray(value.targets) || value.targets.length !== 2) {
+        throw new TypeError('set_tangent.targets must contain exactly two versioned entities.');
+      }
+      return {
+        type: value.type,
+        targets: [
+          versionedTarget(value.targets[0], 'targets[0]'),
+          versionedTarget(value.targets[1], 'targets[1]'),
+        ],
+        constraintId: id(value.constraintId, 'constraintId'),
+      };
+    }
     case 'create_geometry':
       exact(
         value,

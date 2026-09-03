@@ -16,6 +16,10 @@ export class ServerTimingTrace {
       .join(', ');
   }
 
+  summary(): Readonly<Record<string, number>> {
+    return Object.fromEntries(this.#entries.map(({ name, durationMs }) => [name, durationMs]));
+  }
+
   apply(response: Response): Response {
     const value = this.header();
     if (value) response.headers.set('Server-Timing', value);

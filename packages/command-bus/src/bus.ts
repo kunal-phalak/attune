@@ -5,8 +5,11 @@ import {
 } from '@attune/capabilities';
 import {
   changedFootprintReferences,
+  commandExpectedVersions,
+  commandSemanticReferences,
   hashSpecification,
   isSketchCommand,
+  publicReferenceVersion,
   validateWorkspace,
   type AttuneCommand,
   type AttuneRole,
@@ -38,6 +41,7 @@ interface RejectionInput {
   readonly envelope: CommandEnvelope;
   readonly context: TrustedExecutionContext;
   readonly changedEntities?: readonly string[];
+  readonly canRetry?: boolean;
 }
 
 interface EnvelopeValidation {
@@ -100,6 +104,7 @@ export class AttuneCommandBus {
     clock: () => string = () => new Date().toISOString(),
     private readonly solver?: ConstraintSolver,
     history: { readonly receipts?: readonly ChangeReceipt[] } = {},
+    private readonly timing?: (name: string, durationMs: number) => void,
   ) {
     this.#workspace = immutableCopy(initialWorkspace);
     this.#clock = clock;
@@ -149,6 +154,7 @@ export class AttuneCommandBus {
         role: context.role,
         metadata: { commandId, now },
         solver: this.solver,
+        timing: this.timing,
       }).consequence,
     );
   }
@@ -184,14 +190,19 @@ export class AttuneCommandBus {
         role: context.role,
         metadata: { commandId: envelope.commandId, now },
         solver: this.solver,
+        timing: this.timing,
       });
     } catch {
+      const semanticRefs = isSketchCommand(command)
+        ? commandSemanticReferences(command)
+        : ['sketch:document'];
       return this.#reject({
         code: 'COMMAND_CONFLICT',
         message: 'The command parameters do not match the current authoritative records.',
         commandType: command.type,
         envelope,
         context,
+        changedEntities: semanticRefs.length > 0 ? semanticRefs : ['sketch:document'],
       });
     }
 
@@ -202,7 +213,10 @@ export class AttuneCommandBus {
         commandType: command.type,
         envelope,
         context,
-        changedEntities: forecast.consequence.solver.conflicts,
+        changedEntities:
+          forecast.consequence.solver.conflicts.length > 0
+            ? forecast.consequence.solver.conflicts
+            : commandSemanticReferences(command),
       });
     }
 
@@ -295,12 +309,31 @@ export class AttuneCommandBus {
       );
       if (changedEntities.length > 0) {
         this.#reject({
-          code: 'REVALIDATION_REQUIRED',
-          message: `Touched semantic references changed: ${changedEntities.join(', ')}.`,
+          code: 'CONTEXT_CHANGED',
+          message: `The operation overlaps semantic references that changed after inspection: ${changedEntities.join(', ')}.`,
           commandType,
           envelope,
           context,
           changedEntities,
+          canRetry: false,
+        });
+      }
+      const expectedVersions = commandExpectedVersions(command);
+      const versionChanges = Object.entries(expectedVersions)
+        .filter(
+          ([id, version]) => publicReferenceVersion(this.#workspace.sketchDocument, id) !== version,
+        )
+        .map(([id]) => id)
+        .toSorted();
+      if (versionChanges.length > 0) {
+        this.#reject({
+          code: 'CONTEXT_CHANGED',
+          message: `Versioned semantic targets changed after inspection: ${versionChanges.join(', ')}.`,
+          commandType,
+          envelope,
+          context,
+          changedEntities: versionChanges,
+          canRetry: false,
         });
       }
       if (envelope.expectedAuthorityEpoch !== this.#workspace.authorityEpoch) {
@@ -320,6 +353,8 @@ export class AttuneCommandBus {
           commandType,
           envelope,
           context,
+          changedEntities: ['sketch:document'],
+          canRetry: true,
         });
       }
       const exactSequence = envelope.expectedWorkspaceSeq === this.#workspace.workspaceSeq;
@@ -416,6 +451,12 @@ export class AttuneCommandBus {
 
   #reject(input: RejectionInput): never {
     const { code, commandType, context, envelope, message } = input;
+    const changedEntities =
+      input.changedEntities && input.changedEntities.length > 0
+        ? [...new Set(input.changedEntities)].toSorted()
+        : code === 'COMMAND_CONFLICT' && typeof commandType === 'string'
+          ? ['sketch:document']
+          : [];
     const rejection = immutableCopy<CommandRejection>({
       rejectionId: `rejection:${this.#rejections.length + 1}:${envelope.commandId}`,
       commandId: envelope.commandId,
@@ -427,10 +468,13 @@ export class AttuneCommandBus {
       workspaceSeq: this.#workspace.workspaceSeq,
       capabilityEpoch: this.#workspace.capabilityEpoch,
       currentSpecHash: hashSpecification(this.#workspace),
-      changedEntities: input.changedEntities ?? [],
+      changedEntities,
       createdAt: this.#clock(),
     });
     this.#rejections.push(rejection);
-    throw new AttuneCommandError(code, message, input.changedEntities ?? []);
+    const latestVersions = Object.fromEntries(
+      changedEntities.map((id) => [id, publicReferenceVersion(this.#workspace.sketchDocument, id)]),
+    );
+    throw new AttuneCommandError(code, message, changedEntities, latestVersions, input.canRetry);
   }
 }

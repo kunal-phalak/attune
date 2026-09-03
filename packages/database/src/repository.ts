@@ -185,8 +185,8 @@ function sketchDocumentWithCurrentContract(workspace: AttuneWorkspace): SketchDo
   const storedNodes = Reflect.get(stored, 'nodes');
   if (Array.isArray(storedNodes)) return stored;
 
-  // The original, untouched judge seed predates shared topology. Upgrade that known fixture to the
-  // exact current Maker.js source model; edited legacy sketches are topology-normalized in place.
+  // The original untouched review fixture predates shared topology. Upgrade that known fixture to
+  // the exact current procedural wheel; edited legacy sketches are topology-normalized in place.
   if (workspace.workspaceSeq === 0 && stored.id === 'sketch:spoke-wheel') {
     return createSpokeSeedDocument();
   }
@@ -487,6 +487,20 @@ async function initializeJudgeWorkspace(): Promise<void> {
     Reflect.get(current, 'scenarioVersion') === 3 &&
     current.providerCapabilityProfile
   ) {
+    await database.transaction(async (transaction) => {
+      await transaction
+        .update(projects)
+        .set({ name: 'Straight-spoke wheel' })
+        .where(eq(projects.id, current.projectId));
+      await transaction
+        .update(workspaces)
+        .set({ name: 'Straight-spoke wheel' })
+        .where(eq(workspaces.id, JUDGE_WORKSPACE_ID));
+      await transaction
+        .update(workspaceFiles)
+        .set({ name: 'Straight-spoke wheel.attune' })
+        .where(eq(workspaceFiles.workspaceId, JUDGE_WORKSPACE_ID));
+    });
     return;
   }
   const initial = createAt1042Workspace();
@@ -522,19 +536,19 @@ async function initializeJudgeWorkspace(): Promise<void> {
       .values({
         id: initial.projectId,
         organizationId: 'organization:attune-demo',
-        name: 'Spoke sketch',
+        name: 'Straight-spoke wheel',
         code: initial.commitmentId,
       })
       .onConflictDoUpdate({
         target: projects.id,
-        set: { name: 'Spoke sketch' },
+        set: { name: 'Straight-spoke wheel' },
       });
     await transaction
       .insert(workspaces)
       .values({
         id: JUDGE_WORKSPACE_ID,
         projectId: initial.projectId,
-        name: 'Spoke sketch',
+        name: 'Straight-spoke wheel',
         commitmentId: initial.commitmentId,
         liveblocksRoomId: 'attune:workspace:at-1042',
         currentSpecification: initial,
@@ -545,19 +559,19 @@ async function initializeJudgeWorkspace(): Promise<void> {
       })
       .onConflictDoUpdate({
         target: workspaces.id,
-        set: { name: 'Spoke sketch' },
+        set: { name: 'Straight-spoke wheel' },
       });
     await transaction
       .insert(workspaceFiles)
       .values({
         id: 'file:at-1042-panel',
         workspaceId: JUDGE_WORKSPACE_ID,
-        name: 'Spoke sketch.attune',
+        name: 'Straight-spoke wheel.attune',
         kind: 'executable-specification',
       })
       .onConflictDoUpdate({
         target: workspaceFiles.id,
-        set: { name: 'Spoke sketch.attune' },
+        set: { name: 'Straight-spoke wheel.attune' },
       });
     await transaction
       .insert(workspaceMemberships)
@@ -1147,6 +1161,7 @@ export async function listProjectsForUser(userId: string) {
         workspaceSeq: workspaces.workspaceSeq,
         draftVersion: workspaces.draftVersion,
         capabilityEpoch: workspaces.capabilityEpoch,
+        specification: workspaces.currentSpecification,
         updatedAt: workspaces.updatedAt,
       })
       .from(workspaceMemberships)
@@ -1174,6 +1189,7 @@ export async function listProjectsForUser(userId: string) {
     workspaceSeq: row.workspaceSeq,
     draftVersion: row.draftVersion,
     capabilityEpoch: row.capabilityEpoch,
+    sketchDocument: workspaceWithCurrentContract(row.specification).sketchDocument,
     updatedAt: row.updatedAt,
     access: ownedOrganizations.has(row.organizationId) ? ('owned' as const) : ('shared' as const),
     canManage: ownedOrganizations.has(row.organizationId) && row.fileKind.startsWith('sketch:'),
@@ -1197,6 +1213,7 @@ export async function listProjectsForLiveblocksRooms(roomIds: readonly string[])
       workspaceSeq: workspaces.workspaceSeq,
       draftVersion: workspaces.draftVersion,
       capabilityEpoch: workspaces.capabilityEpoch,
+      specification: workspaces.currentSpecification,
       updatedAt: workspaces.updatedAt,
     })
     .from(workspaces)
@@ -1217,6 +1234,7 @@ export async function listProjectsForLiveblocksRooms(roomIds: readonly string[])
     workspaceSeq: row.workspaceSeq,
     draftVersion: row.draftVersion,
     capabilityEpoch: row.capabilityEpoch,
+    sketchDocument: workspaceWithCurrentContract(row.specification).sketchDocument,
     updatedAt: row.updatedAt,
     access: 'shared' as const,
     canManage: false,
@@ -1454,6 +1472,7 @@ export async function executePersistedCommand(
         undefined,
         isSketchCommand(input.command) ? await getPlaneGcsSolver() : undefined,
         { receipts: receiptHistory },
+        input.timing,
       );
       let result: CommandResult;
       try {
@@ -1556,6 +1575,7 @@ export async function executePersistedCommand(
           .where(eq(agentDelegations.id, input.context.delegation.id));
       }
       input.timing?.('receipt_history_persist', performance.now() - persistenceStartedAt);
+      input.timing?.('server_persistence', performance.now() - persistenceStartedAt);
       const serializationStartedAt = performance.now();
       const copied = immutableCopy(result);
       input.timing?.('serialization', performance.now() - serializationStartedAt);

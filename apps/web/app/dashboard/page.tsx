@@ -5,6 +5,15 @@ import {
   listProjectsForLiveblocksRooms,
   listProjectsForUser,
 } from '@attune/database';
+import {
+  arcPoint,
+  bsplinePoint,
+  ellipsePoint,
+  geometryBounds,
+  positiveArcSweep,
+  synchronizeGeometryWithNodes,
+  type SketchDocument,
+} from '@attune/domain';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -12,7 +21,11 @@ import { DashboardLibrary, type AttuneLibraryFile } from '../../components/dashb
 import { DashboardNotifications } from '../../components/dashboard-notifications';
 import { currentAttuneUser } from '../../lib/auth/session';
 import { liveblocksConfigured, liveblocksRoomIdsForUser } from '../../lib/liveblocks/server';
-import { mergeLibraryProjects, parseLibraryFilter } from '../../lib/projects/library';
+import {
+  mergeLibraryProjects,
+  parseLibraryFilter,
+  type SketchThumbnail,
+} from '../../lib/projects/library';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +41,64 @@ function toLibraryFile(
     access: row.access,
     canManage: row.canManage,
     template: row.template,
+    thumbnail: thumbnailForSketch(row.sketchDocument),
   };
+}
+
+function thumbnailForSketch(document: SketchDocument): SketchThumbnail {
+  const geometry = synchronizeGeometryWithNodes(document.entities, document.nodes);
+  const entityBounds = geometry.map(geometryBounds);
+  const bounds = entityBounds.slice(1).reduce(
+    (combined, next) => ({
+      minX: Math.min(combined.minX, next.minX),
+      minY: Math.min(combined.minY, next.minY),
+      maxX: Math.max(combined.maxX, next.maxX),
+      maxY: Math.max(combined.maxY, next.maxY),
+    }),
+    entityBounds[0] ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+  );
+  const entities = geometry.flatMap((entity): SketchThumbnail['entities'] => {
+    if (entity.kind === 'point') {
+      return [{ kind: 'circle', id: entity.id, center: entity.position, radius: 0.75 }];
+    }
+    if (entity.kind === 'line') {
+      return [{ kind: 'line', id: entity.id, start: entity.start, end: entity.end }];
+    }
+    if (entity.kind === 'circle') {
+      return [{ kind: 'circle', id: entity.id, center: entity.center, radius: entity.radius }];
+    }
+    if (entity.kind === 'arc') {
+      return [
+        {
+          kind: 'arc',
+          id: entity.id,
+          start: arcPoint(entity, entity.startAngle),
+          end: arcPoint(entity, entity.endAngle),
+          radius: entity.radius,
+          largeArc: positiveArcSweep(entity.startAngle, entity.endAngle) > Math.PI,
+        },
+      ];
+    }
+    if (entity.kind === 'ellipse') {
+      return [
+        {
+          kind: 'polyline',
+          id: entity.id,
+          points: Array.from({ length: 49 }, (_, index) =>
+            ellipsePoint(entity, (index / 48) * Math.PI * 2),
+          ),
+        },
+      ];
+    }
+    return [
+      {
+        kind: 'polyline',
+        id: entity.id,
+        points: Array.from({ length: 49 }, (_, index) => bsplinePoint(entity, index / 48)),
+      },
+    ];
+  });
+  return { bounds, entities };
 }
 
 function SetupRequired() {

@@ -61,12 +61,27 @@ async function responseJson(response: Response): Promise<unknown> {
     Array.isArray(Reflect.get(error, 'changedEntities'))
       ? Reflect.get(error, 'changedEntities')
       : [];
+  const rawLatestVersions =
+    typeof error === 'object' && error !== null ? Reflect.get(error, 'latestVersions') : undefined;
+  const latestVersions =
+    typeof rawLatestVersions === 'object' && rawLatestVersions !== null
+      ? Object.fromEntries(
+          Object.entries(rawLatestVersions).filter(
+            (entry): entry is [string, number] =>
+              typeof entry[1] === 'number' && Number.isInteger(entry[1]),
+          ),
+        )
+      : {};
+  const canRetry =
+    typeof error === 'object' && error !== null && Reflect.get(error, 'canRetry') === true;
   throw new AttuneHttpError(
     response.status,
     typeof code === 'string' ? code : 'REQUEST_FAILED',
     typeof message === 'string' ? message : 'The authoritative request failed.',
-    false,
+    canRetry,
     rawChangedEntities.filter((candidate): candidate is string => typeof candidate === 'string'),
+    latestVersions,
+    canRetry,
   );
 }
 
@@ -116,9 +131,97 @@ function semanticErrorResult(error: AttuneHttpError, view: AttuneApiView) {
       code: error.code,
       message: error.message,
       semanticRefs: error.changedEntities,
+      latestVersions: error.latestVersions,
+      whatChanged: error.message,
+      canRetry: error.canRetry,
     },
     delegation: view.delegation,
   };
+}
+
+function serverTimings(response: Response): Readonly<Record<string, number>> {
+  const value = response.headers.get('Server-Timing');
+  if (!value) return {};
+  return Object.fromEntries(
+    value.split(',').flatMap((entry) => {
+      const [name, ...parameters] = entry.trim().split(';');
+      const duration = parameters
+        .map((parameter) => parameter.trim().match(/^dur=([0-9.]+)$/)?.[1])
+        .find(Boolean);
+      return name && duration ? [[name, Number(duration)] as const] : [];
+    }),
+  );
+}
+
+function withExecutionTimings(
+  result: unknown,
+  response: Response,
+  startedAt: number,
+  retryCount: number,
+): unknown {
+  if (typeof result !== 'object' || result === null) return result;
+  return {
+    ...result,
+    timings: {
+      ...serverTimings(response),
+      total_tool_execution: Math.max(0, performance.now() - startedAt),
+      automatic_retries: retryCount,
+    },
+  };
+}
+
+function currentReferenceVersion(view: AttuneApiView, id: string): number {
+  const document = view.workspace.sketchDocument;
+  for (const collection of [
+    document.entities,
+    document.nodes,
+    document.groups,
+    document.constraints,
+    document.dimensions,
+    document.parameters,
+  ]) {
+    const reference = collection.find((candidate) => candidate.id === id);
+    if (reference) return reference.version;
+  }
+  return 0;
+}
+
+function rebuildVersionedCommand(
+  command: Readonly<Record<string, unknown>>,
+  view: AttuneApiView,
+): Readonly<Record<string, unknown>> {
+  if (command.type === 'set_radius') {
+    const target = command.target;
+    if (typeof target !== 'object' || target === null) return command;
+    const entityId = Reflect.get(target, 'entityId');
+    return typeof entityId === 'string'
+      ? {
+          ...command,
+          target: { entityId, expectedVersion: currentReferenceVersion(view, entityId) },
+        }
+      : command;
+  }
+  if (command.type === 'set_tangent' && Array.isArray(command.targets)) {
+    return {
+      ...command,
+      targets: command.targets.map((target) => {
+        const entityId =
+          typeof target === 'object' && target !== null
+            ? Reflect.get(target, 'entityId')
+            : undefined;
+        return typeof entityId === 'string'
+          ? { entityId, expectedVersion: currentReferenceVersion(view, entityId) }
+          : target;
+      }),
+    };
+  }
+  if (command.type === 'update_recipe_parameters' && typeof command.sourceRef === 'string') {
+    return {
+      ...command,
+      expectedVersion: currentReferenceVersion(view, command.sourceRef),
+    };
+  }
+  return command;
 }
 
 function contextParameters(focus?: AgentContextFocus): Readonly<Record<string, string | number>> {
@@ -186,6 +289,7 @@ export function createToolRuntime(input: {
       ...parameters,
     });
   const observe = async (focus?: AgentContextFocus, signal?: AbortSignal) => {
+    const startedAt = performance.now();
     input.report({ execution: 'executing', lastAction: 'inspect_context' });
     try {
       const response = await fetch(workspaceEndpoint(contextParameters(focus)), {
@@ -198,28 +302,67 @@ export function createToolRuntime(input: {
         throw new TypeError('Attune returned an invalid agent context snapshot.');
       }
       input.report({ execution: 'completed', lastAction: 'inspect_context' });
-      return context;
+      return {
+        ...context,
+        timings: {
+          ...serverTimings(response),
+          total_tool_execution: Math.max(0, performance.now() - startedAt),
+        },
+      };
     } catch (error) {
       input.report({ execution: 'failed', lastAction: 'inspect_context' });
       throw error;
     }
   };
   const execute = async (command: Readonly<Record<string, unknown>>, signal?: AbortSignal) => {
+    const startedAt = performance.now();
     const action = typeof command.type === 'string' ? command.type : 'attune_command';
     const observed = input.viewRef.current;
     if (!observed) throw new Error('The authoritative WebMCP bootstrap is not loaded.');
     input.report({ execution: 'executing', lastAction: action });
     try {
-      const response = await fetch(workspaceEndpoint(), {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: commandRequestBody(observed, command, 'webmcp', observed.workspace.workspaceSeq),
-        signal,
-      });
-      const result = await responseJson(response);
+      const executeAttempt = async (
+        view: AttuneApiView,
+        nextCommand: Readonly<Record<string, unknown>>,
+      ) => {
+        const response = await fetch(workspaceEndpoint(), {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: commandRequestBody(view, nextCommand, 'webmcp', view.workspace.workspaceSeq),
+          signal,
+        });
+        return { response, result: await responseJson(response) };
+      };
+      let retryCount = 0;
+      let attempt;
+      try {
+        attempt = await executeAttempt(observed, command);
+      } catch (error) {
+        if (
+          !(error instanceof AttuneHttpError) ||
+          error.code !== 'CONTEXT_CHANGED' ||
+          !error.canRetry
+        ) {
+          throw error;
+        }
+        retryCount = 1;
+        const refreshResponse = await fetch(workspaceEndpoint(), {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal,
+        });
+        const refreshed = await responseJson(refreshResponse);
+        if (!isAttuneApiView(refreshed)) {
+          throw new TypeError('Attune returned an invalid retry context.', { cause: error });
+        }
+        input.viewRef.current = refreshed;
+        input.updateView(refreshed);
+        attempt = await executeAttempt(refreshed, rebuildVersionedCommand(command, refreshed));
+      }
+      const { response, result } = attempt;
       if (isMutationResult(result)) {
-        const patched = patchObservation(observed, result);
+        const patched = patchObservation(input.viewRef.current ?? observed, result);
         input.viewRef.current = patched;
         input.updateView(patched);
       } else if (isAttuneApiView(result)) {
@@ -227,9 +370,12 @@ export function createToolRuntime(input: {
         input.updateView(result);
       }
       input.report({ execution: 'completed', lastAction: action });
-      return isAttuneApiView(result)
-        ? { status: 'APPLIED', ...compactWorkspaceResult(result) }
-        : result;
+      return withExecutionTimings(
+        isAttuneApiView(result) ? { status: 'APPLIED', ...compactWorkspaceResult(result) } : result,
+        response,
+        startedAt,
+        retryCount,
+      );
     } catch (error) {
       input.report({ execution: 'failed', lastAction: action });
       if (error instanceof AttuneHttpError) return semanticErrorResult(error, observed);
@@ -237,6 +383,7 @@ export function createToolRuntime(input: {
     }
   };
   const forecast = async (command: Readonly<Record<string, unknown>>, signal?: AbortSignal) => {
+    const startedAt = performance.now();
     input.report({ execution: 'executing', lastAction: 'forecast_change' });
     try {
       const response = await fetch(
@@ -253,7 +400,7 @@ export function createToolRuntime(input: {
       );
       const result = await responseJson(response);
       input.report({ execution: 'completed', lastAction: 'forecast_change' });
-      return result;
+      return withExecutionTimings(result, response, startedAt, 0);
     } catch (error) {
       input.report({ execution: 'failed', lastAction: 'forecast_change' });
       const observed = input.viewRef.current;

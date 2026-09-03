@@ -24,6 +24,10 @@ export async function POST(request: Request) {
   try {
     const workspaceId = parseWorkspaceId(new URL(request.url).searchParams.get('workspace_id'));
     const input = parseCommandExecutionInput(await request.json(), [
+      'instantiate_recipe',
+      'update_recipe_parameters',
+      'set_radius',
+      'set_tangent',
       'apply_deterministic_repair',
       'move_slot',
       'request_quote',

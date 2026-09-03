@@ -21,7 +21,7 @@ export async function POST() {
         {
           error: {
             code: 'JUDGE_ACCESS_REQUIRED',
-            message: 'Only the seeded judge session can reset AT-1042.',
+            message: 'Only the authorized review session can reset this workspace.',
           },
         },
         { status: 403, headers: { 'Cache-Control': 'no-store' } },

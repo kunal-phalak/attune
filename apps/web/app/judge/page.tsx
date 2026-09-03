@@ -29,7 +29,7 @@ export default async function JudgeAccessPage({
       </header>
       <section className="judge-access">
         <div className="judge-introduction">
-          <p className="section-index">AT-1042 / JUDGE WORKSPACE</p>
+          <p className="section-index">PRECISION DESIGN / REVIEW WORKSPACE</p>
           <h1>Review the executable thread.</h1>
           <p>
             Enter the supplied access code to open the persisted manufacturing workspace. The code
@@ -64,7 +64,7 @@ export default async function JudgeAccessPage({
                   That access code was not accepted. Check the supplied code and retry.
                 </p>
               ) : null}
-              <button type="submit">Open AT-1042</button>
+              <button type="submit">Open design workspace</button>
             </form>
           ) : (
             <div className="setup-callout">

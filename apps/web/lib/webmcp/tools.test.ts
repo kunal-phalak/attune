@@ -6,6 +6,46 @@ import { parseModifyGeometryToolInput, registerAttuneTools } from './tools';
 const unavailable = () => Promise.reject(new Error('Not used by this contract test.'));
 
 describe('compact WebMCP geometry mutation surface', () => {
+  it('represents a complete round plate as one typed recipe operation', () => {
+    expect(
+      parseModifyGeometryToolInput({
+        operation: 'instantiate_recipe',
+        recipe: 'round_plate',
+        parameters: {
+          outerDiameter: 160,
+          centerBoreDiameter: 40,
+          holePattern: { pitchCircleDiameter: 120, holeDiameter: 6, count: 4 },
+        },
+        design_spec: { purpose: 'mounting plate', materialIntent: 'aluminium' },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        type: 'instantiate_recipe',
+        sourceRef: expect.stringMatching(/^recipe:round_plate:/),
+        recipe: 'round_plate',
+        parameters: {
+          outerDiameter: 160,
+          centerBoreDiameter: 40,
+          holePattern: { pitchCircleDiameter: 120, holeDiameter: 6, count: 4 },
+        },
+        designRequest: { purpose: 'mounting plate', materialIntent: 'aluminium' },
+      }),
+    );
+  });
+
+  it('uses a small versioned target for a radius mutation', () => {
+    expect(
+      parseModifyGeometryToolInput({
+        operation: 'set_radius',
+        target: { entityId: 'arc:inner-fillet:3', expectedVersion: 4 },
+        radius: 5,
+      }),
+    ).toEqual({
+      type: 'set_radius',
+      target: { entityId: 'arc:inner-fillet:3', expectedVersion: 4 },
+      radius: 5,
+    });
+  });
   it('represents a shared-node movement without exposing renderer or solver objects', () => {
     expect(
       parseModifyGeometryToolInput({
@@ -138,6 +178,17 @@ describe('native model-context registration contract', () => {
       },
       execution.signal,
     );
+    await context.executeTool(
+      'constrain_geometry',
+      {
+        operation: 'set_tangent',
+        targets: [
+          { entityId: 'line:webmcp', expectedVersion: 1 },
+          { entityId: 'arc:webmcp', expectedVersion: 2 },
+        ],
+      },
+      execution.signal,
+    );
 
     expect(execute).toHaveBeenNthCalledWith(
       1,
@@ -147,6 +198,11 @@ describe('native model-context registration contract', () => {
     expect(execute).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ type: 'apply_constraint' }),
+      execution.signal,
+    );
+    expect(execute).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ type: 'set_tangent' }),
       execution.signal,
     );
   });

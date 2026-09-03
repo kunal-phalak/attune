@@ -11,12 +11,13 @@ const projects: readonly LibraryProject[] = [
   {
     workspaceId: 'workspace:owned',
     roomId: 'attune:workspace:owned',
-    projectName: 'Spoke example',
+    projectName: 'Straight-spoke wheel',
     updatedAt: '2026-09-01T08:00:00.000Z',
     status: 'draft',
     access: 'owned',
     canManage: true,
     template: 'spoke',
+    thumbnail: { bounds: { minX: -1, minY: -1, maxX: 1, maxY: 1 }, entities: [] },
   },
   {
     workspaceId: 'workspace:shared',
@@ -27,6 +28,7 @@ const projects: readonly LibraryProject[] = [
     access: 'shared',
     canManage: false,
     template: 'blank',
+    thumbnail: { bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 }, entities: [] },
   },
 ];
 
@@ -38,8 +40,8 @@ describe('dashboard project filtering', () => {
   });
 
   it('filters the selected route by project name', () => {
-    expect(filterLibraryProjects(projects, 'recents', 'spoke')).toEqual([projects[0]]);
-    expect(filterLibraryProjects(projects, 'shared', 'spoke')).toEqual([]);
+    expect(filterLibraryProjects(projects, 'recents', 'wheel')).toEqual([projects[0]]);
+    expect(filterLibraryProjects(projects, 'shared', 'wheel')).toEqual([]);
   });
 
   it('normalizes unsupported route values to recents', () => {

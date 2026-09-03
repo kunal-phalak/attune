@@ -1,3 +1,10 @@
+import { instantiateMechanicalRecipe, mergeRecipeParameterChanges } from '../recipes/mechanical';
+import type {
+  DesignRequestContext,
+  MechanicalRecipeId,
+  RecipeParameterValues,
+  RecipePlacement,
+} from '../recipes/types';
 import { constraintEntityIds, validateConstraintInput, type ConstraintInput } from './constraints';
 import { validateDimensionInput, type DimensionInput } from './dimensions';
 import {
@@ -21,6 +28,33 @@ import { ensureGeometryTopology, incidentEntityIds } from './topology';
 import { trimGeometryAtPoint } from './trim';
 
 export type SketchCommand =
+  | {
+      readonly type: 'instantiate_recipe';
+      readonly sourceRef: string;
+      readonly recipe: MechanicalRecipeId;
+      readonly parameters: RecipeParameterValues;
+      readonly placement?: RecipePlacement;
+      readonly designRequest?: DesignRequestContext;
+    }
+  | {
+      readonly type: 'update_recipe_parameters';
+      readonly sourceRef: string;
+      readonly expectedVersion?: number;
+      readonly changes: RecipeParameterValues;
+    }
+  | {
+      readonly type: 'set_radius';
+      readonly target: { readonly entityId: string; readonly expectedVersion: number };
+      readonly radius: number;
+    }
+  | {
+      readonly type: 'set_tangent';
+      readonly targets: readonly [
+        { readonly entityId: string; readonly expectedVersion: number },
+        { readonly entityId: string; readonly expectedVersion: number },
+      ];
+      readonly constraintId: string;
+    }
   | {
       readonly type: 'create_geometry';
       readonly entities: readonly GeometryInput[];
@@ -107,6 +141,10 @@ export interface SketchCommandApplication {
 
 export function isSketchCommand(command: { readonly type: string }): command is SketchCommand {
   return [
+    'instantiate_recipe',
+    'update_recipe_parameters',
+    'set_radius',
+    'set_tangent',
     'create_geometry',
     'edit_geometry',
     'move_node',
@@ -127,6 +165,75 @@ export function isSketchCommand(command: { readonly type: string }): command is 
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].toSorted();
+}
+
+export function commandSemanticReferences(command: SketchCommand): readonly string[] {
+  switch (command.type) {
+    case 'instantiate_recipe':
+      return [command.sourceRef];
+    case 'update_recipe_parameters':
+      return [command.sourceRef];
+    case 'set_radius':
+      return [command.target.entityId];
+    case 'set_tangent':
+      return unique([...command.targets.map(({ entityId }) => entityId), command.constraintId]);
+    case 'create_geometry':
+      return unique([
+        ...command.entities.map(({ id }) => id),
+        ...(command.groupId ? [command.groupId] : []),
+        ...(command.group ? [command.group.id] : []),
+        ...(command.constraints?.map(({ id }) => id) ?? []),
+      ]);
+    case 'edit_geometry':
+      return unique(command.entities.map(({ id }) => id));
+    case 'move_node':
+      return [command.nodeId];
+    case 'transform_geometry':
+    case 'delete_geometry':
+    case 'set_construction':
+      return unique(command.entityIds);
+    case 'trim_geometry':
+      return [command.entityId];
+    case 'create_group':
+      return unique(command.groups.map(({ id }) => id));
+    case 'rename_group':
+      return [command.groupId];
+    case 'move_to_group':
+      return unique([...command.entityIds, command.groupId]);
+    case 'apply_constraint':
+      return unique([
+        ...command.constraints.map(({ id }) => id),
+        ...command.constraints.flatMap(constraintEntityIds),
+      ]);
+    case 'remove_constraint':
+      return unique(command.constraintIds);
+    case 'set_dimension':
+      return unique([
+        ...command.dimensions.map(({ id }) => id),
+        ...command.dimensions.flatMap(({ refs }) => refs.map(({ entityId }) => entityId)),
+      ]);
+    case 'remove_dimension':
+      return unique(command.dimensionIds);
+    case 'restore_sketch':
+      return ['sketch:document'];
+    default:
+      return assertNever(command);
+  }
+}
+
+export function commandExpectedVersions(command: SketchCommand): Readonly<Record<string, number>> {
+  if (command.type === 'set_radius') {
+    return { [command.target.entityId]: command.target.expectedVersion };
+  }
+  if (command.type === 'set_tangent') {
+    return Object.fromEntries(
+      command.targets.map(({ entityId, expectedVersion }) => [entityId, expectedVersion]),
+    );
+  }
+  if (command.type === 'update_recipe_parameters' && command.expectedVersion !== undefined) {
+    return { [command.sourceRef]: command.expectedVersion };
+  }
+  return {};
 }
 
 function solverAffectedEntityIds(
@@ -179,8 +286,117 @@ function assertNever(value: never): never {
   throw new TypeError(`Unsupported sketch command value: ${String(value)}`);
 }
 
+function recipeRootGroupIds(
+  document: SketchDocument,
+  entityIds: readonly string[],
+): readonly string[] {
+  const selected = new Set(entityIds);
+  const roots = new Set<string>();
+  for (const root of document.groups.filter(
+    ({ sourceRef }) => sourceRef?.kind === 'design-recipe',
+  )) {
+    const descendants = new Set([root.id]);
+    let discovered = true;
+    while (discovered) {
+      discovered = false;
+      for (const group of document.groups) {
+        if (
+          !descendants.has(group.id) &&
+          group.parentGroupId &&
+          descendants.has(group.parentGroupId)
+        ) {
+          descendants.add(group.id);
+          discovered = true;
+        }
+      }
+    }
+    if (
+      document.groups
+        .filter(({ id }) => descendants.has(id))
+        .some(({ entityIds: grouped }) => grouped.some((id) => selected.has(id)))
+    ) {
+      roots.add(root.id);
+    }
+  }
+  return [...roots].toSorted();
+}
+
 function footprintReferences(document: SketchDocument, command: SketchCommand) {
   switch (command.type) {
+    case 'instantiate_recipe': {
+      const fragment = instantiateMechanicalRecipe(command).document;
+      return {
+        reads: [],
+        writes: unique([
+          ...fragment.nodes.map(({ id }) => id),
+          ...fragment.entities.map(({ id }) => id),
+          ...fragment.groups.map(({ id }) => id),
+          ...fragment.parameters.map(({ id }) => id),
+        ]),
+      };
+    }
+    case 'update_recipe_parameters': {
+      const root = document.groups.find(({ id }) => id === command.sourceRef);
+      const groupIds = new Set([command.sourceRef]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const group of document.groups) {
+          if (!groupIds.has(group.id) && group.parentGroupId && groupIds.has(group.parentGroupId)) {
+            groupIds.add(group.id);
+            changed = true;
+          }
+        }
+      }
+      const descendantEntityIds = document.groups
+        .filter(({ id }) => groupIds.has(id))
+        .flatMap(({ entityIds }) => entityIds);
+      const regenerated =
+        root?.sourceRef?.kind === 'design-recipe'
+          ? instantiateMechanicalRecipe({
+              sourceRef: root.sourceRef.sourceRef,
+              recipe: root.sourceRef.recipeId,
+              parameters: mergeRecipeParameterChanges(root.sourceRef.parameters, command.changes),
+              placement: root.sourceRef.placement,
+              ...(root.sourceRef.designRequest
+                ? { designRequest: root.sourceRef.designRequest }
+                : {}),
+              status: 'regenerated',
+            }).document
+          : undefined;
+      return {
+        reads: unique([command.sourceRef, ...descendantEntityIds]),
+        writes: unique([
+          command.sourceRef,
+          ...groupIds,
+          ...descendantEntityIds,
+          ...document.parameters
+            .filter(({ id }) => id.startsWith(`${command.sourceRef}:parameter:`))
+            .map(({ id }) => id),
+          ...(root?.childGroupIds ?? []),
+          ...(regenerated?.nodes.map(({ id }) => id) ?? []),
+          ...(regenerated?.entities.map(({ id }) => id) ?? []),
+          ...(regenerated?.groups.map(({ id }) => id) ?? []),
+          ...(regenerated?.parameters.map(({ id }) => id) ?? []),
+        ]),
+      };
+    }
+    case 'set_radius':
+      return {
+        reads: [command.target.entityId],
+        writes: unique([
+          ...solverAffectedEntityIds(document, [command.target.entityId]),
+          ...recipeRootGroupIds(document, [command.target.entityId]),
+        ]),
+      };
+    case 'set_tangent': {
+      const targets = command.targets.map(({ entityId }) => entityId);
+      const connected = solverAffectedEntityIds(document, targets);
+      return {
+        reads: connected,
+        writes: unique([...connected, command.constraintId]),
+      };
+    }
     case 'create_geometry': {
       const referencedEntities = command.constraints?.flatMap(constraintEntityIds) ?? [];
       const existingRefs = referencedEntities.filter((id) =>
@@ -198,8 +414,13 @@ function footprintReferences(document: SketchDocument, command: SketchCommand) {
         ]),
       };
     }
-    case 'edit_geometry':
-      return { reads: [], writes: command.entities.map(({ id }) => id) };
+    case 'edit_geometry': {
+      const entityIds = command.entities.map(({ id }) => id);
+      return {
+        reads: [],
+        writes: unique([...entityIds, ...recipeRootGroupIds(document, entityIds)]),
+      };
+    }
     case 'move_node': {
       const incident = incidentEntityIds(document.entities, command.nodeId);
       const connected = solverAffectedEntityIds(document, incident);
@@ -364,6 +585,29 @@ export function commandFootprint(
   const groupIds = new Set(document.groups.map(({ id }) => id));
   const constraintIds = new Set(document.constraints.map(({ id }) => id));
   const dimensionIds = new Set(document.dimensions.map(({ id }) => id));
+  if (command.type === 'instantiate_recipe') {
+    const fragment = instantiateMechanicalRecipe(command).document;
+    fragment.entities.forEach(({ id }) => entityIds.add(id));
+    fragment.nodes.forEach(({ id }) => nodeIds.add(id));
+    fragment.groups.forEach(({ id }) => groupIds.add(id));
+  }
+  if (command.type === 'update_recipe_parameters') {
+    const root = document.groups.find(({ id }) => id === command.sourceRef);
+    if (root?.sourceRef?.kind === 'design-recipe') {
+      const fragment = instantiateMechanicalRecipe({
+        sourceRef: root.sourceRef.sourceRef,
+        recipe: root.sourceRef.recipeId,
+        parameters: mergeRecipeParameterChanges(root.sourceRef.parameters, command.changes),
+        placement: root.sourceRef.placement,
+        ...(root.sourceRef.designRequest ? { designRequest: root.sourceRef.designRequest } : {}),
+        status: 'regenerated',
+      }).document;
+      fragment.entities.forEach(({ id }) => entityIds.add(id));
+      fragment.nodes.forEach(({ id }) => nodeIds.add(id));
+      fragment.groups.forEach(({ id }) => groupIds.add(id));
+    }
+  }
+  if (command.type === 'set_tangent') constraintIds.add(command.constraintId);
   if (command.type === 'create_geometry') command.entities.forEach(({ id }) => entityIds.add(id));
   if (command.type === 'trim_geometry') {
     trimGeometryAtPoint(document.entities, command.entityId, command.pickPoint).forEach(({ id }) =>
@@ -427,6 +671,25 @@ function ensureReferencedEntities(document: SketchDocument, entityIds: readonly 
 
 function advance(document: SketchDocument, changes: Partial<SketchDocument>): SketchDocument {
   return { ...document, ...changes, revision: document.revision + 1, lastSolve: undefined };
+}
+
+function modifiedRecipeGroups(
+  document: SketchDocument,
+  entityIds: readonly string[],
+): { readonly groups: SketchDocument['groups']; readonly changedGroupIds: readonly string[] } {
+  const changed = new Set(recipeRootGroupIds(document, entityIds));
+  return {
+    groups: document.groups.map((group) =>
+      changed.has(group.id) && group.sourceRef?.kind === 'design-recipe'
+        ? {
+            ...group,
+            version: group.version + 1,
+            sourceRef: { ...group.sourceRef, status: 'modified' as const },
+          }
+        : group,
+    ),
+    changedGroupIds: [...changed].toSorted(),
+  };
 }
 
 function samePoint(first: SketchPoint2D, second: SketchPoint2D): boolean {
@@ -602,6 +865,229 @@ export function applySketchCommand(
 ): SketchCommandApplication {
   const document = structuredClone(source);
   switch (command.type) {
+    case 'instantiate_recipe': {
+      const fragment = instantiateMechanicalRecipe(command).document;
+      const existing = new Set([
+        ...document.nodes.map(({ id }) => id),
+        ...document.entities.map(({ id }) => id),
+        ...document.groups.map(({ id }) => id),
+        ...document.parameters.map(({ id }) => id),
+      ]);
+      const incoming = [
+        ...fragment.nodes.map(({ id }) => id),
+        ...fragment.entities.map(({ id }) => id),
+        ...fragment.groups.map(({ id }) => id),
+        ...fragment.parameters.map(({ id }) => id),
+      ];
+      if (incoming.some((id) => existing.has(id))) {
+        throw new TypeError(`Recipe sourceRef ${command.sourceRef} already exists.`);
+      }
+      return {
+        document: advance(document, {
+          nodes: [...document.nodes, ...fragment.nodes].toSorted((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+          entities: [...document.entities, ...fragment.entities].toSorted((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+          groups: [...document.groups, ...fragment.groups].toSorted((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+          parameters: [...document.parameters, ...fragment.parameters].toSorted((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+        }),
+        affectedEntities: unique(incoming),
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'update_recipe_parameters': {
+      const root = document.groups.find(({ id }) => id === command.sourceRef);
+      if (!root || root.sourceRef?.kind !== 'design-recipe') {
+        throw new TypeError(`Unknown recipe source reference ${command.sourceRef}.`);
+      }
+      if (root.sourceRef.status === 'modified') {
+        throw new TypeError(
+          `Recipe source ${command.sourceRef} has direct geometry edits and cannot be safely regenerated.`,
+        );
+      }
+      if (command.expectedVersion !== undefined && root.version !== command.expectedVersion) {
+        throw new TypeError(`Recipe source ${command.sourceRef} changed after inspection.`);
+      }
+      const groupIds = new Set([root.id]);
+      let discovered = true;
+      while (discovered) {
+        discovered = false;
+        for (const group of document.groups) {
+          if (
+            !groupIds.has(group.id) &&
+            ((group.parentGroupId && groupIds.has(group.parentGroupId)) ||
+              [...groupIds].some((id) =>
+                document.groups
+                  .find((candidate) => candidate.id === id)
+                  ?.childGroupIds?.includes(group.id),
+              ))
+          ) {
+            groupIds.add(group.id);
+            discovered = true;
+          }
+        }
+      }
+      const replacedEntityIds = new Set(
+        document.groups.filter(({ id }) => groupIds.has(id)).flatMap(({ entityIds }) => entityIds),
+      );
+      const fragment = instantiateMechanicalRecipe({
+        sourceRef: root.sourceRef.sourceRef,
+        recipe: root.sourceRef.recipeId,
+        parameters: mergeRecipeParameterChanges(root.sourceRef.parameters, command.changes),
+        placement: root.sourceRef.placement,
+        ...(root.sourceRef.designRequest ? { designRequest: root.sourceRef.designRequest } : {}),
+        status: 'regenerated',
+      }).document;
+      const retainedEntities = document.entities.filter(({ id }) => !replacedEntityIds.has(id));
+      const retainedNodeIds = new Set(retainedEntities.flatMap(geometryNodeIds));
+      const retainedNodes = document.nodes.filter(({ id }) => retainedNodeIds.has(id));
+      const previousEntities = new Map(document.entities.map((entity) => [entity.id, entity]));
+      const previousNodes = new Map(document.nodes.map((node) => [node.id, node]));
+      const previousGroups = new Map(document.groups.map((group) => [group.id, group]));
+      const previousParameters = new Map(
+        document.parameters.map((parameter) => [parameter.id, parameter]),
+      );
+      const nextEntities = fragment.entities.map((entity) => {
+        const previous = previousEntities.get(entity.id);
+        return previous ? { ...entity, version: previous.version + 1 } : entity;
+      });
+      const nextNodes = fragment.nodes.map((node) => {
+        const previous = previousNodes.get(node.id);
+        return previous ? { ...node, version: previous.version + 1 } : node;
+      });
+      const nextGroups = fragment.groups.map((group) => {
+        const previous = previousGroups.get(group.id);
+        return previous ? { ...group, version: previous.version + 1 } : group;
+      });
+      const nextParameters = fragment.parameters.map((parameter) => {
+        const previous = previousParameters.get(parameter.id);
+        return previous ? { ...parameter, version: previous.version + 1 } : parameter;
+      });
+      const currentRecipeParameterIds = new Set(
+        document.parameters
+          .filter(({ id }) => id.startsWith(`${command.sourceRef}:parameter:`))
+          .map(({ id }) => id),
+      );
+      const currentConstraintIds = document.constraints
+        .filter(({ refs }) =>
+          refs.some(
+            ({ entityId }) =>
+              replacedEntityIds.has(entityId) && !nextEntities.some(({ id }) => id === entityId),
+          ),
+        )
+        .map(({ id }) => id);
+      return {
+        document: advance(document, {
+          nodes: [...retainedNodes, ...nextNodes].toSorted((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+          entities: [...retainedEntities, ...nextEntities].toSorted((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+          groups: [
+            ...document.groups.filter(({ id }) => !groupIds.has(id)),
+            ...nextGroups,
+          ].toSorted((left, right) => left.id.localeCompare(right.id)),
+          parameters: [
+            ...document.parameters.filter(({ id }) => !currentRecipeParameterIds.has(id)),
+            ...nextParameters,
+          ].toSorted((left, right) => left.id.localeCompare(right.id)),
+          constraints: document.constraints.filter(({ id }) => !currentConstraintIds.includes(id)),
+          dimensions: document.dimensions.filter(
+            ({ refs }) =>
+              !refs.some(
+                ({ entityId }) =>
+                  replacedEntityIds.has(entityId) &&
+                  !nextEntities.some(({ id }) => id === entityId),
+              ),
+          ),
+        }),
+        affectedEntities: unique([
+          ...replacedEntityIds,
+          ...fragment.entities.map(({ id }) => id),
+          ...groupIds,
+          ...currentRecipeParameterIds,
+          ...fragment.parameters.map(({ id }) => id),
+          ...currentConstraintIds,
+        ]),
+        addedConstraints: [],
+        removedConstraints: currentConstraintIds,
+      };
+    }
+    case 'set_radius': {
+      const target = document.entities.find(({ id }) => id === command.target.entityId);
+      if (!target || (target.kind !== 'circle' && target.kind !== 'arc')) {
+        throw new TypeError(`Radius target ${command.target.entityId} must be a circle or arc.`);
+      }
+      if (target.version !== command.target.expectedVersion) {
+        throw new TypeError(`Radius target ${target.id} changed after inspection.`);
+      }
+      if (!Number.isFinite(command.radius) || command.radius <= 0) {
+        throw new TypeError('set_radius requires a positive finite radius.');
+      }
+      const patch =
+        target.kind === 'circle'
+          ? { id: target.id, kind: target.kind, center: target.center, radius: command.radius }
+          : {
+              id: target.id,
+              kind: target.kind,
+              center: target.center,
+              radius: command.radius,
+              startAngle: target.startAngle,
+              endAngle: target.endAngle,
+            };
+      const edited = editGeometryWithTopology(document, new Map([[target.id, patch]]));
+      const provenance = modifiedRecipeGroups(document, [target.id]);
+      return {
+        document: advance(document, { ...edited, groups: provenance.groups }),
+        affectedEntities: unique([target.id, ...provenance.changedGroupIds]),
+        addedConstraints: [],
+        removedConstraints: [],
+      };
+    }
+    case 'set_tangent': {
+      const targets = command.targets.map(({ entityId }) => entityId);
+      ensureUniqueCommandIds(targets, 'set_tangent.targets');
+      const entities = command.targets.map((expected) => {
+        const entity = document.entities.find(({ id }) => id === expected.entityId);
+        if (!entity) throw new TypeError(`Unknown tangent target ${expected.entityId}.`);
+        if (entity.version !== expected.expectedVersion) {
+          throw new TypeError(`Tangent target ${expected.entityId} changed after inspection.`);
+        }
+        return entity;
+      });
+      if (
+        !entities.some(({ kind }) => kind === 'line') ||
+        !entities.some(({ kind }) => kind === 'circle' || kind === 'arc')
+      ) {
+        throw new TypeError('set_tangent requires one line and one circle or arc.');
+      }
+      if (document.constraints.some(({ id }) => id === command.constraintId)) {
+        throw new TypeError(`Constraint ${command.constraintId} already exists.`);
+      }
+      const constraint = {
+        id: command.constraintId,
+        version: 1,
+        type: 'tangent' as const,
+        refs: targets.map((entityId) => ({ entityId })),
+      };
+      validateConstraintInput(constraint);
+      return {
+        document: advance(document, {
+          constraints: [...document.constraints, constraint],
+        }),
+        affectedEntities: unique([...targets, command.constraintId]),
+        addedConstraints: [command.constraintId],
+        removedConstraints: [],
+      };
+    }
     case 'create_geometry': {
       const ids = command.entities.map(({ id }) => id);
       ensureUniqueCommandIds(ids, 'create_geometry');
@@ -697,9 +1183,10 @@ export function applySketchCommand(
       ensureReferencedEntities(document, ids);
       const patches = new Map(command.entities.map((patch) => [patch.id, patch]));
       const edited = editGeometryWithTopology(document, patches);
+      const provenance = modifiedRecipeGroups(document, ids);
       return {
-        document: advance(document, edited),
-        affectedEntities: unique(ids),
+        document: advance(document, { ...edited, groups: provenance.groups }),
+        affectedEntities: unique([...ids, ...provenance.changedGroupIds]),
         addedConstraints: [],
         removedConstraints: [],
       };

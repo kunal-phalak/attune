@@ -4,7 +4,7 @@ import StraightSpokesModule from 'makerjs-spokes-straight';
 import straightSpokesMetadata from 'makerjs-spokes-straight/package.json';
 import makerjsMetadata from 'makerjs/package.json';
 
-import { hashCanonical } from '../hash';
+import { browserHashCanonical } from '../browser-hash';
 import {
   createSketchDocument,
   type MakerGeneratorSource,
@@ -78,6 +78,10 @@ export interface MakerJsImportOptions {
     | Omit<MakerGeneratorSource, 'units' | 'status'>
     | Omit<MakerModelSource, 'units' | 'status'>;
   readonly parameters?: readonly SketchParameter[];
+  readonly idNamespace?: string;
+  readonly rootGroupId?: string;
+  readonly rootGroupName?: string;
+  readonly rootGroupSourceRef?: SketchGroup['sourceRef'];
 }
 
 interface WalkedPath {
@@ -102,18 +106,27 @@ function safeSlug(value: string): string {
   );
 }
 
-function stableEntityId(sourceRef: MakerPathSourceRef): string {
-  return `maker:path:${safeSlug(sourceRef.pathId ?? 'path')}:${hashCanonical(sourceRef.routeKey).slice(0, 16)}`;
+function stableEntityId(sourceRef: MakerPathSourceRef, namespace?: string): string {
+  const prefix = namespace ? `${safeSlug(namespace)}:` : '';
+  return `maker:path:${prefix}${safeSlug(sourceRef.pathId ?? 'path')}:${browserHashCanonical(`${namespace ?? ''}:${sourceRef.routeKey}`).slice(0, 16)}`;
 }
 
 function routeToken(route: readonly string[]): string {
   return route.join('\u001f');
 }
 
-function stableGroupId(model: WalkedModel): string {
-  if (model.route.length === 0) return 'maker:group:root';
+function semanticGroupName(value: string): string {
+  const spoke = value.match(/^wedge(\d+)$/i);
+  if (spoke) return `Spoke ${Number(spoke[1]) + 1}`;
+  if (/^ring\d*$/i.test(value)) return 'Outer rim';
+  return value;
+}
+
+function stableGroupId(model: WalkedModel, namespace?: string, rootGroupId?: string): string {
+  if (model.route.length === 0) return rootGroupId ?? 'maker:group:root';
   const name = model.route.at(-1) ?? 'model';
-  return `maker:group:${safeSlug(name)}:${hashCanonical(model.routeKey).slice(0, 12)}`;
+  const prefix = namespace ? `${safeSlug(namespace)}:` : '';
+  return `maker:group:${prefix}${safeSlug(name)}:${browserHashCanonical(`${namespace ?? ''}:${model.routeKey}`).slice(0, 12)}`;
 }
 
 function isMakerLine(path: MakerJs.IPath): path is MakerJs.IPathLine {
@@ -178,8 +191,12 @@ function walkMakerModel(model: MakerJs.IModel): {
   };
 }
 
-function geometryFromWalkedPath(walked: WalkedPath, scale: number): GeometryInput {
-  const id = stableEntityId(walked.sourceRef);
+function geometryFromWalkedPath(
+  walked: WalkedPath,
+  scale: number,
+  namespace?: string,
+): GeometryInput {
+  const id = stableEntityId(walked.sourceRef, namespace);
   const name = walked.sourceRef.pathId ?? id;
   const base = { id, name, sourceRef: walked.sourceRef };
   if (isMakerLine(walked.path)) {
@@ -216,10 +233,14 @@ function geometryFromWalkedPath(walked: WalkedPath, scale: number): GeometryInpu
 function groupsFromWalk(
   walked: ReturnType<typeof walkMakerModel>,
   entities: readonly GeometryEntity[],
+  options: MakerJsImportOptions,
 ): readonly SketchGroup[] {
   const models = walked.models;
   const groupIdByRoute = new Map(
-    models.map((model) => [routeToken(model.route), stableGroupId(model)]),
+    models.map((model) => [
+      routeToken(model.route),
+      stableGroupId(model, options.idNamespace, options.rootGroupId),
+    ]),
   );
   const entityIdByRouteKey = new Map(
     entities.flatMap((entity) =>
@@ -248,18 +269,33 @@ function groupsFromWalk(
       })
       .toSorted();
     const group: SketchGroup = {
-      id: stableGroupId(model),
+      id: stableGroupId(model, options.idNamespace, options.rootGroupId),
       version: 1,
-      name: model.route.length === 0 ? 'Maker.js source' : (model.route.at(-1) ?? 'Model'),
+      name:
+        model.route.length === 0
+          ? (options.rootGroupName ?? 'Imported geometry')
+          : semanticGroupName(model.route.at(-1) ?? 'Geometry group'),
       entityIds,
-      sourceRef: {
-        kind: 'maker-model',
-        routeKey: model.routeKey,
-        route: model.route,
-        ...(model.layer ? { layer: model.layer } : {}),
-      },
+      ...(model.route.length === 0 && options.rootGroupSourceRef
+        ? { sourceRef: options.rootGroupSourceRef }
+        : {
+            sourceRef: {
+              kind: 'maker-model' as const,
+              routeKey: model.routeKey,
+              route: model.route,
+              ...(model.layer ? { layer: model.layer } : {}),
+            },
+          }),
     };
-    return childGroupIds.length > 0 ? Object.assign({}, group, { childGroupIds }) : group;
+    const parentRoute = model.route.slice(0, -2);
+    const parentGroupId =
+      model.route.length === 0 ? undefined : groupIdByRoute.get(routeToken(parentRoute));
+    return Object.assign(
+      {},
+      group,
+      childGroupIds.length > 0 ? { childGroupIds } : {},
+      parentGroupId ? { parentGroupId } : {},
+    );
   });
 }
 
@@ -292,14 +328,14 @@ export function importMakerJsModel(
         status: 'pristine',
       };
   const versioned = walked.paths.map((path) => ({
-    ...geometryFromWalkedPath(path, units.scale),
+    ...geometryFromWalkedPath(path, units.scale, options.idNamespace),
     version: 1,
   })) as GeometryEntity[];
   const document = createSketchDocument({
     id:
       options.documentId ??
-      `sketch:maker:${hashCanonical(walked.paths.map(({ sourceRef }) => sourceRef.routeKey)).slice(0, 16)}`,
-    name: options.name ?? 'Imported Maker.js model',
+      `sketch:maker:${browserHashCanonical(walked.paths.map(({ sourceRef }) => sourceRef.routeKey)).slice(0, 16)}`,
+    name: options.name ?? 'Imported design',
     entities: versioned,
     constraints: [],
     dimensions: [],
@@ -307,7 +343,7 @@ export function importMakerJsModel(
     parameters: options.parameters ?? [],
     source,
   });
-  return { ...document, groups: groupsFromWalk(walked, document.entities) };
+  return { ...document, groups: groupsFromWalk(walked, document.entities, options) };
 }
 
 export function createStraightSpokesModel(
@@ -355,7 +391,7 @@ export function createSpokeSeedDocument(
 ): SketchDocument {
   return importMakerJsModel(createStraightSpokesModel(parameters), {
     documentId: 'sketch:spoke-wheel',
-    name: 'Exact Maker.js straight-spokes wheel',
+    name: 'Straight-spoke wheel',
     sourceUnits: makerjs.unitType.Millimeter,
     source: {
       kind: 'maker-generator',

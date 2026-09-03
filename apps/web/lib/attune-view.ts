@@ -292,6 +292,8 @@ export class AttuneHttpError extends Error {
     message: string,
     readonly retryable = false,
     readonly changedEntities: readonly string[] = [],
+    readonly latestVersions: Readonly<Record<string, number>> = {},
+    readonly canRetry = retryable,
   ) {
     super(message);
     this.name = 'AttuneHttpError';

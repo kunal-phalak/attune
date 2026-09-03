@@ -64,6 +64,10 @@ export interface CommerceMaterializationInput {
 }
 
 function agentActivity(command: AttuneCommand): string {
+  if (command.type === 'instantiate_recipe' || command.type === 'update_recipe_parameters') {
+    return 'Building mechanical geometry';
+  }
+  if (command.type === 'set_tangent') return 'Applying tangency';
   if (command.type === 'apply_constraint') return 'Applying a constraint';
   if (command.type === 'remove_constraint') return 'Removing a constraint';
   if (command.type === 'set_dimension' || command.type === 'remove_dimension') {
@@ -75,6 +79,16 @@ function agentActivity(command: AttuneCommand): string {
 function commandFocus(command: AttuneCommand) {
   if (!isSketchCommand(command)) return {};
   switch (command.type) {
+    case 'instantiate_recipe':
+    case 'update_recipe_parameters':
+      return { groupIds: [command.sourceRef] };
+    case 'set_radius':
+      return { entityIds: [command.target.entityId] };
+    case 'set_tangent':
+      return {
+        entityIds: command.targets.map(({ entityId }) => entityId),
+        constraintIds: [command.constraintId],
+      };
     case 'create_geometry':
     case 'edit_geometry':
       return { entityIds: command.entities.map(({ id }) => id) };
@@ -272,7 +286,7 @@ async function viewForBundle(
   });
   const viewStartedAt = performance.now();
   const selection = createSelectionContext(solve.document);
-  const bus = new AttuneCommandBus(bundle.workspace, undefined, solver);
+  const bus = new AttuneCommandBus(bundle.workspace, undefined, solver, {}, timing);
   const inspection = bus.inspect(role);
   const delegatedCapabilities = delegation
     ? inspection.capabilities.filter(({ id }) => delegation.capabilityIds.includes(id))
@@ -324,6 +338,10 @@ async function viewForBundle(
       rankedConstraintCandidates: rankConstraintCandidates(solve.document, selection),
       availableActions: delegatedCapabilities.some(({ id }) => id === 'edit_draft')
         ? [
+            'instantiate_recipe',
+            'update_recipe_parameters',
+            'set_radius',
+            'set_tangent',
             'create_geometry',
             'edit_geometry',
             'move_node',
@@ -402,9 +420,12 @@ async function agentContextForBundle(
   context: TrustedExecutionContext,
   delegationState: AgentDelegationStatus,
   focus?: SelectionContextRequest,
+  timing?: ServerTimingRecorder,
 ) {
   const solver = await getPlaneGcsSolver();
-  const solution = solver.solve(bundle.workspace.sketchDocument);
+  const solution = await measureServerPhase(timing, 'plane_gcs', async () =>
+    solver.solve(bundle.workspace.sketchDocument),
+  );
   const workspace = {
     ...bundle.workspace,
     sketchDocument: {
@@ -417,20 +438,23 @@ async function agentContextForBundle(
   const capabilityIds = inspection.capabilities
     .filter(({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id))
     .map(({ id }) => id);
-  return compileAgentContext({
-    workspace,
-    role: perspective,
-    capabilityIds,
-    observation: bundle.observation,
-    delegation: delegationState,
-    focus,
-  });
+  return measureServerPhase(timing, 'context_compilation', async () =>
+    compileAgentContext({
+      workspace,
+      role: perspective,
+      capabilityIds,
+      observation: bundle.observation,
+      delegation: delegationState,
+      focus,
+    }),
+  );
 }
 
 export async function inspectAgentContext(
   workspaceId: string,
   perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   focus?: SelectionContextRequest,
+  timing?: ServerTimingRecorder,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
   const access = await agentAccess(workspaceId, perspective);
@@ -452,7 +476,7 @@ export async function inspectAgentContext(
         context.principalId,
       )
     : access.bundle;
-  const snapshot = await agentContextForBundle(bundle, context, access.status, focus);
+  const snapshot = await agentContextForBundle(bundle, context, access.status, focus, timing);
   if (context.delegation) {
     await advanceDelegationObservation(
       workspaceId,
@@ -591,6 +615,9 @@ export async function executeSemanticCommand(
       ({ id }) => !context.delegation || context.delegation.capabilityIds.includes(id),
     )
     .map(({ id }) => id);
+  const changedEntityIds = result.receipt.affectedEntities
+    .filter((id) => result.workspace.sketchDocument.entities.some((entity) => entity.id === id))
+    .slice(0, 16);
   const nextContext = compileAgentContext({
     workspace: result.workspace,
     role: perspective,
@@ -599,8 +626,9 @@ export async function executeSemanticCommand(
     delegation: context.delegation
       ? delegationStatus(context.delegation, result.workspace.authorityEpoch)
       : { status: 'required', authorityEpoch: result.workspace.authorityEpoch },
+    focus: { entityIds: changedEntityIds },
   });
-  timing?.('semantic_context', performance.now() - contextStartedAt);
+  timing?.('context_compilation', performance.now() - contextStartedAt);
   return {
     result,
     nextContext,
@@ -612,11 +640,13 @@ export async function executeAgentSemanticCommand(
   workspaceId: string,
   perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   input: CommandExecutionInput,
+  timing?: ServerTimingRecorder,
 ) {
   const execution = await executeSemanticCommand(
     workspaceId,
     input,
     await trustedDelegatedContext(workspaceId, perspective, input.command.type),
+    timing,
   );
   return execution.mutation;
 }
@@ -638,6 +668,7 @@ async function forecastWithContext(
   workspaceId: string,
   command: AttuneCommand,
   context: TrustedExecutionContext,
+  timing?: ServerTimingRecorder,
 ) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
   const bundle = await readWorkspaceBundle(
@@ -646,14 +677,18 @@ async function forecastWithContext(
     context.path === 'webmcp' ? context.principalId : undefined,
   );
   const solver = await getPlaneGcsSolver();
-  const bus = new AttuneCommandBus(bundle.workspace, undefined, solver);
-  const forecast = bus.forecast(command, context, `forecast-${crypto.randomUUID()}`);
+  const bus = new AttuneCommandBus(bundle.workspace, undefined, solver, {}, timing);
+  const forecast = await measureServerPhase(timing, 'forecast', async () =>
+    bus.forecast(command, context, `forecast-${crypto.randomUUID()}`),
+  );
   const agentContext = await agentContextForBundle(
     bundle,
     context,
     context.delegation
       ? delegationStatus(context.delegation, bundle.workspace.authorityEpoch)
       : { status: 'required', authorityEpoch: bundle.workspace.authorityEpoch },
+    undefined,
+    timing,
   );
   if (context.path === 'webmcp' && context.delegation) {
     await advanceDelegationObservation(
@@ -669,11 +704,13 @@ export async function forecastAgentCommand(
   workspaceId: string,
   perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   command: AttuneCommand,
+  timing?: ServerTimingRecorder,
 ) {
   return forecastWithContext(
     workspaceId,
     command,
     await trustedDelegatedContext(workspaceId, perspective, command.type),
+    timing,
   );
 }
 

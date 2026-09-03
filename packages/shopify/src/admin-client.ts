@@ -1,5 +1,5 @@
 import { ShopifyIntegrationError } from './errors';
-import type { GraphqlBody, GraphqlClient, ShopifyConfiguration } from './types';
+import type { GraphqlBody, GraphqlClient, ShopifyCoreConfiguration } from './types';
 
 function isExpectedJsonObject<T extends object>(value: unknown, _expected?: T): value is T {
   return typeof value === 'object' && value !== null;
@@ -53,7 +53,7 @@ export function graphqlClient(
   };
 }
 
-async function getAdminToken(configuration: ShopifyConfiguration): Promise<string> {
+async function getAdminToken(configuration: ShopifyCoreConfiguration): Promise<string> {
   const response = await requestJson<{ access_token?: unknown }>(
     `https://${configuration.domain}/admin/oauth/access_token`,
     {
@@ -77,7 +77,7 @@ async function getAdminToken(configuration: ShopifyConfiguration): Promise<strin
 }
 
 export async function createAdminClient(
-  configuration: ShopifyConfiguration,
+  configuration: ShopifyCoreConfiguration,
 ): Promise<GraphqlClient> {
   const accessToken = await getAdminToken(configuration);
   return graphqlClient(

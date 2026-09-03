@@ -1,4 +1,4 @@
-import type { FrozenRevision } from '@attune/domain';
+import type { FrozenRevision, ManufacturingRequest, Quote } from '@attune/domain';
 
 import { REQUIRED_ADMIN_SCOPES } from './config';
 import { ShopifyIntegrationError } from './errors';
@@ -17,26 +17,45 @@ import type {
   ShopifyProduct,
 } from './types';
 
-export function expectation(revision: FrozenRevision): ProductExpectation {
-  if (revision.revisionId !== 'r7') {
+function slug(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, '-')
+    .replaceAll(/^-|-$/g, '')
+    .slice(0, 72);
+}
+
+export function expectation(input: {
+  readonly commitmentId: string;
+  readonly projectName: string;
+  readonly revision: FrozenRevision;
+  readonly request: ManufacturingRequest;
+  readonly quote: Quote;
+}): ProductExpectation {
+  const { commitmentId, projectName, revision, request, quote } = input;
+  if (request.specRevision !== revision.revisionId || request.specHash !== revision.specHash) {
     throw new ShopifyIntegrationError(
       'CONFORMANCE_FAILED',
-      'The P0 Shopify contract only materializes exact revision r7.',
+      'The product request must match the exact frozen revision.',
     );
   }
+  const quantity = request.configuration?.quantity ?? quote.panelCount;
+  const configuration = request.configuration;
   return {
-    title: 'Custom Control Faceplate — AT-1042 r7',
-    handle: 'custom-control-faceplate-at-1042-r7',
-    variantTitle: 'Fabrication lot — 4 panels',
-    sku: 'AT-1042-R7-LOT4',
-    price: '2400.00',
-    panelCount: 4,
+    title: `${projectName} — ${revision.revisionId}`,
+    handle: slug(`attune-${commitmentId}-${revision.revisionId}`),
+    variantTitle: `Fabrication lot — ${quantity} ${quantity === 1 ? 'part' : 'parts'}`,
+    sku: slug(`${commitmentId}-${revision.revisionId}-q${quantity}`).toUpperCase(),
+    price: (quote.amountMinor / 100).toFixed(2),
+    currency: quote.currency,
+    panelCount: quantity,
     inventoryLots: 10,
+    descriptionHtml: `<p>One revision-bound fabrication lot for ${quantity} ${quantity === 1 ? 'part' : 'parts'}${configuration ? ` in ${configuration.thicknessMm} mm ${configuration.material}, ${configuration.finish}` : ''}.</p>`,
     metafields: {
-      commitment_id: 'AT-1042',
+      commitment_id: commitmentId,
       revision_id: revision.revisionId,
       spec_hash: revision.specHash,
-      panel_count: '4',
+      panel_count: String(quantity),
     },
   };
 }
@@ -52,8 +71,7 @@ function productInput(expected: ProductExpectation, locationId: string) {
     title: expected.title,
     handle: expected.handle,
     status: 'ACTIVE',
-    descriptionHtml:
-      '<p>One verified revision-bound fabrication lot containing four aluminium control faceplates.</p>',
+    descriptionHtml: expected.descriptionHtml,
     productOptions: [
       { name: 'Configuration', position: 1, values: [{ name: expected.variantTitle }] },
     ],
@@ -138,7 +156,7 @@ export function storefrontConforms(
     variant?.sku === expected.sku &&
     variant?.availableForSale === true &&
     Number(variant?.price?.amount) === Number(expected.price) &&
-    variant?.price?.currencyCode === 'INR' &&
+    variant?.price?.currencyCode === expected.currency &&
     JSON.stringify(metafieldMap(product?.metafields)) === JSON.stringify(expected.metafields)
   );
 }
@@ -203,7 +221,7 @@ export async function upsertProduct(
   if (!adminConforms(created.productSet.product, locationId, expected)) {
     throw new ShopifyIntegrationError(
       'CONFORMANCE_FAILED',
-      'Admin productSet response did not match the exact r7 lot contract.',
+      'Admin productSet response did not match the exact revision-bound lot contract.',
     );
   }
   return productIdentifiers(created.productSet.product);
@@ -228,7 +246,7 @@ export async function verifyAdminProduct(
   if (!adminConforms(reread.product, locationId, expected)) {
     throw new ShopifyIntegrationError(
       'CONFORMANCE_FAILED',
-      'Admin reread did not match the exact r7 lot contract.',
+      'Admin reread did not match the exact revision-bound lot contract.',
     );
   }
 }

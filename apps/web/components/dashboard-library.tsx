@@ -5,6 +5,7 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { DropdownMenu } from '@cloudflare/kumo/components/dropdown';
 import { Input } from '@cloudflare/kumo/components/input';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
+import { Loader } from '@cloudflare/kumo/components/loader';
 import { Sidebar, useSidebar } from '@cloudflare/kumo/components/sidebar';
 import { Surface } from '@cloudflare/kumo/components/surface';
 import { LiveblocksProvider, RoomProvider } from '@liveblocks/react';
@@ -280,8 +281,10 @@ function ProjectActions({
       <Dialog.Root open={renameOpen} onOpenChange={setRenameOpen}>
         <Dialog size="sm">
           <form className="dashboard-project-dialog" onSubmit={(event) => void submitRename(event)}>
-            <Dialog.Title>Rename project</Dialog.Title>
-            <Dialog.Description>Choose a concise name for this project.</Dialog.Description>
+            <Dialog.Title className="dashboard-dialog-title">Rename project</Dialog.Title>
+            <Dialog.Description className="dashboard-dialog-description">
+              Choose a concise name for this project.
+            </Dialog.Description>
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -312,8 +315,10 @@ function ProjectActions({
       <Dialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
         <Dialog size="sm">
           <div className="dashboard-project-dialog">
-            <Dialog.Title>Delete {project.projectName}?</Dialog.Title>
-            <Dialog.Description>
+            <Dialog.Title className="dashboard-dialog-title">
+              Delete {project.projectName}?
+            </Dialog.Title>
+            <Dialog.Description className="dashboard-dialog-description">
               This removes the project from the library and cannot be undone.
             </Dialog.Description>
             <div className="dashboard-dialog-actions">
@@ -377,7 +382,11 @@ function ProjectCardBody({
             )}
           </time>
           <div className="dashboard-project-collaboration">
-            {collaboration ? <AvatarStack max={4} size={25} /> : null}
+            {collaboration ? (
+              <span className="dashboard-avatar-slot">
+                <AvatarStack max={4} size={25} />
+              </span>
+            ) : null}
             {project.canManage ? (
               <ProjectActions project={project} onRenamed={onRenamed} onDeleted={onDeleted} />
             ) : null}
@@ -488,19 +497,14 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger
         render={
-          <Button
-            type="button"
-            variant="primary"
-            size="base"
-            icon={<AppIcons.New size={17} weight="bold" />}
-          >
+          <Button type="button" variant="primary" size="base" icon={<AppIcons.New size={16} />}>
             New project
           </Button>
         }
       />
       <Dialog size="base" className="dashboard-new-project-dialog">
         <div className="dashboard-dialog-header">
-          <Dialog.Title>New project</Dialog.Title>
+          <Dialog.Title className="dashboard-dialog-title">New project</Dialog.Title>
           <Dialog.Close
             render={
               <Button
@@ -508,48 +512,54 @@ function NewProjectDialog({ canCreate }: { readonly canCreate: boolean }) {
                 variant="ghost"
                 size="sm"
                 shape="square"
-                icon={<AppIcons.Close size={18} />}
+                icon={<AppIcons.Close size={16} />}
                 aria-label="Close new project dialog"
               />
             }
           />
         </div>
-        <Dialog.Description>Choose a starting point.</Dialog.Description>
+        <Dialog.Description className="dashboard-dialog-description">
+          Choose a starting point.
+        </Dialog.Description>
         <div className="dashboard-template-actions">
-          <Button
-            type="button"
-            variant="secondary"
-            className="dashboard-template-option"
-            disabled={creating !== null}
-            loading={creating === 'blank'}
-            aria-pressed={creating === 'blank'}
-            onClick={() => void createProject('blank')}
-          >
-            <span className="dashboard-template-preview" aria-hidden>
-              <ProjectThumbnail template="blank" />
-            </span>
-            <span>
-              <strong>Blank sketch</strong>
-              <small>Empty XY canvas</small>
-            </span>
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            className="dashboard-template-option"
-            disabled={creating !== null}
-            loading={creating === 'spoke'}
-            aria-pressed={creating === 'spoke'}
-            onClick={() => void createProject('spoke')}
-          >
-            <span className="dashboard-template-preview" aria-hidden>
-              <ProjectThumbnail template="spoke" />
-            </span>
-            <span>
-              <strong>Straight-spoke wheel</strong>
-              <small>Parametric sketch example</small>
-            </span>
-          </Button>
+          <div className="dashboard-template-option-wrap">
+            <Button
+              type="button"
+              variant="secondary"
+              className="dashboard-template-option"
+              disabled={creating !== null}
+              aria-pressed={creating === 'blank'}
+              onClick={() => void createProject('blank')}
+            >
+              <span className="dashboard-template-preview" aria-hidden>
+                <ProjectThumbnail template="blank" />
+              </span>
+              <span>
+                <strong>Blank sketch</strong>
+                <small>Empty XY canvas</small>
+              </span>
+            </Button>
+            {creating === 'blank' ? <LoaderSpinner /> : null}
+          </div>
+          <div className="dashboard-template-option-wrap">
+            <Button
+              type="button"
+              variant="secondary"
+              className="dashboard-template-option"
+              disabled={creating !== null}
+              aria-pressed={creating === 'spoke'}
+              onClick={() => void createProject('spoke')}
+            >
+              <span className="dashboard-template-preview" aria-hidden>
+                <ProjectThumbnail template="spoke" />
+              </span>
+              <span>
+                <strong>Straight-spoke wheel</strong>
+                <small>Editable mechanical wheel</small>
+              </span>
+            </Button>
+            {creating === 'spoke' ? <LoaderSpinner /> : null}
+          </div>
         </div>
       </Dialog>
     </Dialog.Root>
@@ -638,11 +648,13 @@ function DashboardSidebar({
   query,
   onQueryChange,
   searchRef,
+  operationalWorkspaceId,
 }: {
   readonly filter: LibraryFilter;
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
   readonly searchRef: React.RefObject<HTMLInputElement | null>;
+  readonly operationalWorkspaceId?: string;
 }) {
   const { isMobile, open, setOpen, setOpenMobile } = useSidebar();
   const sidebarRestoreStarted = useRef(false);
@@ -682,39 +694,62 @@ function DashboardSidebar({
   return (
     <Sidebar className="dashboard-sidebar">
       <Sidebar.Header className="dashboard-sidebar-header">
-        <Link className="dashboard-brandmark" href="/" aria-label="Attune home">
+        <Link
+          className="dashboard-brandmark"
+          href="/"
+          aria-label="Attune home"
+          onClick={(e) => {
+            if (!open) {
+              e.preventDefault();
+              setOpen(true);
+            }
+          }}
+        >
           <AttuneBrandmark size={24} />
         </Link>
         <Sidebar.Trigger className="dashboard-sidebar-header-trigger" />
       </Sidebar.Header>
       <Sidebar.Content>
-        <div className="dashboard-search-wrap">
-          <InputGroup size="base" className="dashboard-search">
-            <InputGroup.Addon>
-              <AppIcons.Search size={16} weight="regular" aria-hidden />
-            </InputGroup.Addon>
-            <InputGroup.Input
-              ref={searchRef}
-              id="dashboard-project-search"
-              type="search"
-              value={query}
-              placeholder="Search projects"
-              onChange={(event) => onQueryChange(event.target.value)}
-              aria-label="Search projects"
-            />
-            <InputGroup.Addon align="end">
-              <InputGroup.Button
-                type="button"
-                variant="ghost"
-                tooltip="Focus project search"
+        {open || isMobile ? (
+          <div className="dashboard-search-wrap">
+            <InputGroup size="base" className="dashboard-search">
+              <InputGroup.Addon>
+                <AppIcons.Search size={16} weight="regular" aria-hidden />
+              </InputGroup.Addon>
+              <InputGroup.Input
+                ref={searchRef}
+                id="dashboard-project-search"
+                type="search"
+                value={query}
+                placeholder="Search projects"
+                onChange={(event) => onQueryChange(event.target.value)}
+                aria-label="Search projects"
+              />
+              <InputGroup.Addon align="end">
+                <InputGroup.Button
+                  type="button"
+                  variant="ghost"
+                  tooltip="Focus project search"
+                  onClick={focusSearch}
+                  aria-label="Focus project search"
+                >
+                  <kbd>⌘K</kbd>
+                </InputGroup.Button>
+              </InputGroup.Addon>
+            </InputGroup>
+          </div>
+        ) : (
+          <div className="dashboard-search-collapsed">
+            <Sidebar.Menu>
+              <Sidebar.MenuButton
+                icon={AppIcons.Search}
+                tooltip="Search"
                 onClick={focusSearch}
-                aria-label="Focus project search"
-              >
-                <kbd>⌘K</kbd>
-              </InputGroup.Button>
-            </InputGroup.Addon>
-          </InputGroup>
-        </div>
+                aria-label="Search projects"
+              />
+            </Sidebar.Menu>
+          </div>
+        )}
         <Sidebar.Group>
           <Sidebar.Menu>
             {navigation.map((item) => (
@@ -726,13 +761,11 @@ function DashboardSidebar({
                 tooltip={item.label}
                 size="base"
                 icon={
-                  item.id === 'recents' ? (
-                    <AppIcons.History size={18} />
-                  ) : item.id === 'drafts' ? (
-                    <AppIcons.File size={18} />
-                  ) : (
-                    <AppIcons.Collaborators size={18} />
-                  )
+                  item.id === 'recents'
+                    ? AppIcons.History
+                    : item.id === 'drafts'
+                      ? AppIcons.File
+                      : AppIcons.Collaborators
                 }
               >
                 {item.label}
@@ -740,6 +773,49 @@ function DashboardSidebar({
             ))}
           </Sidebar.Menu>
         </Sidebar.Group>
+        {operationalWorkspaceId ? (
+          <Sidebar.Group>
+            <Sidebar.GroupLabel>Manufacturing</Sidebar.GroupLabel>
+            <Sidebar.Menu>
+              <Sidebar.MenuButton
+                itemId="dashboard-orders"
+                href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=buyer&surface=buyer_orders`}
+                tooltip="Orders"
+                size="base"
+                icon={AppIcons.Commerce}
+              >
+                Orders
+              </Sidebar.MenuButton>
+              <Sidebar.MenuButton
+                itemId="dashboard-requests"
+                href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_requests`}
+                tooltip="Requests"
+                size="base"
+                icon={AppIcons.Activity}
+              >
+                Requests
+              </Sidebar.MenuButton>
+              <Sidebar.MenuButton
+                itemId="dashboard-provider-profile"
+                href={`/workspace/${encodeURIComponent(operationalWorkspaceId)}?perspective=provider&surface=provider_profile`}
+                tooltip="Provider profile"
+                size="base"
+                icon={AppIcons.Settings}
+              >
+                Provider profile
+              </Sidebar.MenuButton>
+              <Sidebar.MenuButton
+                itemId="dashboard-notifications"
+                tooltip="Notifications"
+                size="base"
+                icon={AppIcons.Comments}
+                onClick={() => window.dispatchEvent(new Event('attune:open-notifications'))}
+              >
+                Notifications
+              </Sidebar.MenuButton>
+            </Sidebar.Menu>
+          </Sidebar.Group>
+        ) : null}
       </Sidebar.Content>
     </Sidebar>
   );
@@ -752,6 +828,7 @@ export function DashboardLibrary({
   filter,
   canCreate,
   headerAction,
+  operationalWorkspaceId,
 }: {
   readonly files: readonly AttuneLibraryFile[];
   readonly collaboration: boolean;
@@ -759,6 +836,7 @@ export function DashboardLibrary({
   readonly filter: LibraryFilter;
   readonly canCreate: boolean;
   readonly headerAction?: ReactNode;
+  readonly operationalWorkspaceId?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -803,6 +881,7 @@ export function DashboardLibrary({
         query={query}
         onQueryChange={setQuery}
         searchRef={searchRef}
+        operationalWorkspaceId={operationalWorkspaceId}
       />
       <section className="dashboard-library" aria-label="Projects">
         <header>
@@ -852,4 +931,8 @@ export function DashboardLibrary({
       </section>
     </Sidebar.Provider>
   );
+}
+
+function LoaderSpinner() {
+  return <Loader size={16} className="dashboard-template-loader" />;
 }

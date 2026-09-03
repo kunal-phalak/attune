@@ -6,6 +6,7 @@ export function attuneActivityNotification(input: {
   readonly title: string;
   readonly description: string;
   readonly actorId?: string;
+  readonly route?: string;
 }) {
   return {
     userId: input.userId,
@@ -16,6 +17,7 @@ export function attuneActivityNotification(input: {
       title: input.title,
       description: input.description,
       workspaceId: input.workspaceId,
+      ...(input.route ? { route: input.route } : {}),
       ...(input.actorId ? { actorId: input.actorId } : {}),
     },
   };

@@ -1,4 +1,4 @@
-import { hashSpecification, type AttuneWorkspace } from '@attune/domain';
+import { hashSpecification, type AttuneWorkspace, type ProviderBinding } from '@attune/domain';
 
 import type { CapabilityAuthority } from './types';
 
@@ -8,14 +8,27 @@ function currentProvider(workspace: AttuneWorkspace) {
     providerId: profile.providerId,
     profileId: profile.profileId,
     profileVersion: profile.version,
+    ...(profile.shopify
+      ? {
+          shopDomain: profile.shopify.shopDomain,
+          shopifyLocationId: profile.shopify.locationId,
+        }
+      : {}),
   };
 }
 
 function providerMatches(
-  candidate: { readonly provider: ReturnType<typeof currentProvider> },
+  candidate: { readonly provider: ProviderBinding },
   workspace: AttuneWorkspace,
 ) {
-  return JSON.stringify(candidate.provider) === JSON.stringify(currentProvider(workspace));
+  const current = currentProvider(workspace);
+  return (
+    candidate.provider.providerId === current.providerId &&
+    candidate.provider.profileId === current.profileId &&
+    candidate.provider.profileVersion === current.profileVersion &&
+    candidate.provider.shopDomain === current.shopDomain &&
+    candidate.provider.shopifyLocationId === current.shopifyLocationId
+  );
 }
 
 export function deriveCurrentAuthority(workspace: AttuneWorkspace): CapabilityAuthority {

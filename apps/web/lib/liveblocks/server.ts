@@ -80,7 +80,7 @@ export async function liveblocksRoomPermission(
 
 export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborativeDraft {
   return {
-    intent: 'Fabricate a custom control-enclosure faceplate with four protected buyer mounts.',
+    intent: 'Create and manufacture the exact shared design revision.',
     commitmentId: workspace.commitmentId,
     fabricationQuantity: workspace.fabricationQuantity,
     geometry: structuredClone(workspace.geometry),

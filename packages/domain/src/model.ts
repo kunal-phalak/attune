@@ -12,10 +12,34 @@ export type AttuneRole = 'buyer' | 'provider' | 'reviewer';
 
 export type CapabilityLimit = number | 'ANY' | 'UNSPECIFIED';
 
+export interface ManufacturingConfiguration {
+  readonly material: PanelGeometry['material'];
+  readonly thicknessMm: number;
+  readonly finish: string;
+  readonly quantity: number;
+  readonly toleranceMm: number;
+}
+
 export interface ProviderCapabilityProfile {
   readonly profileId: string;
   readonly providerId: string;
   readonly providerName: string;
+  readonly source?: 'SHOPIFY_AND_ATTUNE' | 'DEMO';
+  readonly shopify?: {
+    readonly shopId: string;
+    readonly shopDomain: string;
+    readonly primaryDomain: string;
+    readonly locationId: string;
+    readonly locationName: string;
+    readonly address: string;
+    readonly city?: string;
+    readonly province?: string;
+    readonly country?: string;
+    readonly latitude?: number;
+    readonly longitude?: number;
+    readonly currency: string;
+    readonly verifiedAt: string;
+  };
   readonly version: string;
   readonly processes: readonly {
     readonly id: string;
@@ -52,6 +76,8 @@ export interface ProviderCapabilityProfile {
   };
   readonly supportedOperations: readonly string[] | 'ANY' | 'UNSPECIFIED';
   readonly surfaceFinish?: Readonly<Record<string, string>>;
+  readonly finishes?: readonly string[];
+  readonly leadTimeDays?: { readonly min: number; readonly max: number };
   readonly customRules: readonly {
     readonly id: string;
     readonly description: string;
@@ -64,6 +90,8 @@ export interface ProviderBinding {
   readonly providerId: string;
   readonly profileId: string;
   readonly profileVersion: string;
+  readonly shopDomain?: string;
+  readonly shopifyLocationId?: string;
 }
 
 export interface PointMm {
@@ -185,10 +213,12 @@ export interface Quote {
   readonly revisionId: string;
   readonly specHash: string;
   readonly provider: ProviderBinding;
-  readonly amountMinor: 240_000;
-  readonly currency: 'INR';
-  readonly panelCount: 4;
-  readonly commerceLotQuantity: 1;
+  readonly amountMinor: number;
+  readonly currency: string;
+  readonly panelCount: number;
+  readonly commerceLotQuantity: number;
+  readonly leadTimeDays?: number;
+  readonly validUntil?: string;
   readonly quotedAt: string;
 }
 
@@ -204,6 +234,12 @@ export interface Acceptance {
 export type DesignVisibility = 'PRIVATE' | 'DISCOVERABLE';
 
 export type ManufacturingRequestStatus =
+  | 'REQUESTED'
+  | 'UNDER_REVIEW'
+  | 'QUOTE_READY'
+  | 'QUOTE_CHANGED'
+  | 'CHECKOUT_READY'
+  | 'ORDERED'
   | 'PROVIDER_REVIEW_REQUESTED'
   | 'QUOTED'
   | 'ACCEPTED'
@@ -216,6 +252,11 @@ export interface ManufacturingRequest {
   readonly specHash: string;
   readonly provider: ProviderBinding;
   readonly visibility: DesignVisibility;
+  readonly configuration?: ManufacturingConfiguration;
+  readonly providerProfileVersion?: string;
+  readonly shopDomain?: string;
+  readonly shopifyLocationId?: string;
+  readonly buyerPrincipalId?: string;
   readonly status: ManufacturingRequestStatus;
   readonly requestedAt: string;
   readonly updatedAt: string;
@@ -230,8 +271,10 @@ export interface ExternalCommerceSnapshot {
   readonly specHash: string;
   readonly provider: ProviderBinding;
   readonly amountMinor: number;
-  readonly currency: 'INR';
-  readonly customerId: string;
+  readonly currency: string;
+  readonly customerId?: string;
+  readonly name?: string;
+  readonly invoiceUrl?: string;
   readonly updatedAt: string;
 }
 
@@ -248,14 +291,14 @@ export interface CommerceVerification {
   readonly variantId: string;
   readonly publicationId: string;
   readonly storefrontUrl: string;
-  readonly commitmentId: 'AT-1042';
-  readonly revisionId: 'r7';
+  readonly commitmentId: string;
+  readonly revisionId: string;
   readonly specHash: string;
-  readonly title: 'Custom Control Faceplate — AT-1042 r7';
-  readonly sku: 'AT-1042-R7-LOT4';
-  readonly amountMinor: 240_000;
-  readonly currency: 'INR';
-  readonly panelCount: 4;
+  readonly title: string;
+  readonly sku: string;
+  readonly amountMinor: number;
+  readonly currency: string;
+  readonly panelCount: number;
   readonly verifiedAt: string;
 }
 
@@ -268,14 +311,15 @@ export interface CommerceLink {
 }
 
 export interface AttuneWorkspace {
-  readonly scenarioVersion: 3;
-  readonly projectId: 'project:attune';
-  readonly commitmentId: 'AT-1042';
+  readonly scenarioVersion: number;
+  readonly projectId: string;
+  readonly commitmentId: string;
   readonly workspaceSeq: number;
   readonly draftVersion: number;
   readonly capabilityEpoch: number;
   readonly authorityEpoch: number;
-  readonly fabricationQuantity: 4;
+  readonly fabricationQuantity: number;
+  readonly manufacturingConfiguration?: ManufacturingConfiguration;
   readonly providerCapabilityProfile: ProviderCapabilityProfile;
   readonly geometry: PanelGeometry;
   readonly sketchDocument: SketchDocument;
@@ -302,8 +346,22 @@ export type AttuneCommand =
   | SketchCommand
   | { readonly type: 'apply_deterministic_repair'; readonly repairId: DeterministicRepair['id'] }
   | { readonly type: 'move_slot'; readonly centerX: number; readonly centerY: number }
-  | { readonly type: 'request_quote' }
-  | { readonly type: 'freeze_and_quote_revision' }
+  | {
+      readonly type: 'request_quote';
+      readonly configuration?: ManufacturingConfiguration;
+      readonly buyerPrincipalId?: string;
+    }
+  | {
+      readonly type: 'freeze_and_quote_revision';
+      readonly amountMinor?: number;
+      readonly currency?: string;
+      readonly leadTimeDays?: number;
+      readonly validUntil?: string;
+    }
+  | {
+      readonly type: 'synchronize_provider_profile';
+      readonly profile: ProviderCapabilityProfile;
+    }
   | { readonly type: 'accept_revision'; readonly revisionId: string; readonly quoteId: string }
   | {
       readonly type: 'synchronize_shopify_draft_order';

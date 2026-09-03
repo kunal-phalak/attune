@@ -1,4 +1,9 @@
-import type { CommerceVerification, FrozenRevision } from '@attune/domain';
+import type {
+  CommerceVerification,
+  FrozenRevision,
+  ManufacturingRequest,
+  Quote,
+} from '@attune/domain';
 
 import { createAdminClient } from './admin-client';
 import { configurationFromEnvironment } from './config';
@@ -12,11 +17,15 @@ import {
   verifyScopes,
 } from './verify';
 
-export async function materializeAt1042Revision(
-  revision: FrozenRevision,
-): Promise<CommerceVerification> {
+export async function materializeRevision(input: {
+  readonly commitmentId: string;
+  readonly projectName: string;
+  readonly revision: FrozenRevision;
+  readonly request: ManufacturingRequest;
+  readonly quote: Quote;
+}): Promise<CommerceVerification> {
   const configuration = configurationFromEnvironment();
-  const expected = expectation(revision);
+  const expected = expectation(input);
   const admin = await createAdminClient(configuration);
   const storefront = createStorefrontClient(configuration);
 
@@ -37,14 +46,14 @@ export async function materializeAt1042Revision(
     storefrontUrl:
       storefrontProduct.onlineStoreUrl ??
       `https://${configuration.domain}/products/${expected.handle}`,
-    commitmentId: 'AT-1042',
-    revisionId: 'r7',
-    specHash: revision.specHash,
+    commitmentId: input.commitmentId,
+    revisionId: input.revision.revisionId,
+    specHash: input.revision.specHash,
     title: expected.title,
     sku: expected.sku,
-    amountMinor: 240_000,
-    currency: 'INR',
-    panelCount: 4,
+    amountMinor: input.quote.amountMinor,
+    currency: input.quote.currency,
+    panelCount: expected.panelCount,
     verifiedAt: new Date().toISOString(),
   };
 }

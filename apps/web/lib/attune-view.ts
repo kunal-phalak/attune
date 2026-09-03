@@ -32,23 +32,47 @@ export interface AttuneApiView {
   };
   readonly product: {
     readonly workspaceId: string;
+    readonly agentToolsEnabled: boolean;
     readonly projectName: string;
     readonly fileName: string;
     readonly liveblocksRoomId: string;
   };
   readonly specHash: string;
   readonly workspace: {
-    readonly commitmentId: 'AT-1042';
+    readonly commitmentId: string;
     readonly workspaceSeq: number;
     readonly draftVersion: number;
     readonly capabilityEpoch: number;
     readonly authorityEpoch: number;
-    readonly fabricationQuantity: 4;
+    readonly fabricationQuantity: number;
+    readonly manufacturingConfiguration?: {
+      readonly material: 'acrylic' | 'aluminium';
+      readonly thicknessMm: number;
+      readonly finish: string;
+      readonly quantity: number;
+      readonly toleranceMm: number;
+    };
     readonly providerCapabilityProfile: {
       readonly profileId: string;
       readonly providerId: string;
       readonly providerName: string;
       readonly version: string;
+      readonly source?: 'SHOPIFY_AND_ATTUNE' | 'DEMO';
+      readonly shopify?: {
+        readonly shopId: string;
+        readonly shopDomain: string;
+        readonly primaryDomain: string;
+        readonly locationId: string;
+        readonly locationName: string;
+        readonly address: string;
+        readonly city?: string;
+        readonly province?: string;
+        readonly country?: string;
+        readonly latitude?: number;
+        readonly longitude?: number;
+        readonly currency: string;
+        readonly verifiedAt: string;
+      };
     };
     readonly geometry: PanelGeometry;
     readonly sketchDocument: SketchDocument;
@@ -76,6 +100,8 @@ export interface AttuneApiView {
       readonly currency: string;
       readonly panelCount: number;
       readonly commerceLotQuantity: number;
+      readonly leadTimeDays?: number;
+      readonly validUntil?: string;
     }[];
     readonly acceptances: readonly {
       readonly acceptanceId: string;
@@ -94,6 +120,12 @@ export interface AttuneApiView {
       };
       readonly visibility: 'PRIVATE' | 'DISCOVERABLE';
       readonly status:
+        | 'REQUESTED'
+        | 'UNDER_REVIEW'
+        | 'QUOTE_READY'
+        | 'QUOTE_CHANGED'
+        | 'CHECKOUT_READY'
+        | 'ORDERED'
         | 'PROVIDER_REVIEW_REQUESTED'
         | 'QUOTED'
         | 'ACCEPTED'
@@ -101,6 +133,15 @@ export interface AttuneApiView {
         | 'EXTERNAL_DRIFT';
       readonly requestedAt: string;
       readonly updatedAt: string;
+      readonly configuration?: {
+        readonly material: 'acrylic' | 'aluminium';
+        readonly thicknessMm: number;
+        readonly finish: string;
+        readonly quantity: number;
+        readonly toleranceMm: number;
+      };
+      readonly shopDomain?: string;
+      readonly shopifyLocationId?: string;
     }[];
     readonly externalCommerceRecords: readonly {
       readonly externalId: string;
@@ -111,6 +152,8 @@ export interface AttuneApiView {
       readonly specHash: string;
       readonly syncState: 'IN_SYNC' | 'EXTERNAL_DRIFT';
       readonly synchronizedAt: string;
+      readonly name?: string;
+      readonly invoiceUrl?: string;
     }[];
     readonly commerceLinks: readonly CommerceLinkView[];
   };
@@ -273,8 +316,8 @@ export interface CommerceLinkView {
     readonly variantId: string;
     readonly publicationId: string;
     readonly storefrontUrl: string;
-    readonly commitmentId: 'AT-1042';
-    readonly revisionId: 'r7';
+    readonly commitmentId: string;
+    readonly revisionId: string;
     readonly specHash: string;
     readonly title: string;
     readonly sku: string;
@@ -307,7 +350,7 @@ export function isAttuneApiView(value: unknown): value is AttuneApiView {
   return (
     typeof workspace === 'object' &&
     workspace !== null &&
-    Reflect.get(workspace, 'commitmentId') === 'AT-1042' &&
+    typeof Reflect.get(workspace, 'commitmentId') === 'string' &&
     Number.isInteger(Reflect.get(workspace, 'workspaceSeq')) &&
     typeof specHash === 'string'
   );
@@ -325,7 +368,7 @@ function isHumanSemanticMutationResponse(value: unknown): value is HumanSemantic
     typeof Reflect.get(mutation, 'specificationHash') === 'string' &&
     typeof workspace === 'object' &&
     workspace !== null &&
-    Reflect.get(workspace, 'commitmentId') === 'AT-1042'
+    typeof Reflect.get(workspace, 'commitmentId') === 'string'
   );
 }
 

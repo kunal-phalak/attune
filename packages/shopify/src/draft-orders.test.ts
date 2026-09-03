@@ -16,7 +16,16 @@ function quotedRequest() {
   ).workspace;
   const requested = transitionWorkspace(
     repaired,
-    { type: 'request_quote' },
+    {
+      type: 'request_quote',
+      configuration: {
+        material: 'acrylic',
+        thicknessMm: 5,
+        finish: 'Polished',
+        quantity: 7,
+        toleranceMm: 0.25,
+      },
+    },
     {
       commandId: 'request',
       now: NOW,
@@ -24,7 +33,13 @@ function quotedRequest() {
   ).workspace;
   return transitionWorkspace(
     requested,
-    { type: 'freeze_and_quote_revision' },
+    {
+      type: 'freeze_and_quote_revision',
+      amountMinor: 875_000,
+      currency: 'INR',
+      leadTimeDays: 12,
+      validUntil: '2026-09-30T00:00:00.000Z',
+    },
     {
       commandId: 'quote',
       now: NOW,
@@ -43,24 +58,31 @@ describe('Shopify Draft Order preparation', () => {
     );
   });
 
-  it('binds one custom lot to the exact private request, revision, hash, provider, and customer', () => {
+  it('binds one custom line item to the exact request, revision, configuration, provider, and customer', () => {
     const workspace = quotedRequest();
     const prepared = prepareDraftOrderInput({
       customerId: 'gid://shopify/Customer/1042',
+      workspaceId: 'workspace:test-design',
+      projectName: 'Test design',
       request: workspace.manufacturingRequests[0],
       quote: workspace.quotes[0],
     });
 
-    expect(prepared.purchasingEntity.customerId).toBe('gid://shopify/Customer/1042');
+    expect(prepared.purchasingEntity).toEqual({ customerId: 'gid://shopify/Customer/1042' });
     expect(prepared.lineItems).toEqual([
-      expect.objectContaining({ quantity: 1, originalUnitPrice: '2400.00' }),
+      expect.objectContaining({ quantity: 1, originalUnitPrice: '8750.00' }),
     ]);
     expect(prepared.customAttributes).toEqual(
       expect.arrayContaining([
-        { key: 'attune_spec_revision', value: 'r7' },
+        { key: 'attune_workspace_id', value: 'workspace:test-design' },
+        { key: 'attune_request_id', value: workspace.manufacturingRequests[0].requestId },
+        { key: 'attune_revision', value: 'r7' },
         { key: 'attune_spec_hash', value: workspace.quotes[0].specHash },
-        { key: 'attune_visibility', value: 'PRIVATE' },
         { key: 'attune_provider_profile_version', value: 'v1' },
+        { key: 'attune_material', value: 'acrylic' },
+        { key: 'attune_thickness', value: '5' },
+        { key: 'attune_finish', value: 'Polished' },
+        { key: 'attune_quantity', value: '7' },
       ]),
     );
   });

@@ -2,6 +2,7 @@ import {
   canCreateProjectsForUser,
   databaseConfigured,
   ensureJudgeWorkspace,
+  JUDGE_WORKSPACE_ID,
   listProjectsForLiveblocksRooms,
   listProjectsForUser,
 } from '@attune/database';
@@ -149,6 +150,7 @@ export default async function DashboardPage({
       filter={filter}
       canCreate={hasProjectCreatePermission && collaboration}
       headerAction={collaboration ? <DashboardNotifications /> : null}
+      operationalWorkspaceId={user.judge ? JUDGE_WORKSPACE_ID : undefined}
     />
   );
 }

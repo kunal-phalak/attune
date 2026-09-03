@@ -54,7 +54,7 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     description: () => 'Freeze and quote the requested specification.',
     predictedConsequences: ({ authority }) => [
       `Creates immutable ${authority.revisionId}.`,
-      'Quotes one four-panel fabrication lot at ₹2,400.',
+      'Commits the provider-entered price, lead time, and quote validity.',
     ],
     blockers: quoteBlockers,
     reason: () => 'A buyer request matches the exact current specification hash.',
@@ -74,7 +74,7 @@ export const CAPABILITY_DEFINITIONS: readonly CapabilityDefinition[] = [
     description: () => 'Materialize the accepted revision in Shopify.',
     predictedConsequences: () => [
       'Requires exact Admin, publication, and Storefront verification.',
-      'Creates one purchasable lot representing four physical panels.',
+      'Creates one purchasable lot representing the accepted manufacturing configuration.',
     ],
     blockers: commerceBlockers,
     reason: () => 'Buyer acceptance matches the current frozen revision and specification hash.',

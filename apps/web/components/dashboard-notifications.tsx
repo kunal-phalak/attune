@@ -4,45 +4,101 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Popover } from '@cloudflare/kumo/components/popover';
 import {
   LiveblocksProvider,
+  useDeleteInboxNotification,
   useInboxNotifications,
   useMarkAllInboxNotificationsAsRead,
+  useMarkInboxNotificationAsRead,
   useUnreadInboxNotificationsCount,
 } from '@liveblocks/react';
-import {
-  InboxNotification,
-  InboxNotificationList,
-  type InboxNotificationCustomKindProps,
-} from '@liveblocks/react-ui';
-import { BellIcon } from '@phosphor-icons/react';
-import { useMemo } from 'react';
+import { InboxNotification, InboxNotificationList } from '@liveblocks/react-ui';
+import { BellIcon, ChatCircleIcon, TrashIcon } from '@phosphor-icons/react';
+import { useEffect, useMemo, useState, type ComponentProps } from 'react';
 
 import { dashboardUserResolver } from '../lib/liveblocks/resolve-users';
 
 import styles from './dashboard-notifications.module.css';
 
-function AttuneActivityNotification({
-  inboxNotification,
-  ...props
-}: InboxNotificationCustomKindProps<'$attuneActivity'>) {
-  const activity = inboxNotification.activities.at(-1)?.data;
+type InboxNotificationData = ComponentProps<typeof InboxNotification>['inboxNotification'];
+
+type ActivityData = {
+  readonly title?: string;
+  readonly description?: string;
+  readonly workspaceId?: string;
+  readonly actorId?: string;
+  readonly route?: string;
+};
+
+function notificationRoute(notification: InboxNotificationData): string {
+  if (notification.kind === '$attuneActivity') {
+    const activity = notification.activities?.at(-1)?.data as ActivityData | undefined;
+    if (activity?.route) return activity.route;
+    if (activity?.workspaceId) {
+      return `/workspace/${encodeURIComponent(activity.workspaceId)}`;
+    }
+  }
+  return '/dashboard';
+}
+
+function NotificationRow({ notification }: { readonly notification: InboxNotificationData }) {
+  const markAsRead = useMarkInboxNotificationAsRead();
+  const deleteNotification = useDeleteInboxNotification();
+  const unread = !notification.readAt || notification.notifiedAt > notification.readAt;
+
+  const activity =
+    notification.kind === '$attuneActivity'
+      ? (notification.activities?.at(-1)?.data as ActivityData | undefined)
+      : undefined;
+  const title =
+    activity?.title ?? (notification.kind === 'thread' ? 'New comment' : 'Notification');
+  const description =
+    activity?.description ?? (notification.kind === 'thread' ? 'A comment was posted.' : '');
+
   return (
-    <InboxNotification.Custom
-      {...props}
-      inboxNotification={inboxNotification}
-      href={
-        activity?.workspaceId
-          ? `/workspace/${encodeURIComponent(activity.workspaceId)}`
-          : '/dashboard'
-      }
-      title={activity?.title ?? 'Attune activity'}
-      aside={
-        <InboxNotification.Icon>
-          <BellIcon size={18} />
-        </InboxNotification.Icon>
-      }
-    >
-      {activity?.description ?? 'Workspace activity was recorded.'}
-    </InboxNotification.Custom>
+    <div className="flex items-start justify-between gap-3" data-unread={unread ? '' : undefined}>
+      <a
+        href={notificationRoute(notification)}
+        className="flex items-start gap-3"
+        onClick={(event) => {
+          event.preventDefault();
+          if (unread) markAsRead(notification.id);
+          window.location.assign(notificationRoute(notification));
+        }}
+      >
+        <span
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-kumo-surface-2)] text-[var(--color-kumo-strong)]"
+          aria-hidden
+        >
+          {notification.kind === 'thread' ? <ChatCircleIcon size={18} /> : <BellIcon size={18} />}
+        </span>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-sm font-medium text-[var(--color-kumo-strong)]">
+            {title}
+          </span>
+          {description ? (
+            <span className="line-clamp-2 text-xs text-[var(--color-kumo-subtle)]">
+              {description}
+            </span>
+          ) : null}
+        </span>
+      </a>
+      <span className="flex shrink-0 items-center gap-1">
+        {unread ? (
+          <span
+            className="size-2 rounded-full bg-[var(--color-attune-conflict)]"
+            aria-label="Unread"
+          />
+        ) : null}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          shape="square"
+          icon={<TrashIcon size={16} />}
+          aria-label="Delete notification"
+          onClick={() => deleteNotification(notification.id)}
+        />
+      </span>
+    </div>
   );
 }
 
@@ -51,10 +107,17 @@ function NotificationTray() {
   const unread = useUnreadInboxNotificationsCount();
   const unreadCount = unread.count ?? 0;
   const markAllAsRead = useMarkAllInboxNotificationsAsRead();
-  const kinds = useMemo(() => ({ $attuneActivity: AttuneActivityNotification }), []);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const reveal = () => setOpen(true);
+    window.addEventListener('attune:open-notifications', reveal);
+    return () => window.removeEventListener('attune:open-notifications', reveal);
+  }, []);
+
   return (
     <div className={styles.anchor}>
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <Popover.Trigger
           render={
             <Button
@@ -77,11 +140,7 @@ function NotificationTray() {
           </div>
           <InboxNotificationList className={styles.list}>
             {(result.inboxNotifications ?? []).map((notification) => (
-              <InboxNotification
-                key={notification.id}
-                inboxNotification={notification}
-                kinds={kinds}
-              />
+              <NotificationRow key={notification.id} notification={notification} />
             ))}
           </InboxNotificationList>
           {!result.isLoading && (result.inboxNotifications?.length ?? 0) === 0 ? (

@@ -18,6 +18,7 @@ import {
   refreshAgentDelegation,
   reserveExternalMaterialization,
   revokeAgentDelegation,
+  workspaceMemberUserIds,
   type WorkspaceBundle,
   type WorkspaceIdentity,
 } from '@attune/database';
@@ -29,10 +30,15 @@ import {
   rankConstraintCandidates,
   type AttuneCommand,
   type AttuneRole,
+  type ProviderCapabilityProfile,
   type SelectionContextRequest,
 } from '@attune/domain';
 import { getPlaneGcsSolver } from '@attune/domain/planegcs';
-import { materializeAt1042Revision } from '@attune/shopify';
+import {
+  createAndVerifyDraftOrder,
+  materializeRevision,
+  ShopifyIntegrationError,
+} from '@attune/shopify';
 import { compileAgentContext, compileAgentMutationResult } from '@attune/webmcp';
 
 import {
@@ -46,7 +52,10 @@ import {
   type AgentDelegationStatus,
 } from './agent-delegation';
 import { requireWorkspaceIdentity } from './auth/session';
+import { attuneActivityNotification } from './liveblocks/notifications';
 import {
+  getLiveblocks,
+  liveblocksConfigured,
   setAgentPresence,
   snapshotCollaborativeDraft,
   syncAuthoritativeWorkspace,
@@ -155,6 +164,27 @@ async function accessForIdentity(
   let delegation = await agentDelegationForWorkspace(bundle.workspaceId, identity.principalId);
   let status = delegationStatus(delegation, bundle.workspace.authorityEpoch);
   const now = Date.now();
+  if (
+    bundle.workspaceId === JUDGE_WORKSPACE_ID &&
+    identity.roles.includes('buyer') &&
+    identity.roles.includes('provider') &&
+    (!delegation ||
+      (status.status === 'revalidation_required' &&
+        !delegation.revokedAt &&
+        Date.parse(delegation.consentExpiresAt) > now))
+  ) {
+    delegation = await issueAgentDelegation({
+      workspaceId: bundle.workspaceId,
+      principalId: identity.principalId,
+      capabilityIds,
+      authorityEpoch: bundle.workspace.authorityEpoch,
+      observationCursor: bundle.workspace.workspaceSeq,
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: leaseTimestamp(now),
+      consentExpiresAt: new Date(now + AGENT_ACCESS_CONSENT_MS).toISOString(),
+    });
+    status = delegationStatus(delegation, bundle.workspace.authorityEpoch, now);
+  }
   if (delegation && status.status === 'active' && delegationLeaseExpired(delegation, now)) {
     delegation = await refreshAgentDelegation({
       id: delegation.id,
@@ -226,6 +256,44 @@ function trustedSystemContext(workspaceId: string): TrustedExecutionContext {
     role: 'provider',
     principalId: 'integration:shopify:attune',
   };
+}
+
+function trustedShopifyReconciliationContext(workspaceId: string): TrustedExecutionContext {
+  return {
+    path: 'shopify_reconciliation',
+    workspaceId,
+    role: 'provider',
+    principalId: 'shopify:reconciliation:attune',
+  };
+}
+
+async function notifyWorkspace(input: {
+  readonly workspaceId: string;
+  readonly title: string;
+  readonly description: string;
+  readonly subjectId: string;
+  readonly route?: string;
+}): Promise<void> {
+  if (!liveblocksConfigured()) return;
+  const [bundle, userIds] = await Promise.all([
+    readWorkspaceBundle(input.workspaceId),
+    workspaceMemberUserIds(input.workspaceId),
+  ]);
+  await Promise.all(
+    userIds.map((userId) =>
+      getLiveblocks().triggerInboxNotification(
+        attuneActivityNotification({
+          userId,
+          roomId: bundle.liveblocksRoomId,
+          workspaceId: input.workspaceId,
+          subjectId: input.subjectId,
+          title: input.title,
+          description: input.description,
+          route: input.route,
+        }),
+      ),
+    ),
+  );
 }
 
 function impactMetrics(bundle: WorkspaceBundle) {
@@ -311,6 +379,7 @@ async function viewForBundle(
     observation: bundle.observation,
     product: {
       workspaceId: bundle.workspaceId,
+      agentToolsEnabled: bundle.workspaceId === JUDGE_WORKSPACE_ID,
       projectName: bundle.projectName,
       fileName: bundle.fileName,
       liveblocksRoomId: bundle.liveblocksRoomId,
@@ -568,11 +637,33 @@ export async function executeAgentCommand(
   perspective: Extract<AttuneRole, 'buyer' | 'provider'>,
   input: CommandExecutionInput,
 ) {
-  return executeWithContext(
+  const context = await trustedDelegatedContext(workspaceId, perspective, input.command.type);
+  const result = await executeWithContext(
     workspaceId,
-    input,
-    await trustedDelegatedContext(workspaceId, perspective, input.command.type),
+    input.command.type === 'request_quote'
+      ? { ...input, command: { ...input.command, buyerPrincipalId: context.principalId } }
+      : input,
+    context,
   );
+  if (input.command.type === 'request_quote') {
+    await notifyWorkspace({
+      workspaceId,
+      title: 'Request received',
+      description: 'A manufacturing request is ready for maker review.',
+      subjectId: `request:${result.workspace.manufacturingRequests.at(-1)?.requestId ?? input.envelope.commandId}`,
+      route: `/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_requests`,
+    }).catch(() => undefined);
+  }
+  if (input.command.type === 'accept_revision') {
+    await notifyWorkspace({
+      workspaceId,
+      title: 'Checkout ready',
+      description: 'The exact quoted revision was accepted and can continue to Shopify.',
+      subjectId: `acceptance:${input.command.quoteId}`,
+      route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
+    }).catch(() => undefined);
+  }
+  return result;
 }
 
 export async function executeSemanticCommand(
@@ -727,18 +818,148 @@ export async function executeHumanCommand(
   input: CommandExecutionInput,
   role: AttuneRole = 'buyer',
 ) {
-  return executeWithContext(workspaceId, input, await trustedHumanContext(workspaceId, role));
+  const context = await trustedHumanContext(workspaceId, role);
+  const result = await executeWithContext(
+    workspaceId,
+    input.command.type === 'request_quote'
+      ? { ...input, command: { ...input.command, buyerPrincipalId: context.principalId } }
+      : input,
+    context,
+  );
+  if (input.command.type === 'request_quote') {
+    await notifyWorkspace({
+      workspaceId,
+      title: 'Request received',
+      description: 'A manufacturing request is ready for maker review.',
+      subjectId: `request:${result.workspace.manufacturingRequests.at(-1)?.requestId ?? input.envelope.commandId}`,
+      route: `/workspace/${encodeURIComponent(workspaceId)}?perspective=provider&surface=provider_requests`,
+    }).catch(() => undefined);
+  }
+  if (input.command.type === 'accept_revision') {
+    await notifyWorkspace({
+      workspaceId,
+      title: 'Checkout ready',
+      description: 'The exact quoted revision was accepted and can continue to Shopify.',
+      subjectId: `acceptance:${input.command.quoteId}`,
+      route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
+    }).catch(() => undefined);
+  }
+  return result;
+}
+
+export async function synchronizeProviderProfile(
+  workspaceId: string,
+  profile: ProviderCapabilityProfile,
+) {
+  if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
+  const bundle = await readWorkspaceBundle(workspaceId);
+  const current = bundle.workspace.providerCapabilityProfile;
+  const currentIdentity = current.shopify
+    ? {
+        providerId: current.providerId,
+        profileId: current.profileId,
+        version: current.version,
+        providerName: current.providerName,
+        shopify: current.shopify,
+      }
+    : null;
+  const nextIdentity = {
+    providerId: profile.providerId,
+    profileId: profile.profileId,
+    version: profile.version,
+    providerName: profile.providerName,
+    shopify: profile.shopify,
+  };
+  if (JSON.stringify(currentIdentity) !== JSON.stringify(nextIdentity)) {
+    await executePersistedCommand({
+      workspaceId,
+      command: { type: 'synchronize_provider_profile', profile },
+      envelope: {
+        commandId: `shopify-provider-${crypto.randomUUID()}`,
+        expectedWorkspaceSeq: bundle.workspace.workspaceSeq,
+        expectedCapabilityEpoch: bundle.workspace.capabilityEpoch,
+        expectedAuthorityEpoch: bundle.workspace.authorityEpoch,
+        expectedSpecHash: hashSpecification(bundle.workspace),
+      },
+      context: trustedSystemContext(workspaceId),
+    });
+  }
+  return inspectForHuman(workspaceId);
 }
 
 export async function executeProviderCommand(workspaceId: string, input: CommandExecutionInput) {
   if (workspaceId === JUDGE_WORKSPACE_ID) await ensureJudgeWorkspace();
   const context = await trustedHumanContext(workspaceId, 'provider');
   const current = await readWorkspaceBundle(workspaceId);
-  const collaboration = await snapshotCollaborativeDraft(
-    current.liveblocksRoomId,
-    current.workspace,
-  );
-  return executeWithContext(workspaceId, input, context, collaboration.versionId);
+  let liveblocksVersionId: string | undefined;
+  try {
+    const collaboration = await snapshotCollaborativeDraft(
+      current.liveblocksRoomId,
+      current.workspace,
+    );
+    liveblocksVersionId = collaboration.versionId;
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'COLLABORATIVE_DRAFT_MISSING') {
+      throw error;
+    }
+  }
+  return executeWithContext(workspaceId, input, context, liveblocksVersionId);
+}
+
+export async function finalizeProviderQuote(workspaceId: string, input: CommandExecutionInput) {
+  if (input.command.type !== 'freeze_and_quote_revision') {
+    throw new TypeError('Provider quote finalization requires quote terms.');
+  }
+  let stage = 'quote persistence';
+  try {
+    const quotedView = await executeProviderCommand(workspaceId, input);
+    const quote = quotedView.workspace.quotes.at(-1);
+    const request = quote
+      ? quotedView.workspace.manufacturingRequests.find(
+          (candidate) =>
+            candidate.specRevision === quote.revisionId && candidate.specHash === quote.specHash,
+        )
+      : undefined;
+    if (!quote || !request) throw new Error('The finalized quote is not bound to a request.');
+    stage = 'Shopify Draft Order creation and reread';
+    const snapshot = await createAndVerifyDraftOrder({
+      workspaceId,
+      projectName: quotedView.product.projectName,
+      request,
+      quote,
+    });
+    stage = 'Draft Order reconciliation';
+    const current = await readWorkspaceBundle(workspaceId);
+    await executePersistedCommand({
+      workspaceId,
+      command: { type: 'synchronize_shopify_draft_order', snapshot },
+      envelope: {
+        commandId: `shopify-draft-order-${crypto.randomUUID()}`,
+        expectedWorkspaceSeq: current.workspace.workspaceSeq,
+        expectedCapabilityEpoch: current.workspace.capabilityEpoch,
+        expectedAuthorityEpoch: current.workspace.authorityEpoch,
+        expectedSpecHash: hashSpecification(current.workspace),
+      },
+      context: trustedShopifyReconciliationContext(workspaceId),
+    });
+    stage = 'buyer notification';
+    await notifyWorkspace({
+      workspaceId,
+      title: 'Quote ready',
+      description: `${new Intl.NumberFormat('en-IN', { style: 'currency', currency: quote.currency }).format(quote.amountMinor / 100)} · ${quote.leadTimeDays ?? '—'} day lead time`,
+      subjectId: `quote:${quote.quoteId}`,
+      route: `/workspace/${encodeURIComponent(workspaceId)}?surface=buyer_orders`,
+    }).catch(() => undefined);
+    return inspectForProvider(workspaceId);
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : 'Unknown error';
+    process.stderr.write(`[attune] Provider quote failed during ${stage}: ${detail}\n`);
+    if (error instanceof ShopifyIntegrationError) throw error;
+    throw new ShopifyIntegrationError(
+      'CONFORMANCE_FAILED',
+      `Provider quote failed during ${stage}.`,
+    );
+  }
 }
 
 export async function executeCommerceMaterialization(
@@ -770,7 +991,27 @@ export async function executeCommerceMaterialization(
     );
   }
   try {
-    const verification = await materializeAt1042Revision(reservation.revision);
+    const reservedBundle = await readWorkspaceBundle(workspaceId);
+    const reservedQuote = reservedBundle.workspace.quotes.find(
+      ({ revisionId, specHash }) =>
+        revisionId === reservation.revision.revisionId &&
+        specHash === reservation.revision.specHash,
+    );
+    const reservedRequest = reservedBundle.workspace.manufacturingRequests.find(
+      ({ specRevision, specHash }) =>
+        specRevision === reservation.revision.revisionId &&
+        specHash === reservation.revision.specHash,
+    );
+    if (!reservedQuote || !reservedRequest) {
+      throw new Error('Product materialization requires the exact quoted manufacturing request.');
+    }
+    const verification = await materializeRevision({
+      commitmentId: reservedBundle.workspace.commitmentId,
+      projectName: reservedBundle.projectName,
+      revision: reservation.revision,
+      request: reservedRequest,
+      quote: reservedQuote,
+    });
     await executePersistedCommand({
       workspaceId,
       command: { type: 'materialize_for_commerce', revisionId: input.revisionId, verification },

@@ -3,6 +3,7 @@ import { createSpokeSeedDocument } from './maker/makerjs-adapter';
 import type {
   AttuneCommand,
   AttuneWorkspace,
+  ManufacturingConfiguration,
   PanelGeometry,
   ProviderBinding,
   ProviderCapabilityProfile,
@@ -89,6 +90,7 @@ export function createJudgeProviderCapabilityProfile(): ProviderCapabilityProfil
     profileId: 'profile:attune-fabrication:laser:v1',
     providerId: 'provider:attune-fabrication',
     providerName: 'Attune Demo Fabrication',
+    source: 'DEMO',
     version: 'v1',
     processes: [
       {
@@ -119,6 +121,8 @@ export function createJudgeProviderCapabilityProfile(): ProviderCapabilityProfil
       noInvalidOverlap: true,
     },
     supportedOperations: ['outer_profile', 'through_cut', 'hole', 'slot'],
+    finishes: ['As cut', 'Brushed', 'Powder coated'],
+    leadTimeDays: { min: 5, max: 10 },
     customRules: [],
     effectiveAt: '2026-08-29T00:00:00.000Z',
   };
@@ -130,7 +134,28 @@ export function providerBinding(workspace: AttuneWorkspace): ProviderBinding {
     providerId: profile.providerId,
     profileId: profile.profileId,
     profileVersion: profile.version,
+    ...(profile.shopify
+      ? {
+          shopDomain: profile.shopify.shopDomain,
+          shopifyLocationId: profile.shopify.locationId,
+        }
+      : {}),
   };
+}
+
+function manufacturingConfiguration(workspace: AttuneWorkspace): ManufacturingConfiguration {
+  return (
+    workspace.manufacturingConfiguration ?? {
+      material: workspace.geometry.material,
+      thicknessMm: workspace.geometry.thickness,
+      finish: 'As cut',
+      quantity: workspace.fabricationQuantity,
+      toleranceMm:
+        typeof workspace.providerCapabilityProfile.toleranceMm === 'number'
+          ? workspace.providerCapabilityProfile.toleranceMm
+          : 0.2,
+    }
+  );
 }
 
 export function createAt1042Workspace(
@@ -145,6 +170,13 @@ export function createAt1042Workspace(
     capabilityEpoch: 1,
     authorityEpoch: 0,
     fabricationQuantity: 4,
+    manufacturingConfiguration: {
+      material: 'aluminium',
+      thicknessMm: 3,
+      finish: 'As cut',
+      quantity: 4,
+      toleranceMm: 0.2,
+    },
     providerCapabilityProfile: createJudgeProviderCapabilityProfile(),
     geometry: seedGeometry(),
     sketchDocument:
@@ -211,7 +243,11 @@ function mutateSketchDraft(
   );
 }
 
-function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata): AttuneWorkspace {
+function freezeAndQuote(
+  workspace: AttuneWorkspace,
+  command: Extract<AttuneCommand, { type: 'freeze_and_quote_revision' }>,
+  metadata: TransitionMetadata,
+): AttuneWorkspace {
   const specHash = hashSpecification(workspace);
   const revisionId = `r${workspace.draftVersion}`;
   const request = workspace.quoteRequests.find(
@@ -223,6 +259,15 @@ function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata
     throw new Error(
       'A current quote request is required before the provider can freeze a revision.',
     );
+  }
+  const configuration =
+    workspace.manufacturingRequests.find(({ requestId }) => requestId === request.id)
+      ?.configuration ?? manufacturingConfiguration(workspace);
+  const amountMinor = command.amountMinor ?? 240_000;
+  const currency =
+    command.currency ?? workspace.providerCapabilityProfile.shopify?.currency ?? 'INR';
+  if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+    throw new Error('A provider quote requires a positive amount in minor currency units.');
   }
 
   return advance(workspace, {
@@ -250,10 +295,12 @@ function freezeAndQuote(workspace: AttuneWorkspace, metadata: TransitionMetadata
         revisionId,
         specHash,
         provider: providerBinding(workspace),
-        amountMinor: 240_000,
-        currency: 'INR',
-        panelCount: 4,
+        amountMinor,
+        currency,
+        panelCount: configuration.quantity,
         commerceLotQuantity: 1,
+        ...(command.leadTimeDays ? { leadTimeDays: command.leadTimeDays } : {}),
+        ...(command.validUntil ? { validUntil: command.validUntil } : {}),
         quotedAt: metadata.now,
       },
     ],
@@ -411,13 +458,40 @@ export function transitionWorkspace(
         }),
         affectedEntities: ['slot:connector'],
       };
+    case 'synchronize_provider_profile':
+      return {
+        workspace: advance(workspace, { providerCapabilityProfile: command.profile }),
+        affectedEntities: [command.profile.providerId, command.profile.profileId],
+      };
     case 'request_quote': {
       const requestId = `quote-request:${metadata.commandId}`;
-      const specRevision = `r${workspace.draftVersion}`;
-      const specHash = hashSpecification(workspace);
-      const provider = providerBinding(workspace);
+      const configuration = command.configuration ?? manufacturingConfiguration(workspace);
+      if (
+        !Number.isSafeInteger(configuration.quantity) ||
+        configuration.quantity <= 0 ||
+        configuration.thicknessMm <= 0 ||
+        configuration.toleranceMm <= 0
+      ) {
+        throw new Error('Manufacturing configuration values must be positive.');
+      }
+      const configured = {
+        ...workspace,
+        fabricationQuantity: configuration.quantity,
+        manufacturingConfiguration: configuration,
+        geometry: {
+          ...workspace.geometry,
+          material: configuration.material,
+          thickness: configuration.thicknessMm,
+        },
+      };
+      if (!validateGeometry(configured.geometry, configured.providerCapabilityProfile).valid) {
+        throw new Error('The selected manufacturing configuration is not compatible.');
+      }
+      const specRevision = `r${configured.draftVersion}`;
+      const specHash = hashSpecification(configured);
+      const provider = providerBinding(configured);
       return {
-        workspace: advance(workspace, {
+        workspace: advance(configured, {
           quoteRequests: [
             ...workspace.quoteRequests,
             {
@@ -438,6 +512,13 @@ export function transitionWorkspace(
               provider,
               visibility: 'PRIVATE',
               status: 'PROVIDER_REVIEW_REQUESTED',
+              configuration,
+              providerProfileVersion: provider.profileVersion,
+              ...(provider.shopDomain ? { shopDomain: provider.shopDomain } : {}),
+              ...(provider.shopifyLocationId
+                ? { shopifyLocationId: provider.shopifyLocationId }
+                : {}),
+              ...(command.buyerPrincipalId ? { buyerPrincipalId: command.buyerPrincipalId } : {}),
               requestedAt: metadata.now,
               updatedAt: metadata.now,
             },
@@ -448,7 +529,7 @@ export function transitionWorkspace(
     }
     case 'freeze_and_quote_revision':
       return {
-        workspace: freezeAndQuote(workspace, metadata),
+        workspace: freezeAndQuote(workspace, command, metadata),
         affectedEntities: [`revision:r${workspace.draftVersion}`, 'quote:current'],
       };
     case 'accept_revision':

@@ -67,6 +67,13 @@ function requiredNumber(value: unknown, name: string): number {
   return value;
 }
 
+function requiredText(value: unknown, name: string, maximum = 120): string {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > maximum) {
+    throw new TypeError(`${name} must be a non-empty string no longer than ${maximum} characters.`);
+  }
+  return value.trim();
+}
+
 function optionalInteger(value: unknown, name: string): number | undefined {
   return value === undefined ? undefined : requiredInteger(value, name);
 }
@@ -110,12 +117,57 @@ function parseMoveCommand(value: Record<string, unknown>): AttuneCommand {
   };
 }
 
-function parseEmptyCommand(
-  value: Record<string, unknown>,
-  type: 'request_quote' | 'freeze_and_quote_revision',
-): AttuneCommand {
-  assertExactKeys(value, ['type'], `${type} command`);
-  return { type };
+function parseManufacturingConfiguration(value: unknown) {
+  if (!isObject(value)) throw new TypeError('configuration must be an object.');
+  assertExactKeys(
+    value,
+    ['material', 'thicknessMm', 'finish', 'quantity', 'toleranceMm'],
+    'manufacturing configuration',
+  );
+  if (value.material !== 'aluminium' && value.material !== 'acrylic') {
+    throw new TypeError('configuration.material must be aluminium or acrylic.');
+  }
+  const quantity = requiredInteger(value.quantity, 'configuration.quantity');
+  const thicknessMm = requiredNumber(value.thicknessMm, 'configuration.thicknessMm');
+  const toleranceMm = requiredNumber(value.toleranceMm, 'configuration.toleranceMm');
+  if (quantity < 1 || quantity > 10_000 || thicknessMm <= 0 || toleranceMm <= 0) {
+    throw new TypeError('Manufacturing dimensions and quantity must be positive.');
+  }
+  return {
+    material: value.material,
+    thicknessMm,
+    finish: requiredText(value.finish, 'configuration.finish', 80),
+    quantity,
+    toleranceMm,
+  } as const;
+}
+
+function parseRequestQuoteCommand(value: Record<string, unknown>): AttuneCommand {
+  assertExactKeys(value, ['type', 'configuration'], 'request_quote command');
+  return {
+    type: 'request_quote',
+    ...(value.configuration
+      ? { configuration: parseManufacturingConfiguration(value.configuration) }
+      : {}),
+  };
+}
+
+function parseFinalizeQuoteCommand(value: Record<string, unknown>): AttuneCommand {
+  assertExactKeys(
+    value,
+    ['type', 'amountMinor', 'currency', 'leadTimeDays', 'validUntil'],
+    'freeze_and_quote_revision command',
+  );
+  const amountMinor = requiredInteger(value.amountMinor, 'amountMinor');
+  const leadTimeDays = requiredInteger(value.leadTimeDays, 'leadTimeDays');
+  const currency = requiredText(value.currency, 'currency', 3).toUpperCase();
+  const validUntil = requiredText(value.validUntil, 'validUntil', 40);
+  if (amountMinor < 1 || leadTimeDays < 1 || leadTimeDays > 365 || !/^[A-Z]{3}$/.test(currency)) {
+    throw new TypeError('Quote terms are invalid.');
+  }
+  if (!Number.isFinite(Date.parse(validUntil)))
+    throw new TypeError('validUntil must be an ISO date.');
+  return { type: 'freeze_and_quote_revision', amountMinor, currency, leadTimeDays, validUntil };
 }
 
 function parseAcceptanceCommand(value: Record<string, unknown>): AttuneCommand {
@@ -141,9 +193,9 @@ function parseCommand(value: unknown, allowedTypes: ReadonlySet<AttuneCommandTyp
     case 'move_slot':
       return parseMoveCommand(value);
     case 'request_quote':
-      return parseEmptyCommand(value, type);
+      return parseRequestQuoteCommand(value);
     case 'freeze_and_quote_revision':
-      return parseEmptyCommand(value, type);
+      return parseFinalizeQuoteCommand(value);
     case 'accept_revision':
       return parseAcceptanceCommand(value);
     default:

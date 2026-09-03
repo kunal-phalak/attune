@@ -1,22 +1,22 @@
-# Shopify Connectivity Spike Checklist
-
-Do not begin Neon, Kumo, judge-session, or editor work until every item is verified on
-the final development store.
+# Shopify operational checklist
 
 - [x] Development store and Dev Dashboard app belong to the same organization.
-- [x] Liquid storefront is active and password protected.
 - [x] Client-credentials grant succeeds.
-- [x] App has the required product and publication scopes.
-- [x] App has `read_locations` for deterministic inventory-location discovery.
-- [ ] App has `read_inventory` for location-level inventory verification.
+- [x] Connected shop identity can be read.
+- [x] Active locations can be read and selected without a hard-coded location ID.
+- [x] App has `write_draft_orders` for the quote-to-invoice path.
+- [x] App capability boundaries are reported independently.
+- [ ] Buyer submits a configured request for the exact current specification hash.
+- [ ] Maker enters price and lead time and freezes that exact revision.
+- [ ] Shopify creates a real Draft Order with one custom fabrication line item.
+- [ ] Admin reread proves money, currency, revision, hash, provider, location, and configuration.
+- [ ] Buyer accepts the same immutable revision and opens the Shopify invoice checkout.
+- [ ] Screenshots record buyer request, maker quote, buyer acceptance, and Shopify invoice.
+
+## Optional Online Store product path
+
+- [x] Liquid storefront is active and password protected.
 - [x] Online Store publication ID is confirmed.
 - [x] Attune metafield definitions are Storefront-readable.
-- [ ] Current inventory-aware `pnpm shopify:spike` completes and writes redacted evidence.
-- [x] Storefront password works in a WebMCP-enabled browser.
-- [x] The generated product is visible after password entry.
-- [x] Shopify-native `get_product` returns the visible product.
-- [ ] Shopify-native `update_cart` adds quantity one.
-- [ ] Visible cart shows one ₹2,400 lot representing four panels.
-- [x] Product-page screenshot is captured.
-- [ ] Cart screenshot is captured.
-- [ ] Browser, timestamp, theme, and API versions are recorded.
+- [ ] Product, publication, inventory, and Storefront verification all pass for the current quote.
+- [ ] Shopify-native browser WebMCP reads the visible product when this optional path is shown.

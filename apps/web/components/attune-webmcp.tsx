@@ -67,6 +67,7 @@ export function AttuneWebMcp({
   );
   const availableTools = useMemo(() => toolNamesForCapabilities(capabilityIds), [capabilityIds]);
   const workspaceReady = view !== null;
+  const toolsEnabled = view?.product.agentToolsEnabled === true;
 
   useEffect(() => {
     void refresh().catch(() => setRegistration('failed'));
@@ -88,6 +89,10 @@ export function AttuneWebMcp({
       return undefined;
     }
     if (!workspaceReady) return undefined;
+    if (!toolsEnabled) {
+      setRegistration('unsupported');
+      return undefined;
+    }
     const lifecycle = new AbortController();
     const runtime = createToolRuntime({
       workspaceId,
@@ -102,7 +107,7 @@ export function AttuneWebMcp({
       () => setRegistration('failed'),
     );
     return () => lifecycle.abort();
-  }, [capabilityIds, updateView, workspaceId, workspaceReady]);
+  }, [capabilityIds, toolsEnabled, updateView, workspaceId, workspaceReady]);
 
   useEffect(() => {
     onStatus?.({
@@ -155,7 +160,7 @@ export function AttuneWebMcp({
           positionMethod="fixed"
           className="workspace-agent-popover"
         >
-          <Popover.Title>Agent access</Popover.Title>
+          <Popover.Title className="workspace-agent-popover-title">Agent access</Popover.Title>
           <p>
             {delegation?.status === 'revalidation_required'
               ? 'Workspace authority changed. Revalidate access before the agent mutates the design.'
@@ -163,18 +168,21 @@ export function AttuneWebMcp({
                 ? 'Short-lived browser-agent delegation is active for your current workspace authority.'
                 : 'Enable a short-lived browser-agent delegation for capabilities you already possess.'}
           </p>
-          <Button
-            type="button"
-            variant={enabled ? 'secondary' : 'primary'}
-            size="sm"
-            onClick={() => void updateAgentAccess()}
-          >
-            {enabled
-              ? 'Disable agent'
-              : delegation?.status === 'revalidation_required'
-                ? 'Revalidate agent'
-                : 'Enable agent'}
-          </Button>
+          <div className="workspace-agent-popover-footer">
+            <Button
+              type="button"
+              variant={enabled ? 'secondary' : 'primary'}
+              size="sm"
+              className="workspace-agent-popover-action"
+              onClick={() => void updateAgentAccess()}
+            >
+              {enabled
+                ? 'Disable agent'
+                : delegation?.status === 'revalidation_required'
+                  ? 'Revalidate agent'
+                  : 'Enable agent'}
+            </Button>
+          </div>
         </Popover.Content>
       </Popover>
       <output className="visually-hidden" aria-live="polite">

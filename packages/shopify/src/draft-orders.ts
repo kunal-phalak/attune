@@ -40,7 +40,7 @@ export const DRAFT_ORDER_REREAD = `#graphql
   }
 `;
 
-export const DRAFT_ORDER_TARGET_SCOPES = ['write_draft_orders', 'read_customers'] as const;
+export const DRAFT_ORDER_TARGET_SCOPES = ['write_draft_orders'] as const;
 export const DRAFT_ORDER_WEBHOOK_TOPICS = [
   'draft_orders/create',
   'draft_orders/update',
@@ -48,29 +48,36 @@ export const DRAFT_ORDER_WEBHOOK_TOPICS = [
 ] as const;
 
 export interface DraftOrderPreparation {
-  readonly customerId: string;
+  readonly customerId?: string;
+  readonly workspaceId?: string;
+  readonly projectName?: string;
   readonly request: ManufacturingRequest;
   readonly quote: Quote;
 }
 
 function attributes(input: DraftOrderPreparation) {
-  const { provider, requestId, specHash, specRevision, visibility } = input.request;
+  const request = input.request;
+  const { provider, requestId, specHash, specRevision } = request;
+  const configuration = request.configuration;
   return [
-    { key: 'attune_commitment_id', value: 'AT-1042' },
+    { key: 'attune_workspace_id', value: input.workspaceId ?? 'legacy-fixture' },
     { key: 'attune_request_id', value: requestId },
-    { key: 'attune_spec_revision', value: specRevision },
+    { key: 'attune_revision', value: specRevision },
     { key: 'attune_spec_hash', value: specHash },
     { key: 'attune_provider_id', value: provider.providerId },
-    { key: 'attune_provider_profile_id', value: provider.profileId },
     { key: 'attune_provider_profile_version', value: provider.profileVersion },
-    { key: 'attune_visibility', value: visibility },
+    { key: 'attune_shopify_location_id', value: request.shopifyLocationId ?? '' },
+    { key: 'attune_material', value: configuration?.material ?? '' },
+    { key: 'attune_thickness', value: String(configuration?.thicknessMm ?? '') },
+    { key: 'attune_finish', value: configuration?.finish ?? '' },
+    { key: 'attune_quantity', value: String(configuration?.quantity ?? input.quote.panelCount) },
   ];
 }
 
 export function prepareDraftOrderInput(input: DraftOrderPreparation) {
   const { quote, request } = input;
   const exact =
-    request.status === 'QUOTED' &&
+    (request.status === 'QUOTED' || request.status === 'QUOTE_READY') &&
     quote.revisionId === request.specRevision &&
     quote.specHash === request.specHash &&
     JSON.stringify(quote.provider) === JSON.stringify(request.provider);
@@ -82,13 +89,13 @@ export function prepareDraftOrderInput(input: DraftOrderPreparation) {
   }
 
   return {
-    purchasingEntity: { customerId: input.customerId },
+    ...(input.customerId ? { purchasingEntity: { customerId: input.customerId } } : {}),
     note: `Attune ${request.requestId} · ${request.specRevision}`,
     tags: ['attune', 'custom-manufacturing', request.specRevision],
     customAttributes: attributes(input),
     lineItems: [
       {
-        title: `Custom control faceplate — ${request.specRevision} · lot of 4`,
+        title: `Custom fabrication — ${input.projectName ?? 'Attune design'} — ${request.specRevision}`,
         quantity: 1,
         originalUnitPrice: (quote.amountMinor / 100).toFixed(2),
         customAttributes: attributes(input),

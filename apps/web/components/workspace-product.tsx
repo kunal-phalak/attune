@@ -57,6 +57,11 @@ import { sketchSnapshotFromDocument } from '../lib/sketch/versions';
 import { viewportInsetsFor } from '../lib/sketch/viewport-insets';
 import { isAttuneCollaborativeDraft, type AttuneCollaborativeDraft } from '../liveblocks.config';
 import { AttuneWebMcp } from './attune-webmcp';
+import {
+  FindMakersButton,
+  ManufacturingFlow,
+  type ManufacturingSurface,
+} from './manufacturing-flow';
 import { AppIcons } from './ui/app-icons';
 import { AttuneBrandmark } from './ui/attune-brandmark';
 import { Kbd } from './ui/kbd';
@@ -155,6 +160,7 @@ function ToolButton({
   disabled,
   icon,
   onClick,
+  side = 'right',
 }: {
   readonly label: string;
   readonly keybind?: string;
@@ -163,6 +169,7 @@ function ToolButton({
   readonly disabled?: boolean;
   readonly icon: ReactNode;
   readonly onClick: () => void;
+  readonly side?: 'top' | 'right' | 'bottom' | 'left';
 }) {
   const control = (
     <Toolbar.Button
@@ -181,7 +188,11 @@ function ToolButton({
     </Toolbar.Button>
   );
   return (
-    <Tooltip content={keybind && !showLabel ? `${label} (${keybind})` : label} render={control} />
+    <Tooltip
+      side={side}
+      content={keybind && !showLabel ? `${label} (${keybind})` : label}
+      render={control}
+    />
   );
 }
 
@@ -213,7 +224,7 @@ function WorkspaceTools({
       >
         <ToolButton
           label="Select"
-          keybind="/"
+          keybind="V"
           showLabel={showLabels}
           active={panels.leftPanel !== 'comments' && canvasTool === 'select'}
           icon={<AppIcons.Select size={20} weight="regular" />}
@@ -273,6 +284,7 @@ function WorkspaceTools({
           active={panels.rightPanel === 'history'}
           icon={<AppIcons.History size={20} weight="regular" />}
           onClick={() => onPanel('history')}
+          side="left"
         />
       </Toolbar>
       <Toolbar
@@ -425,8 +437,10 @@ function WorkspaceShell({
   canComment = canEdit,
   perspective,
   actorName,
+  actorId,
   projectName,
   initialView,
+  initialSurface = 'design',
   collaborativeDraft,
   remoteSelections = EMPTY_COLLABORATOR_SELECTIONS,
   onSaveVersion,
@@ -438,8 +452,10 @@ function WorkspaceShell({
   readonly canComment?: boolean;
   readonly perspective: Extract<CapabilityRole, 'buyer' | 'provider'>;
   readonly actorName: string;
+  readonly actorId: string;
   readonly projectName: string;
   readonly initialView: AttuneApiView;
+  readonly initialSurface?: ManufacturingSurface;
   readonly collaborativeDraft?: AttuneCollaborativeDraft | null;
   readonly remoteSelections?: readonly {
     readonly color: readonly [number, number, number];
@@ -448,6 +464,8 @@ function WorkspaceShell({
   readonly onSaveVersion?: () => Promise<void>;
 }) {
   const [view, setView] = useState<AttuneApiView | null>(initialView);
+  const [manufacturingSurface, setManufacturingSurface] =
+    useState<ManufacturingSurface>(initialSurface);
   const [canvasTool, setCanvasTool] = useState<CanvasTool>('select');
   const [constraintTool, setConstraintTool] = useState<ConstraintTool | null>(null);
   const [selection, setSelection] = useState<SelectionSet>(EMPTY_SELECTION_SET);
@@ -464,6 +482,7 @@ function WorkspaceShell({
       readonly workspaceSeq: number;
       readonly label: string;
       readonly actor: string;
+      readonly actorId: string;
       readonly createdAt: string;
     }[]
   >([]);
@@ -471,6 +490,12 @@ function WorkspaceShell({
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   viewRef.current = view;
+
+  const setAuthoritativeView = useCallback((next: AttuneApiView) => {
+    viewRef.current = next;
+    setView(next);
+    window.dispatchEvent(new CustomEvent('attune:workspace-changed', { detail: next }));
+  }, []);
 
   useEffect(() => {
     if (!collaborativeDraft) return;
@@ -570,6 +595,7 @@ function WorkspaceShell({
             workspaceSeq: applied.mutation.workspaceSequence,
             label: historyLabel,
             actor: actorName,
+            actorId,
             createdAt: new Date().toISOString(),
           },
           ...events.filter(
@@ -586,7 +612,7 @@ function WorkspaceShell({
       );
       return pending;
     },
-    [actorName, workspaceId],
+    [actorName, actorId, workspaceId],
   );
 
   const receiptSequences = new Set(view?.records.receipts.map(({ workspaceSeq }) => workspaceSeq));
@@ -599,6 +625,7 @@ function WorkspaceShell({
         workspaceSeq: receipt.workspaceSeq,
         label: receiptHistoryLabel(receipt.command),
         actor: receipt.origin === 'webmcp' ? 'Agent' : actorName,
+        actorId: receipt.origin === 'webmcp' ? 'agent' : actorId,
         createdAt: receipt.createdAt,
       })),
   ].toSorted(
@@ -674,6 +701,7 @@ function WorkspaceShell({
           agentControl={
             canEdit ? (
               <>
+                <FindMakersButton onClick={() => setManufacturingSurface('marketplace')} />
                 {collaboration && roomId ? <WorkspaceShareDialog roomId={roomId} /> : null}
                 <AttuneWebMcp
                   workspaceId={workspaceId}
@@ -684,6 +712,16 @@ function WorkspaceShell({
             ) : null
           }
         />
+        {view ? (
+          <ManufacturingFlow
+            workspaceId={workspaceId}
+            perspective={perspective}
+            surface={manufacturingSurface}
+            view={view}
+            onSurface={setManufacturingSurface}
+            onView={setAuthoritativeView}
+          />
+        ) : null}
         {versionPreview ? (
           <output className="workspace-version-preview">
             <span>
@@ -732,22 +770,26 @@ function WorkspaceShell({
           onProfileFillChange={setProfileFill}
         />
         <ItemsPanel
+          key={panels.leftPanel === 'items' ? 'items' : `items-${panelWidths.left}`}
           open={panels.leftPanel === 'items'}
           document={view?.workspace.sketchDocument ?? null}
           selection={selection}
           onSelectionChange={setSelection}
           onCommand={perspective === 'buyer' && canEdit ? applySketchCommand : undefined}
           onClose={closeLeftPanel}
+          defaultWidth={panelWidths.left}
           onWidthChange={(left) => setPanelWidths((current) => ({ ...current, left }))}
         />
         {collaboration ? (
           <LiveCommentsRail
+            key={panels.leftPanel === 'comments' ? 'comments' : `comments-${panelWidths.left}`}
             open={panels.leftPanel === 'comments'}
             workspaceId={workspaceId}
             canComment={canComment}
             placingComment={placingComment}
             onPlaceComment={() => setPlacingComment(true)}
             onClose={closeLeftPanel}
+            defaultWidth={panelWidths.left}
             onWidthChange={(left) => setPanelWidths((current) => ({ ...current, left }))}
           />
         ) : null}
@@ -755,6 +797,7 @@ function WorkspaceShell({
           open={panels.rightPanel === 'history'}
           events={historyEvents}
           onClose={closeRightPanel}
+          defaultWidth={panelWidths.right}
           onWidthChange={(right) => setPanelWidths((current) => ({ ...current, right }))}
         />
       </main>
@@ -832,6 +875,7 @@ export function WorkspaceProduct({
   actor,
   projectName,
   initialView,
+  initialSurface = 'design',
 }: {
   readonly workspaceId: string;
   readonly roomId: string;
@@ -840,6 +884,7 @@ export function WorkspaceProduct({
   readonly actor: { readonly id: string; readonly name: string; readonly role: CapabilityRole };
   readonly projectName: string;
   readonly initialView: AttuneApiView;
+  readonly initialSurface?: ManufacturingSurface;
 }) {
   const resolver = useMemo(() => workspaceUserResolver(roomId), [roomId]);
   if (!collaboration) {
@@ -849,8 +894,10 @@ export function WorkspaceProduct({
         collaboration={false}
         perspective={perspective}
         actorName={actor.name}
+        actorId={actor.id}
         projectName={projectName}
         initialView={initialView}
+        initialSurface={initialSurface}
       />
     );
   }
@@ -871,8 +918,10 @@ export function WorkspaceProduct({
           workspaceId={workspaceId}
           perspective={perspective}
           actorName={actor.name}
+          actorId={actor.id}
           projectName={projectName}
           initialView={initialView}
+          initialSurface={initialSurface}
         />
       </RoomProvider>
     </LiveblocksProvider>

@@ -149,9 +149,13 @@ describe('native model-context registration contract', () => {
     expect(context.getTools()).toEqual([
       'check_design',
       'constrain_geometry',
+      'continue_to_shopify',
+      'find_makers',
       'forecast_change',
       'inspect_context',
+      'inspect_manufacturing_order',
       'modify_geometry',
+      'open_attune_surface',
     ]);
     expect(registrationSignals.every((signal) => signal === registration.signal)).toBe(true);
 

@@ -4,6 +4,25 @@ export const VERIFY_SCOPES = `#graphql
   }
 `;
 
+export const INSPECT_PROVIDER = `#graphql
+  query InspectAttuneProvider {
+    currentAppInstallation { accessScopes { handle } }
+    shop {
+      id name myshopifyDomain currencyCode
+      primaryDomain { host url }
+    }
+    locations(first: 50) {
+      nodes {
+        id name isActive fulfillsOnlineOrders
+        address {
+          formatted address1 address2 city province provinceCode
+          country countryCode zip latitude longitude
+        }
+      }
+    }
+  }
+`;
+
 export const RESOLVE_LOCATION = `#graphql
   query ResolveAttuneLocation {
     locations(first: 20) {

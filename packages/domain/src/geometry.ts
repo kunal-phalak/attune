@@ -236,6 +236,7 @@ export function hashSpecification(
   return hashCanonical({
     commitmentId: workspace.commitmentId,
     fabricationQuantity: workspace.fabricationQuantity,
+    manufacturingConfiguration: Reflect.get(workspace, 'manufacturingConfiguration') ?? null,
     geometry: workspace.geometry,
     sketchDocument: sketchSpecification(workspace.sketchDocument),
   });

@@ -294,6 +294,41 @@ describe('server-issued WebMCP delegation', () => {
 });
 
 describe('manufacturing request and Shopify synchronization contract', () => {
+  it('recognizes a request bound to a connected Shopify provider identity', () => {
+    const workspace = createAt1042Workspace();
+    const bus = new AttuneCommandBus(
+      {
+        ...workspace,
+        providerCapabilityProfile: {
+          ...workspace.providerCapabilityProfile,
+          providerId: 'provider:shopify:80716136484',
+          profileId: 'profile:80716136484:103785725988',
+          source: 'SHOPIFY_AND_ATTUNE',
+          shopify: {
+            shopId: 'gid://shopify/Shop/80716136484',
+            shopDomain: 'attune-webmcp-challenge.myshopify.com',
+            primaryDomain: 'attune-webmcp-challenge.myshopify.com',
+            locationId: 'gid://shopify/Location/103785725988',
+            locationName: 'Shop location',
+            address: 'Bengaluru, India',
+            currency: 'INR',
+            verifiedAt: FIXED_TIME,
+          },
+        },
+      },
+      () => FIXED_TIME,
+    );
+
+    bus.execute(
+      { type: 'apply_deterministic_repair', repairId: 'move_slot_left_to_clearance' },
+      envelope(bus, 'repair-shopify-provider'),
+      buyer,
+    );
+    bus.execute({ type: 'request_quote' }, envelope(bus, 'request-shopify-provider'), buyer);
+
+    expect(compiledIds(bus, 'provider')).toContain('freeze_and_quote_revision');
+  });
+
   it('binds a private request and quote to the exact provider profile', () => {
     const bus = new AttuneCommandBus(createAt1042Workspace(), () => FIXED_TIME);
     runThroughAcceptance(bus);

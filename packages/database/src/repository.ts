@@ -216,6 +216,16 @@ function workspaceWithCurrentContract(workspace: AttuneWorkspace): AttuneWorkspa
     authorityEpoch: workspace.authorityEpoch ?? 0,
     providerCapabilityProfile:
       workspace.providerCapabilityProfile ?? createJudgeProviderCapabilityProfile(),
+    manufacturingConfiguration: workspace.manufacturingConfiguration ?? {
+      material: storedGeometry.material,
+      thicknessMm: storedGeometry.thickness,
+      finish: 'As cut',
+      quantity: workspace.fabricationQuantity,
+      toleranceMm:
+        typeof workspace.providerCapabilityProfile?.toleranceMm === 'number'
+          ? workspace.providerCapabilityProfile.toleranceMm
+          : 0.2,
+    },
     geometry: {
       ...storedGeometry,
       rectangularCutouts: storedGeometry.rectangularCutouts ?? [],
@@ -291,6 +301,23 @@ async function persistDomainRecords(
   workspace: AttuneWorkspace,
   liveblocksVersionId?: string,
 ) {
+  await transaction
+    .insert(providerCapabilityProfiles)
+    .values({
+      profileId: workspace.providerCapabilityProfile.profileId,
+      providerId: workspace.providerCapabilityProfile.providerId,
+      version: workspace.providerCapabilityProfile.version,
+      profile: workspace.providerCapabilityProfile,
+      effectiveAt: workspace.providerCapabilityProfile.effectiveAt,
+    })
+    .onConflictDoUpdate({
+      target: [providerCapabilityProfiles.profileId, providerCapabilityProfiles.version],
+      set: {
+        providerId: workspace.providerCapabilityProfile.providerId,
+        profile: workspace.providerCapabilityProfile,
+        effectiveAt: workspace.providerCapabilityProfile.effectiveAt,
+      },
+    });
   if (workspace.manufacturingRequests.length > 0) {
     await Promise.all(
       workspace.manufacturingRequests.map((request) =>
@@ -768,10 +795,25 @@ export async function advanceDelegationObservation(
 export async function resetJudgeWorkspace(): Promise<void> {
   await ensureJudgeWorkspace();
   const database = getDatabase();
-  const initial = createAt1042Workspace();
   const now = new Date().toISOString();
 
   await database.transaction(async (transaction) => {
+    const rows = await transaction
+      .select({ workspace: workspaces.currentSpecification })
+      .from(workspaces)
+      .where(eq(workspaces.id, JUDGE_WORKSPACE_ID))
+      .for('update')
+      .limit(1);
+    const current = rows[0]?.workspace;
+    const seed = createAt1042Workspace();
+    const initial = current
+      ? {
+          ...seed,
+          providerCapabilityProfile:
+            current.providerCapabilityProfile ?? seed.providerCapabilityProfile,
+          authorityEpoch: (current.authorityEpoch ?? 0) + 1,
+        }
+      : seed;
     await clearWorkspaceRecords(transaction, JUDGE_WORKSPACE_ID);
     await transaction
       .update(workspaces)

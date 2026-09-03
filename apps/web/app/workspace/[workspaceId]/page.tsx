@@ -9,12 +9,25 @@ import {
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 
+import type { ManufacturingSurface } from '../../../components/manufacturing-flow';
 import { WorkspaceProduct } from '../../../components/workspace-product';
 import { viewForTrustedBundle } from '../../../lib/attune-runtime';
 import { currentAttuneUser } from '../../../lib/auth/session';
 import { liveblocksConfigured, liveblocksRoomPermission } from '../../../lib/liveblocks/server';
 
 export const dynamic = 'force-dynamic';
+
+function manufacturingSurface(value: string | undefined): ManufacturingSurface {
+  if (
+    value === 'marketplace' ||
+    value === 'buyer_orders' ||
+    value === 'provider_requests' ||
+    value === 'provider_profile'
+  ) {
+    return value;
+  }
+  return 'design';
+}
 
 function PersistenceGate() {
   return (
@@ -39,7 +52,7 @@ export default async function WorkspacePage({
   searchParams,
 }: {
   readonly params: Promise<{ readonly workspaceId: string }>;
-  readonly searchParams: Promise<{ readonly perspective?: string }>;
+  readonly searchParams: Promise<{ readonly perspective?: string; readonly surface?: string }>;
 }) {
   if (!databaseConfigured()) return <PersistenceGate />;
   const user = await currentAttuneUser();
@@ -66,11 +79,13 @@ export default async function WorkspacePage({
     };
   }
   if (!identity) notFound();
-  const requestedPerspective = (await searchParams).perspective;
+  const parameters = await searchParams;
+  const requestedPerspective = parameters.perspective;
   const perspective = requestedPerspective === 'provider' ? 'provider' : 'buyer';
   if (requestedPerspective === 'provider' && !identity.roles.includes('provider')) notFound();
   const bundle = await readWorkspaceBundle(workspaceId);
   const initialView = await viewForTrustedBundle(bundle, perspective, identity);
+  const initialSurface = manufacturingSurface(parameters.surface);
   return (
     <WorkspaceProduct
       workspaceId={workspaceId}
@@ -79,6 +94,7 @@ export default async function WorkspacePage({
       perspective={perspective}
       projectName={bundle.projectName}
       initialView={initialView}
+      initialSurface={initialSurface}
       actor={{
         id: user.userId,
         name: user.displayName,

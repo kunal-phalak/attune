@@ -2,8 +2,8 @@ import type { AttuneRole, PanelGeometry, SketchDocument } from '@attune/domain';
 
 export interface AttuneCollaborativeDraft {
   readonly intent: string;
-  readonly commitmentId: 'AT-1042';
-  readonly fabricationQuantity: 4;
+  readonly commitmentId: string;
+  readonly fabricationQuantity: number;
   readonly geometry: PanelGeometry;
   readonly sketchDocument: SketchDocument;
   readonly draftVersion: number;
@@ -21,8 +21,8 @@ export function isAttuneCollaborativeDraft(value: unknown): value is AttuneColla
   if (typeof value !== 'object' || value === null) return false;
   const geometry = Reflect.get(value, 'geometry');
   return (
-    Reflect.get(value, 'commitmentId') === 'AT-1042' &&
-    Reflect.get(value, 'fabricationQuantity') === 4 &&
+    typeof Reflect.get(value, 'commitmentId') === 'string' &&
+    Number.isInteger(Reflect.get(value, 'fabricationQuantity')) &&
     Number.isInteger(Reflect.get(value, 'draftVersion')) &&
     Number.isInteger(Reflect.get(value, 'workspaceSeq')) &&
     Number.isInteger(Reflect.get(value, 'capabilityEpoch')) &&
@@ -81,6 +81,7 @@ declare global {
         description: string;
         workspaceId: string;
         actorId?: string;
+        route?: string;
       };
     };
   }

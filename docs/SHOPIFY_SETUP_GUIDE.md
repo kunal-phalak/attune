@@ -67,16 +67,20 @@ Dev stores remain password-protected. See Shopify's
 5. Use the deployed Attune HTTPS URL as the app URL when available. Until then, Shopify
    permits `https://shopify.dev/apps/default-app-home` for a non-embedded API-only app.
 6. Select these required scopes:
+   - `write_draft_orders`
    - `write_products`
    - `write_publications`
    - `read_locations`
    - `read_inventory`
+   - `read_customers`
    - `unauthenticated_read_product_listings`
 7. Release the version.
 8. From the app's **Home** page, select **Install app** and install it on the final Attune
    dev store.
 
-`write_products` covers `productSet`, including variant `inventoryQuantities`;
+`write_draft_orders` enables the primary quote-to-invoice path. `read_customers` is optional for
+attaching a known buyer to a Draft Order. `write_products` covers the optional `productSet` path,
+including variant `inventoryQuantities`;
 `write_publications` covers `publishablePublish`; and `read_locations` lets the spike
 discover an active location that fulfills online orders. `read_inventory` lets Attune
 reread and prove the exact location-level quantity instead of trusting its mutation
@@ -147,16 +151,14 @@ and Storefront-readable metafields through
 
 ## 8. Judge-equivalent browser proof
 
-After the server-side spike succeeds:
+1. Enter Attune through the judge buyer session and open the designated workspace.
+2. Open **Find makers** and confirm the connected shop name and chosen Shopify location are shown.
+3. Configure material, thickness, finish, and quantity, then submit the exact request.
+4. Switch visibly to the maker perspective, enter price and lead time, and send the quote.
+5. Confirm Shopify returns and Attune rereads a real Draft Order with an invoice URL.
+6. Return to the buyer perspective, accept the same immutable revision and specification hash,
+   then continue to the Shopify-hosted invoice checkout.
 
-1. Open the generated Liquid product URL in a Chromium browser with WebMCP support.
-2. Enter the storefront password.
-3. Confirm the product page is visibly loaded.
-4. Fetch the page's native Shopify tools.
-5. Call Shopify-native `get_product` for the visible product.
-6. Call Shopify-native `update_cart` with quantity `1`.
-7. Open the visible cart and confirm one ₹2,400 fabrication lot representing four
-   panels.
-
-Do not call Shopify's server-side `/api/mcp` or `/api/ucp/mcp` endpoints, do not add
-quantity four, and do not make checkout a release requirement.
+If the optional product path is also demonstrated, open the Liquid product in a WebMCP-enabled
+Chromium browser and verify it with Shopify-native tools. Do not call Shopify's server-side
+`/api/mcp` or `/api/ucp/mcp` endpoints.

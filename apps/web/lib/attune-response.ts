@@ -3,6 +3,31 @@ import { NextResponse } from 'next/server';
 
 import { isAttuneCommandError } from './attune-runtime';
 
+const SHOPIFY_ERROR_CODES = new Set([
+  'MISSING_CONFIGURATION',
+  'ADMIN_AUTH_FAILED',
+  'MISSING_ADMIN_SCOPES',
+  'GRAPHQL_FAILED',
+  'CONFORMANCE_FAILED',
+  'STOREFRONT_TIMEOUT',
+]);
+
+function shopifyError(error: unknown) {
+  if (error instanceof ShopifyIntegrationError) return error;
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = Reflect.get(error, 'code');
+  const message = Reflect.get(error, 'message');
+  if (
+    Reflect.get(error, 'name') !== 'ShopifyIntegrationError' ||
+    typeof code !== 'string' ||
+    !SHOPIFY_ERROR_CODES.has(code) ||
+    typeof message !== 'string'
+  ) {
+    return undefined;
+  }
+  return { code, message, retryable: Reflect.get(error, 'retryable') === true };
+}
+
 export function attuneErrorResponse(error: unknown): NextResponse {
   if (error instanceof Error && error.message === 'AUTHENTICATION_REQUIRED') {
     return NextResponse.json(
@@ -42,16 +67,17 @@ export function attuneErrorResponse(error: unknown): NextResponse {
     );
   }
 
-  if (error instanceof ShopifyIntegrationError) {
+  const integrationError = shopifyError(error);
+  if (integrationError) {
     return NextResponse.json(
       {
         error: {
-          code: error.code,
-          message: error.message,
-          retryable: error.retryable,
+          code: integrationError.code,
+          message: integrationError.message,
+          retryable: integrationError.retryable,
         },
       },
-      { status: error.retryable ? 503 : 424 },
+      { status: integrationError.retryable ? 503 : 424 },
     );
   }
 

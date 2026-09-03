@@ -30,6 +30,13 @@ export interface AgentContextFocus {
 }
 
 export interface ToolRuntime {
+  readonly current?: (signal?: AbortSignal) => Promise<AttuneApiView>;
+  readonly marketplace?: (signal?: AbortSignal) => Promise<unknown>;
+  readonly navigate?: (
+    destination:
+      | { readonly perspective: 'buyer' | 'provider'; readonly surface: string }
+      | { readonly url: string },
+  ) => Promise<unknown>;
   readonly observe: (
     focus?: AgentContextFocus,
     signal?: AbortSignal,
@@ -314,6 +321,55 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
+  const current = async (signal?: AbortSignal) => {
+    input.report({ execution: 'executing', lastAction: 'inspect_manufacturing_order' });
+    try {
+      const response = await fetch(workspaceEndpoint(), {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal,
+      });
+      const next = await responseJson(response);
+      if (!isAttuneApiView(next)) throw new TypeError('Attune returned an invalid workspace view.');
+      input.viewRef.current = next;
+      input.updateView(next);
+      input.report({ execution: 'completed', lastAction: 'inspect_manufacturing_order' });
+      return next;
+    } catch (error) {
+      input.report({ execution: 'failed', lastAction: 'inspect_manufacturing_order' });
+      throw error;
+    }
+  };
+  const marketplace = async (signal?: AbortSignal) => {
+    input.report({ execution: 'executing', lastAction: 'find_makers' });
+    try {
+      const response = await fetch(
+        attuneWorkspaceEndpoint('/api/attune/marketplace', input.workspaceId),
+        { cache: 'no-store', headers: { Accept: 'application/json' }, signal },
+      );
+      const payload = await responseJson(response);
+      const nextView =
+        typeof payload === 'object' && payload !== null ? Reflect.get(payload, 'view') : undefined;
+      if (isAttuneApiView(nextView)) {
+        input.viewRef.current = nextView;
+        input.updateView(nextView);
+      }
+      input.report({ execution: 'completed', lastAction: 'find_makers' });
+      return payload;
+    } catch (error) {
+      input.report({ execution: 'failed', lastAction: 'find_makers' });
+      throw error;
+    }
+  };
+  const navigate: ToolRuntime['navigate'] = async (destination) => {
+    const url =
+      'url' in destination
+        ? destination.url
+        : `/workspace/${encodeURIComponent(input.workspaceId)}?perspective=${destination.perspective}&surface=${encodeURIComponent(destination.surface)}`;
+    input.report({ execution: 'completed', lastAction: 'open_attune_surface' });
+    window.setTimeout(() => window.location.assign(url), 50);
+    return { status: 'OPENING', destination: url };
+  };
   const execute = async (command: Readonly<Record<string, unknown>>, signal?: AbortSignal) => {
     const startedAt = performance.now();
     const action = typeof command.type === 'string' ? command.type : 'attune_command';
@@ -410,5 +466,5 @@ export function createToolRuntime(input: {
       throw error;
     }
   };
-  return { execute, forecast, observe };
+  return { current, execute, forecast, marketplace, navigate, observe };
 }

@@ -88,6 +88,8 @@ export async function POST(request: Request) {
       'remove_constraint',
       'set_dimension',
       'remove_dimension',
+      'request_quote',
+      'accept_revision',
     ]);
     const result = isSketchCommand(input.command)
       ? await executeAgentSemanticCommand(workspaceId, role, input, timing.record)

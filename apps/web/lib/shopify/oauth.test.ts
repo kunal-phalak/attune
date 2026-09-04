@@ -146,7 +146,7 @@ describe('Shopify OAuth security', () => {
         expires_in: 3_600,
         refresh_token_expires_in: 7_776_000,
         scope:
-          'read_locations,write_draft_orders,write_customers,read_orders,write_products,write_files',
+          'read_locations,write_draft_orders,write_customers,read_orders,unauthenticated_read_content,unauthenticated_read_product_listings,write_products,write_files',
       });
     });
     const token = await exchangeShopifyAuthorizationCode(

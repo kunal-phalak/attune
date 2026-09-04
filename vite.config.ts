@@ -90,10 +90,8 @@ export default defineConfig({
     sortImports: true,
     sortPackageJson: true,
     ignorePatterns: [
-      'ATTUNE_CODEX_MASTER_BUILD_SPEC.md',
       'apps/web/public/canvaskit/**',
       'apps/web/next-env.d.ts',
-      'docs/attune-ui-reference-pack/**',
       'packages/database/drizzle/**',
     ],
   },

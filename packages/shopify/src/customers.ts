@@ -218,15 +218,24 @@ export async function synchronizeCustomerWithAdmin(
     );
   }
 
-  if (
-    normalized(customer.defaultEmailAddress?.emailAddress) !== normalized(profile.email) ||
-    normalized(customer.firstName) !== normalized(profile.firstName) ||
-    normalized(customer.lastName) !== normalized(profile.lastName) ||
-    !shippingAddress
-  ) {
+  const returnedEmail = normalized(customer.defaultEmailAddress?.emailAddress);
+  const returnedFirstName = normalized(customer.firstName);
+  const returnedLastName = normalized(customer.lastName);
+  const mismatches: string[] = [];
+  if (returnedEmail !== normalized(profile.email)) mismatches.push('email');
+  if (returnedFirstName !== normalized(profile.firstName)) mismatches.push('first name');
+  if (returnedLastName !== normalized(profile.lastName)) mismatches.push('last name');
+  if (!shippingAddress) mismatches.push('delivery address');
+  if (mismatches.length > 0) {
     throw new ShopifyIntegrationError(
       'PROTECTED_CUSTOMER_DATA_UNAVAILABLE',
-      'Shopify did not return the expected customer name, email, and delivery address. Confirm protected customer data access.',
+      `Shopify did not return the expected customer data for customer ${customerId} in ${input.shopDomain}: ${mismatches.join(', ')} were missing or redacted. Confirm the app is approved for Level 2 protected customer data access (name, address, phone, and email) in the Shopify Partner Dashboard: https://partners.shopify.com, and that the store re-granted the read_customers/write_customers scopes.`,
+    );
+  }
+  if (!shippingAddress) {
+    throw new ShopifyIntegrationError(
+      'PROTECTED_CUSTOMER_DATA_UNAVAILABLE',
+      `Shopify did not return a delivery address for customer ${customerId} in ${input.shopDomain}. Confirm protected customer data access in the Shopify Partner Dashboard.`,
     );
   }
 

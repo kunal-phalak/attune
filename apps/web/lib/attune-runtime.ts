@@ -1215,7 +1215,13 @@ async function executeProviderCommandWithContext(
     );
     liveblocksVersionId = collaboration.versionId;
   } catch (error) {
-    if (!(error instanceof Error) || error.message !== 'COLLABORATIVE_DRAFT_MISSING') {
+    // The Liveblocks canvas version is a non-critical annotation on the frozen revision. The
+    // canonical frozen revision (with its own full spec and spec hash) is persisted independently
+    // and is the source of truth for the quote. A canvas that is out of sync (or unversioned)
+    // must never block quote finalization, so tolerate both MISSING and DRIFT here and simply
+    // persist the quote without the canvas version binding.
+    const message = error instanceof Error ? error.message : '';
+    if (message !== 'COLLABORATIVE_DRAFT_MISSING' && message !== 'COLLABORATIVE_DRAFT_DRIFT') {
       throw error;
     }
   }

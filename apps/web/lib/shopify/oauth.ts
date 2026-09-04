@@ -14,6 +14,8 @@ export const SHOPIFY_CORE_SCOPES = [
   'read_customers',
   'write_customers',
   'read_orders',
+  'unauthenticated_read_content',
+  'unauthenticated_read_product_listings',
 ] as const;
 export const SHOPIFY_OPTIONAL_SCOPES = [
   'write_products',

@@ -42,3 +42,8 @@ export {
 export type { ShopifyDraftOrderSummary } from './draft-order-service';
 export { materializeRevision } from './materialize';
 export { attachExactVersionPreview } from './product-media';
+export {
+  createStorefrontAccessToken,
+  createStorefrontClientForDomain,
+  resolveShopBrandLogo,
+} from './shop';

@@ -4,6 +4,7 @@ import { MapPinIcon } from '@phosphor-icons/react';
 import mapboxgl from 'mapbox-gl';
 import { useEffect, useRef, useState } from 'react';
 
+import { SHOPIFY_FALLBACK_ICON_URL } from '../../lib/shopify/store-branding';
 import type { MarketplaceProvider } from './types';
 
 function markerElement(maker: MarketplaceProvider, selected: boolean): HTMLButtonElement {
@@ -26,7 +27,9 @@ function markerElement(maker: MarketplaceProvider, selected: boolean): HTMLButto
     inner.setAttribute('src', maker.logoUrl);
     inner.setAttribute('alt', '');
     inner.addEventListener('error', () => {
-      if (inner.parentElement === element) inner.remove();
+      if (inner.src !== SHOPIFY_FALLBACK_ICON_URL) {
+        inner.src = SHOPIFY_FALLBACK_ICON_URL;
+      }
     });
     element.append(inner);
   }

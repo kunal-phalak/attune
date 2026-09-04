@@ -117,6 +117,7 @@ export const shopifyInstallations = pgTable(
     primaryDomain: text('primary_domain').notNull(),
     currencyCode: text('currency_code').notNull(),
     encryptedOfflineAccessToken: text('encrypted_offline_access_token'),
+    encryptedStorefrontAccessToken: text('encrypted_storefront_access_token'),
     encryptedOfflineRefreshToken: text('encrypted_offline_refresh_token'),
     accessTokenExpiresAt: timestamp('access_token_expires_at', {
       mode: 'string',

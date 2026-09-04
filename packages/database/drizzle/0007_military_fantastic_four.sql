@@ -1,0 +1,1 @@
+ALTER TABLE "shopify_installations" ADD COLUMN "encrypted_storefront_access_token" text;

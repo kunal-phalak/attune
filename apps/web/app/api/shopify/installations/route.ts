@@ -43,7 +43,7 @@ export async function GET() {
       {
         configured: shopifyOAuthConfigured(),
         redirectUri: shopifyOAuthConfigured() ? shopifyOAuthConfiguration().redirectUri : null,
-        installations: installations.map(publicShopifyInstallation),
+        installations: await Promise.all(installations.map(publicShopifyInstallation)),
       },
       { headers: { 'Cache-Control': 'no-store' } },
     );
@@ -72,7 +72,9 @@ export async function PATCH(request: Request) {
       locationId,
     });
     const updated = await shopifyInstallationForOwner(user.principalId, installationId);
-    return NextResponse.json({ installation: updated ? publicShopifyInstallation(updated) : null });
+    return NextResponse.json({
+      installation: updated ? await publicShopifyInstallation(updated) : null,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Shopify location could not be updated.' },

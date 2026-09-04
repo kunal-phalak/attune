@@ -33,6 +33,7 @@ export {
   refreshAgentDelegation,
   resetJudgeWorkspace,
   saveShopifyInstallation,
+  saveShopifyInstallationStorefrontAccessToken,
   saveShopifyInstallationMakerProfile,
   saveBuyerCommerceProfile,
   saveShopifyCustomerBinding,

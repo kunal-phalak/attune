@@ -2,12 +2,17 @@ import { createHash } from 'node:crypto';
 
 import {
   markShopifyInstallationNeedsReauthorization,
+  saveShopifyInstallationMakerProfile,
+  saveShopifyInstallationStorefrontAccessToken,
   updateShopifyInstallationCredentials,
   type ShopifyInstallation,
 } from '@attune/database';
 import {
+  createStorefrontAccessToken,
+  createStorefrontClientForDomain,
   createAdminClientForAccessToken,
   inspectShopifyProviderWithAdmin,
+  resolveShopBrandLogo,
   type ShopifyProviderConnection,
 } from '@attune/shopify';
 
@@ -20,7 +25,7 @@ import {
   SHOPIFY_OPTIONAL_SCOPES,
   shopifyOAuthConfiguration,
 } from './oauth';
-import { shopifyStoreLogoUrl } from './store-branding';
+import { officialShopifyStoreLogoUrl, shopifyStoreLogoUrl } from './store-branding';
 
 const REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 
@@ -28,8 +33,57 @@ export function shopifyInstallationId(ownerPrincipalId: string, shopId: string):
   return `shopify:${createHash('sha256').update(`${ownerPrincipalId}\0${shopId}`).digest('hex').slice(0, 32)}`;
 }
 
-export function publicShopifyInstallation(installation: ShopifyInstallation) {
+async function storefrontTokenForInstallation(
+  installation: ShopifyInstallation,
+): Promise<string | undefined> {
+  if (missingShopifyCoreScopes(installation.grantedScopes).length > 0) return undefined;
+  if (installation.encryptedStorefrontAccessToken) {
+    return decryptShopifyToken(installation.encryptedStorefrontAccessToken);
+  }
+  const token = await createStorefrontAccessToken(
+    await adminForShopifyInstallation(installation),
+    `Attune marketplace ${installation.id}`,
+  );
+  await saveShopifyInstallationStorefrontAccessToken(
+    installation.id,
+    encryptShopifyToken(token),
+  );
+  return token;
+}
+
+export async function resolveShopifyInstallationBrandLogo(
+  installation: ShopifyInstallation,
+): Promise<string | undefined> {
+  const token = await storefrontTokenForInstallation(installation).catch(() => undefined);
+  const cached = officialShopifyStoreLogoUrl(installation.makerProfile?.shopify?.logoUrl);
+  if (cached || !token) return cached;
+  let resolved: string | undefined;
+  try {
+    resolved = officialShopifyStoreLogoUrl(
+      await resolveShopBrandLogo(
+        createStorefrontClientForDomain(installation.shopDomain, token),
+      ),
+    );
+  } catch {
+    return undefined;
+  }
+  if (resolved && installation.makerProfile?.shopify) {
+    await saveShopifyInstallationMakerProfile({
+      ownerPrincipalId: installation.ownerPrincipalId,
+      installationId: installation.id,
+      makerProfile: {
+        ...installation.makerProfile,
+        shopify: { ...installation.makerProfile.shopify, logoUrl: resolved },
+      },
+      marketplaceListed: installation.marketplaceListed,
+    });
+  }
+  return resolved;
+}
+
+export async function publicShopifyInstallation(installation: ShopifyInstallation) {
   const missingCoreScopes = missingShopifyCoreScopes(installation.grantedScopes);
+  const logoUrl = await resolveShopifyInstallationBrandLogo(installation);
   const selectedLocation =
     installation.locations.find(({ id }) => id === installation.selectedLocationId) ?? null;
   return {
@@ -38,7 +92,7 @@ export function publicShopifyInstallation(installation: ShopifyInstallation) {
     shopDomain: installation.shopDomain,
     shopName: installation.shopName,
     primaryDomain: installation.primaryDomain,
-    logoUrl: shopifyStoreLogoUrl(installation.makerProfile?.shopify?.logoUrl),
+    logoUrl: shopifyStoreLogoUrl(logoUrl),
     currencyCode: installation.currencyCode,
     grantedScopes: installation.grantedScopes,
     missingCoreScopes,
@@ -113,7 +167,13 @@ export async function adminForShopifyInstallation(installation: ShopifyInstallat
 export async function inspectShopifyInstallation(
   installation: ShopifyInstallation,
 ): Promise<ShopifyProviderConnection> {
-  return inspectShopifyProviderWithAdmin(await adminForShopifyInstallation(installation));
+  const connection = await inspectShopifyProviderWithAdmin(
+    await adminForShopifyInstallation(installation),
+  );
+  const logoUrl = await resolveShopifyInstallationBrandLogo(installation);
+  return logoUrl
+    ? { ...connection, shop: { ...connection.shop, logoUrl } }
+    : connection;
 }
 
 export async function registerShopifyUninstallWebhook(

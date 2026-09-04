@@ -1,4 +1,8 @@
-export function shopifyStoreLogoUrl(storefrontLogoUrl?: string | null): string | undefined {
+export const SHOPIFY_FALLBACK_ICON_URL = 'https://cdn.shopify.com/static/shopify-favicon.png';
+
+export function officialShopifyStoreLogoUrl(
+  storefrontLogoUrl?: string | null,
+): string | undefined {
   const candidate = storefrontLogoUrl?.trim();
   if (!candidate) return undefined;
   try {
@@ -10,4 +14,8 @@ export function shopifyStoreLogoUrl(storefrontLogoUrl?: string | null): string |
   } catch {
     return undefined;
   }
+}
+
+export function shopifyStoreLogoUrl(storefrontLogoUrl?: string | null): string {
+  return officialShopifyStoreLogoUrl(storefrontLogoUrl) ?? SHOPIFY_FALLBACK_ICON_URL;
 }

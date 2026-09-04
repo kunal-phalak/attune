@@ -4,7 +4,13 @@ import {
   shopifyInstallationForShop,
 } from '@attune/database';
 import { createJudgeProviderCapabilityProfile } from '@attune/domain';
-import { createAdminClientForAccessToken, inspectShopifyProviderWithAdmin } from '@attune/shopify';
+import {
+  createAdminClientForAccessToken,
+  createStorefrontAccessToken,
+  createStorefrontClientForDomain,
+  inspectShopifyProviderWithAdmin,
+  resolveShopBrandLogo,
+} from '@attune/shopify';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
@@ -77,7 +83,23 @@ export async function GET(request: Request) {
       configuration.adminVersion,
       token.accessToken,
     );
-    const connection = await inspectShopifyProviderWithAdmin(admin);
+    const inspectedConnection = await inspectShopifyProviderWithAdmin(admin);
+    const connectionStatus =
+      missingShopifyCoreScopes(inspectedConnection.grantedScopes).length === 0
+        ? 'connected'
+        : 'needs_reauthorization';
+    const storefrontToken =
+      connectionStatus === 'connected'
+        ? await createStorefrontAccessToken(admin, `Attune marketplace ${user.principalId}`)
+        : undefined;
+    const logoUrl = storefrontToken
+      ? await resolveShopBrandLogo(
+          createStorefrontClientForDomain(callbackShopDomain, storefrontToken),
+        )
+      : undefined;
+    const connection = logoUrl
+      ? { ...inspectedConnection, shop: { ...inspectedConnection.shop, logoUrl } }
+      : inspectedConnection;
     const verifiedShopDomain = normalizeShopDomain(connection.shop.myshopifyDomain);
     if (verifiedShopDomain !== callbackShopDomain) {
       return failure('Shopify returned a different store identity.', 403);
@@ -99,27 +121,26 @@ export async function GET(request: Request) {
       primaryDomain: connection.shop.primaryDomain.host,
       currencyCode: connection.shop.currencyCode,
       encryptedOfflineAccessToken: encryptShopifyToken(token.accessToken),
+      encryptedStorefrontAccessToken: storefrontToken
+        ? encryptShopifyToken(storefrontToken)
+        : existing?.encryptedStorefrontAccessToken,
       encryptedOfflineRefreshToken: token.refreshToken
         ? encryptShopifyToken(token.refreshToken)
         : null,
       accessTokenExpiresAt: token.accessTokenExpiresAt,
       refreshTokenExpiresAt: token.refreshTokenExpiresAt,
       grantedScopes: connection.grantedScopes,
-      connectionStatus:
-        missingShopifyCoreScopes(connection.grantedScopes).length === 0
-          ? 'connected'
-          : 'needs_reauthorization',
+      connectionStatus,
       locations: connection.locations,
       selectedLocationId,
       makerProfile:
-        existing?.makerProfile ??
-        (selectedLocationId
+        selectedLocationId
           ? shopifyProviderProfile(
               connection,
               selectedLocationId,
-              createJudgeProviderCapabilityProfile(),
+              existing?.makerProfile ?? createJudgeProviderCapabilityProfile(),
             )
-          : null),
+          : (existing?.makerProfile ?? null),
       marketplaceListed: existing?.marketplaceListed ?? true,
       installedAt: existing?.installedAt ?? now,
       updatedAt: now,

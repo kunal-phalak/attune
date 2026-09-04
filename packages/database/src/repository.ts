@@ -179,6 +179,7 @@ function shopifyInstallationSelection() {
     primaryDomain: shopifyInstallations.primaryDomain,
     currencyCode: shopifyInstallations.currencyCode,
     encryptedOfflineAccessToken: shopifyInstallations.encryptedOfflineAccessToken,
+    encryptedStorefrontAccessToken: shopifyInstallations.encryptedStorefrontAccessToken,
     encryptedOfflineRefreshToken: shopifyInstallations.encryptedOfflineRefreshToken,
     accessTokenExpiresAt: shopifyInstallations.accessTokenExpiresAt,
     refreshTokenExpiresAt: shopifyInstallations.refreshTokenExpiresAt,
@@ -286,6 +287,7 @@ export async function saveShopifyInstallation(input: {
   readonly primaryDomain: string;
   readonly currencyCode: string;
   readonly encryptedOfflineAccessToken: string;
+  readonly encryptedStorefrontAccessToken?: string | null;
   readonly encryptedOfflineRefreshToken?: string | null;
   readonly accessTokenExpiresAt?: string | null;
   readonly refreshTokenExpiresAt?: string | null;
@@ -317,6 +319,9 @@ export async function saveShopifyInstallation(input: {
         primaryDomain: values.primaryDomain,
         currencyCode: values.currencyCode,
         encryptedOfflineAccessToken: values.encryptedOfflineAccessToken,
+        ...(values.encryptedStorefrontAccessToken !== undefined
+          ? { encryptedStorefrontAccessToken: values.encryptedStorefrontAccessToken }
+          : {}),
         encryptedOfflineRefreshToken: values.encryptedOfflineRefreshToken ?? null,
         accessTokenExpiresAt: values.accessTokenExpiresAt ?? null,
         refreshTokenExpiresAt: values.refreshTokenExpiresAt ?? null,
@@ -355,6 +360,16 @@ export async function updateShopifyInstallationCredentials(input: {
       updatedAt: input.updatedAt,
     })
     .where(eq(shopifyInstallations.id, input.installationId));
+}
+
+export async function saveShopifyInstallationStorefrontAccessToken(
+  installationId: string,
+  encryptedStorefrontAccessToken: string,
+): Promise<void> {
+  await getDatabase()
+    .update(shopifyInstallations)
+    .set({ encryptedStorefrontAccessToken, updatedAt: new Date().toISOString() })
+    .where(eq(shopifyInstallations.id, installationId));
 }
 
 export async function markShopifyInstallationNeedsReauthorization(
@@ -415,6 +430,7 @@ export async function disconnectShopifyInstallation(
     .update(shopifyInstallations)
     .set({
       encryptedOfflineAccessToken: null,
+      encryptedStorefrontAccessToken: null,
       encryptedOfflineRefreshToken: null,
       accessTokenExpiresAt: null,
       refreshTokenExpiresAt: null,
@@ -437,6 +453,7 @@ export async function markShopifyInstallationUninstalled(shopDomain: string): Pr
     .update(shopifyInstallations)
     .set({
       encryptedOfflineAccessToken: null,
+      encryptedStorefrontAccessToken: null,
       encryptedOfflineRefreshToken: null,
       accessTokenExpiresAt: null,
       refreshTokenExpiresAt: null,

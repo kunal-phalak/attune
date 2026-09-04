@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { shopifyStoreLogoUrl } from './store-branding';
+import { SHOPIFY_FALLBACK_ICON_URL, shopifyStoreLogoUrl } from './store-branding';
 
 describe('Shopify store branding', () => {
   it('accepts the official HTTPS storefront logo URL unchanged', () => {
@@ -9,8 +9,13 @@ describe('Shopify store branding', () => {
     );
   });
 
-  it('rejects non-HTTPS and credential-bearing URLs', () => {
-    expect(shopifyStoreLogoUrl('http://cdn.shopify.com/store-logo.png')).toBeUndefined();
-    expect(shopifyStoreLogoUrl('https://user:secret@cdn.shopify.com/store-logo.png')).toBeUndefined();
+  it('uses Shopify’s favicon for missing or unsafe storefront logos', () => {
+    expect(shopifyStoreLogoUrl()).toBe(SHOPIFY_FALLBACK_ICON_URL);
+    expect(shopifyStoreLogoUrl('http://cdn.shopify.com/store-logo.png')).toBe(
+      SHOPIFY_FALLBACK_ICON_URL,
+    );
+    expect(shopifyStoreLogoUrl('https://user:secret@cdn.shopify.com/store-logo.png')).toBe(
+      SHOPIFY_FALLBACK_ICON_URL,
+    );
   });
 });

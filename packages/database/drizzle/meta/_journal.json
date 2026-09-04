@@ -50,6 +50,13 @@
       "when": 1788441880764,
       "tag": "0006_round_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788498269575,
+      "tag": "0007_military_fantastic_four",
+      "breakpoints": true
     }
   ]
 }

@@ -1238,6 +1238,10 @@ export async function executeProviderCommand(workspaceId: string, input: Command
 
 const DEFAULT_DEMO_CURRENCY = 'INR';
 
+function isStaleWorkspaceError(error: unknown): boolean {
+  return error instanceof AttuneCommandError && error.code === 'STALE_WORKSPACE';
+}
+
 async function finalizeProviderQuoteWithContext(
   workspaceId: string,
   input: CommandExecutionInput,
@@ -1369,19 +1373,34 @@ async function finalizeProviderQuoteWithContext(
         ? await createAndVerifyDraftOrderWithAdmin(admin, draftOrderInput)
         : await createAndVerifyDraftOrder(draftOrderInput);
       stage = 'Draft Order reconciliation';
-      const current = await readWorkspaceBundle(workspaceId);
-      await executePersistedCommand({
-        workspaceId,
-        command: { type: 'synchronize_shopify_draft_order', snapshot },
-        envelope: {
-          commandId: `shopify-draft-order-${crypto.randomUUID()}`,
-          expectedWorkspaceSeq: current.workspace.workspaceSeq,
-          expectedCapabilityEpoch: current.workspace.capabilityEpoch,
-          expectedAuthorityEpoch: current.workspace.authorityEpoch,
-          expectedSpecHash: hashSpecification(current.workspace),
-        },
-        context: trustedShopifyReconciliationContext(workspaceId),
-      });
+      // The workspace may advance between the read and the command execution (e.g. through
+      // Liveblocks sync or a concurrent mutation). Re-read and retry once on sequence drift
+      // so the reconciliation doesn't fail on a stale envelope.
+      const reconciliationContext = trustedShopifyReconciliationContext(workspaceId);
+      const reconciliationCommandId = `shopify-draft-order-${crypto.randomUUID()}`;
+      /* eslint-disable no-await-in-loop -- sequential retry for sequence drift */
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const current = await readWorkspaceBundle(workspaceId);
+        try {
+          await executePersistedCommand({
+            workspaceId,
+            command: { type: 'synchronize_shopify_draft_order', snapshot },
+            envelope: {
+              commandId: reconciliationCommandId,
+              expectedWorkspaceSeq: current.workspace.workspaceSeq,
+              expectedCapabilityEpoch: current.workspace.capabilityEpoch,
+              expectedAuthorityEpoch: current.workspace.authorityEpoch,
+              expectedSpecHash: hashSpecification(current.workspace),
+            },
+            context: reconciliationContext,
+          });
+          break;
+        } catch (error) {
+          if (attempt === 0 && isStaleWorkspaceError(error)) continue;
+          throw error;
+        }
+      }
+      /* eslint-enable no-await-in-loop */
     }
     stage = 'buyer notification';
     await notifyWorkspace({

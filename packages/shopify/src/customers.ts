@@ -111,9 +111,13 @@ function assertNoUserErrors(
   operation: string,
 ): void {
   if (errors?.length) {
+    const details = errors
+      .map((e) => e.message)
+      .filter(Boolean)
+      .join('; ');
     throw new ShopifyIntegrationError(
       'CONFORMANCE_FAILED',
-      `${operation} returned customer validation errors.`,
+      `${operation} returned customer validation errors${details ? `: ${details}` : ''}.`,
     );
   }
 }

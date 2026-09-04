@@ -1203,6 +1203,12 @@ async function executeProviderCommandWithContext(
   const current = await readWorkspaceBundle(workspaceId);
   let liveblocksVersionId: string | undefined;
   try {
+    // Bring the collaborative canvas up to the authoritative workspace before validating the
+    // snapshot. syncAuthoritativeWorkspace only overwrites the room when the canvas is behind
+    // the authoritative seq, so genuine un-committed canvas edits (a real drift) are preserved
+    // and still surfaced, but a stale canvas that simply never got re-synced no longer produces
+    // a false COLLABORATIVE_DRAFT_DRIFT on quote finalization.
+    await syncAuthoritativeWorkspace(current.liveblocksRoomId, current.workspace);
     const collaboration = await snapshotCollaborativeDraft(
       current.liveblocksRoomId,
       current.workspace,

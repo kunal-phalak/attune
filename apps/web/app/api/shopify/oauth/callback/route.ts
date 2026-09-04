@@ -133,14 +133,13 @@ export async function GET(request: Request) {
       connectionStatus,
       locations: connection.locations,
       selectedLocationId,
-      makerProfile:
-        selectedLocationId
-          ? shopifyProviderProfile(
-              connection,
-              selectedLocationId,
-              existing?.makerProfile ?? createJudgeProviderCapabilityProfile(),
-            )
-          : (existing?.makerProfile ?? null),
+      makerProfile: selectedLocationId
+        ? shopifyProviderProfile(
+            connection,
+            selectedLocationId,
+            existing?.makerProfile ?? createJudgeProviderCapabilityProfile(),
+          )
+        : (existing?.makerProfile ?? null),
       marketplaceListed: existing?.marketplaceListed ?? true,
       installedAt: existing?.installedAt ?? now,
       updatedAt: now,

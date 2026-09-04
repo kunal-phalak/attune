@@ -40,8 +40,8 @@ import {
   defaultManufacturingVersionId,
   resolveManufacturingVersionSelection,
 } from '../lib/manufacturing/version-selection';
-import { projectSketchForCanvas } from '../lib/sketch/canvaskit-projection';
 import { SHOPIFY_FALLBACK_ICON_URL } from '../lib/shopify/store-branding';
+import { projectSketchForCanvas } from '../lib/sketch/canvaskit-projection';
 import { attuneToastManager } from './attune-ui-provider';
 import { BuyerProfileDialog } from './manufacturing-flow/buyer-profile-dialog';
 import { ProviderProfileSurface } from './manufacturing-flow/provider-profile';

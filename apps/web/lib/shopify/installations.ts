@@ -44,10 +44,7 @@ async function storefrontTokenForInstallation(
     await adminForShopifyInstallation(installation),
     `Attune marketplace ${installation.id}`,
   );
-  await saveShopifyInstallationStorefrontAccessToken(
-    installation.id,
-    encryptShopifyToken(token),
-  );
+  await saveShopifyInstallationStorefrontAccessToken(installation.id, encryptShopifyToken(token));
   return token;
 }
 
@@ -60,9 +57,7 @@ export async function resolveShopifyInstallationBrandLogo(
   let resolved: string | undefined;
   try {
     resolved = officialShopifyStoreLogoUrl(
-      await resolveShopBrandLogo(
-        createStorefrontClientForDomain(installation.shopDomain, token),
-      ),
+      await resolveShopBrandLogo(createStorefrontClientForDomain(installation.shopDomain, token)),
     );
   } catch {
     return undefined;
@@ -171,9 +166,7 @@ export async function inspectShopifyInstallation(
     await adminForShopifyInstallation(installation),
   );
   const logoUrl = await resolveShopifyInstallationBrandLogo(installation);
-  return logoUrl
-    ? { ...connection, shop: { ...connection.shop, logoUrl } }
-    : connection;
+  return logoUrl ? { ...connection, shop: { ...connection.shop, logoUrl } } : connection;
 }
 
 export async function registerShopifyUninstallWebhook(

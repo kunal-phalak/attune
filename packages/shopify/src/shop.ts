@@ -13,7 +13,11 @@ export async function createStorefrontAccessToken(
         accessToken: string;
         accessScopes: readonly { handle: string }[];
       } | null;
-      userErrors: readonly { code?: string | null; field?: readonly string[] | null; message: string }[];
+      userErrors: readonly {
+        code?: string | null;
+        field?: readonly string[] | null;
+        message: string;
+      }[];
     };
   }>(RESOLVE_STOREFRONT_TOKEN, { title }, 'Resolve Shopify Storefront token');
   const result = data.storefrontAccessTokenCreate;
@@ -33,10 +37,7 @@ export async function createStorefrontAccessToken(
   return token;
 }
 
-export function createStorefrontClientForDomain(
-  domain: string,
-  token: string,
-): GraphqlClient {
+export function createStorefrontClientForDomain(domain: string, token: string): GraphqlClient {
   const version =
     process.env.SHOPIFY_STOREFRONT_API_VERSION?.trim() ||
     process.env.SHOPIFY_ADMIN_API_VERSION?.trim();
@@ -51,9 +52,7 @@ export function createStorefrontClientForDomain(
   });
 }
 
-export async function resolveShopBrandLogo(
-  storefront: GraphqlClient,
-): Promise<string | undefined> {
+export async function resolveShopBrandLogo(storefront: GraphqlClient): Promise<string | undefined> {
   try {
     const data = await storefront<{
       shop: { brand: { squareLogo: { image: { url: string } | null } | null } | null };

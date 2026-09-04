@@ -11,6 +11,10 @@ function graphqlTestClient(result: unknown): GraphqlClient {
   };
 }
 
+const unavailableStorefront: GraphqlClient = async () => {
+  throw new Error('Storefront unavailable');
+};
+
 describe('Shopify Storefront branding', () => {
   it('creates a Storefront access token', async () => {
     const token = await createStorefrontAccessToken(
@@ -61,12 +65,6 @@ describe('Shopify Storefront branding', () => {
     await expect(
       resolveShopBrandLogo(graphqlTestClient({ shop: { brand: { squareLogo: null } } })),
     ).resolves.toBeUndefined();
-    await expect(
-      resolveShopBrandLogo(
-        (async () => {
-          throw new Error('Storefront unavailable');
-        }) as GraphqlClient,
-      ),
-    ).resolves.toBeUndefined();
+    await expect(resolveShopBrandLogo(unavailableStorefront)).resolves.toBeUndefined();
   });
 });

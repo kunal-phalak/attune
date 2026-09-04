@@ -21,6 +21,7 @@ import {
   shopifyInstallationId,
 } from '../../../../../lib/shopify/installations';
 import {
+  decryptShopifyToken,
   encryptShopifyToken,
   exchangeShopifyAuthorizationCode,
   missingShopifyCoreScopes,
@@ -88,23 +89,42 @@ export async function GET(request: Request) {
       missingShopifyCoreScopes(inspectedConnection.grantedScopes).length === 0
         ? 'connected'
         : 'needs_reauthorization';
-    const storefrontToken =
-      connectionStatus === 'connected'
-        ? await createStorefrontAccessToken(admin, `Attune marketplace ${user.principalId}`)
-        : undefined;
-    const logoUrl = storefrontToken
-      ? await resolveShopBrandLogo(
-          createStorefrontClientForDomain(callbackShopDomain, storefrontToken),
-        )
-      : undefined;
-    const connection = logoUrl
-      ? { ...inspectedConnection, shop: { ...inspectedConnection.shop, logoUrl } }
-      : inspectedConnection;
-    const verifiedShopDomain = normalizeShopDomain(connection.shop.myshopifyDomain);
+    const verifiedShopDomain = normalizeShopDomain(inspectedConnection.shop.myshopifyDomain);
     if (verifiedShopDomain !== callbackShopDomain) {
       return failure('Shopify returned a different store identity.', 403);
     }
     const existing = await shopifyInstallationForShop(user.principalId, verifiedShopDomain);
+
+    // The storefront token and brand logo are non-critical branding concerns. Never let a
+    // storefront-token failure (e.g. ACCESS_DENIED when the app lacks Storefront access) fail
+    // the store connection itself. Reuse an existing stored token when the store already has
+    // one, and only mint a fresh token otherwise.
+    let storefrontToken: string | undefined;
+    let logoUrl: string | undefined;
+    if (connectionStatus === 'connected') {
+      try {
+        if (existing?.encryptedStorefrontAccessToken) {
+          storefrontToken = decryptShopifyToken(existing.encryptedStorefrontAccessToken);
+        } else {
+          storefrontToken = await createStorefrontAccessToken(
+            admin,
+            `Attune marketplace ${user.principalId}`,
+          );
+        }
+        if (storefrontToken) {
+          logoUrl = await resolveShopBrandLogo(
+            createStorefrontClientForDomain(callbackShopDomain, storefrontToken),
+          );
+        }
+      } catch {
+        // Keep whatever plaintext token was already decrypted (or none). The encrypted form
+        // stored below falls back to the existing token, so a re-mint failure never corrupts it.
+        logoUrl = undefined;
+      }
+    }
+    const connection = logoUrl
+      ? { ...inspectedConnection, shop: { ...inspectedConnection.shop, logoUrl } }
+      : inspectedConnection;
     const now = new Date().toISOString();
     const activeLocations = connection.locations.filter(({ isActive }) => isActive);
     const selectedLocationId =

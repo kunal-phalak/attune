@@ -13,9 +13,9 @@ import {
   ensureJudgeWorkspace,
   executePersistedCommand,
   finishExternalMaterialization,
+  grantWorkspaceProviderAuthority,
   issueAgentDelegation,
   JUDGE_WORKSPACE_ID,
-  listProjectsForUser,
   liveblocksRoomIdForWorkspace,
   readWorkspaceBundle,
   refreshAgentDelegation,
@@ -68,6 +68,7 @@ import { requireWorkspaceIdentity, workspaceIdentity } from './auth/session';
 import { attuneActivityNotification } from './liveblocks/notifications';
 import {
   getLiveblocks,
+  grantLiveblocksWorkspaceProviderAccess,
   liveblocksConfigured,
   setAgentPresence,
   snapshotCollaborativeDraft,
@@ -325,6 +326,7 @@ async function notifyWorkspace(input: {
 async function notifyMakerForRequest(
   shopDomain: string,
   input: {
+    readonly workspaceId: string;
     readonly title: string;
     readonly description: string;
     readonly subjectId: string;
@@ -336,18 +338,16 @@ async function notifyMakerForRequest(
     if (!installation) return;
     const maker = await userIdForPrincipalId(installation.ownerPrincipalId);
     if (!maker) return;
-    const projects = await listProjectsForUser(maker.userId);
-    const operational = projects.find(({ roles }) => roles.includes('provider')) ?? projects[0];
-    if (!operational) return;
+    const bundle = await readWorkspaceBundle(input.workspaceId);
     await getLiveblocks().triggerInboxNotification(
       attuneActivityNotification({
         userId: maker.userId,
-        roomId: operational.liveblocksRoomId,
-        workspaceId: operational.workspaceId,
+        roomId: bundle.liveblocksRoomId,
+        workspaceId: input.workspaceId,
         subjectId: input.subjectId,
         title: input.title,
         description: input.description,
-        route: `/dashboard?workspace_id=${encodeURIComponent(operational.workspaceId)}&perspective=provider&surface=provider_requests`,
+        route: `/dashboard?workspace_id=${encodeURIComponent(input.workspaceId)}&perspective=provider&surface=provider_requests`,
       }),
     );
   } catch {
@@ -901,6 +901,18 @@ async function synchronizeLiveMakerForRequest(
     installation.selectedLocationId ?? existing.shopify?.locationId,
     installation.makerProfile ?? existing,
   );
+  const maker = await userIdForPrincipalId(installation.ownerPrincipalId);
+  if (!maker) {
+    throw new ShopifyIntegrationError(
+      'ADMIN_AUTH_FAILED',
+      'The selected Maker store owner could not receive this request.',
+    );
+  }
+  const access = await grantWorkspaceProviderAuthority(workspaceId, maker.userId);
+  await grantLiveblocksWorkspaceProviderAccess(access.liveblocksRoomId, maker.userId);
+  if (access.changed) {
+    await syncAuthoritativeWorkspace(access.liveblocksRoomId, access.workspace);
+  }
   return persistProviderProfile(workspaceId, profile);
 }
 
@@ -948,15 +960,9 @@ export async function executeAgentCommand(
   if (input.command.type === 'request_quote') {
     const request = result.workspace.manufacturingRequests.at(-1);
     const subjectId = `request:${request?.requestId ?? input.envelope.commandId}`;
-    await notifyWorkspace({
-      workspaceId,
-      title: 'Request received',
-      description: 'A manufacturing request is ready for maker review.',
-      subjectId,
-      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=provider_requests`,
-    }).catch(() => undefined);
     if (request?.provider.shopDomain) {
       await notifyMakerForRequest(request.provider.shopDomain, {
+        workspaceId,
         title: 'New request received',
         description: 'A buyer sent you a manufacturing request ready for review.',
         subjectId,
@@ -1158,15 +1164,9 @@ export async function executeHumanCommand(
   if (input.command.type === 'request_quote') {
     const request = result.workspace.manufacturingRequests.at(-1);
     const subjectId = `request:${request?.requestId ?? input.envelope.commandId}`;
-    await notifyWorkspace({
-      workspaceId,
-      title: 'Request received',
-      description: 'A manufacturing request is ready for maker review.',
-      subjectId,
-      route: `/dashboard?workspace_id=${encodeURIComponent(workspaceId)}&perspective=provider&surface=provider_requests`,
-    }).catch(() => undefined);
     if (request?.provider.shopDomain) {
       await notifyMakerForRequest(request.provider.shopDomain, {
+        workspaceId,
         title: 'New request received',
         description: 'A buyer sent you a manufacturing request ready for review.',
         subjectId,

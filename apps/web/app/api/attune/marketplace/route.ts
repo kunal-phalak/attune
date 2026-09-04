@@ -126,9 +126,7 @@ async function marketplaceProvider(
     connectionLabel: 'Shopify connected',
     locationName: profile.shopify?.locationName,
     address: profile.shopify?.address,
-    logoUrl: profile.shopify?.primaryDomain
-      ? shopifyStoreLogoUrl(profile.shopify.primaryDomain)
-      : undefined,
+    logoUrl: shopifyStoreLogoUrl(live.connection.shop.logoUrl),
     latitude: profile.shopify?.latitude,
     longitude: profile.shopify?.longitude,
     profile,

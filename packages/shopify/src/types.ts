@@ -60,6 +60,7 @@ export interface ShopifyShopIdentity {
   readonly name: string;
   readonly myshopifyDomain: string;
   readonly primaryDomain: { readonly host: string; readonly url: string };
+  readonly logoUrl?: string;
   readonly currencyCode: string;
 }
 

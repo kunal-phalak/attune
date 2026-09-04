@@ -15,6 +15,7 @@ export {
   executePersistedCommand,
   finishExternalMaterialization,
   grantShopifyMakerAuthority,
+  grantWorkspaceProviderAuthority,
   identityForLiveblocksRoom,
   identityForWorkspace,
   issueAgentDelegation,

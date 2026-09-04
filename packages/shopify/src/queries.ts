@@ -23,6 +23,36 @@ export const INSPECT_PROVIDER = `#graphql
   }
 `;
 
+export const STOREFRONT_ACCESS_TOKENS = `#graphql
+  query ListAttuneStorefrontAccessTokens {
+    shop {
+      storefrontAccessTokens(first: 1) {
+        nodes { accessToken }
+      }
+    }
+  }
+`;
+
+export const STOREFRONT_ACCESS_TOKEN_CREATE = `#graphql
+  mutation CreateAttuneStorefrontAccessToken($input: StorefrontAccessTokenInput!) {
+    storefrontAccessTokenCreate(input: $input) {
+      storefrontAccessToken { accessToken }
+      userErrors { field message }
+    }
+  }
+`;
+
+export const STOREFRONT_BRANDING = `#graphql
+  query InspectAttuneStorefrontBranding {
+    shop {
+      brand {
+        squareLogo { image { url } }
+        logo { image { url } }
+      }
+    }
+  }
+`;
+
 export const RESOLVE_LOCATION = `#graphql
   query ResolveAttuneLocation {
     locations(first: 20) {

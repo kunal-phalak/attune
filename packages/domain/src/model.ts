@@ -63,6 +63,7 @@ export interface ProviderCapabilityProfile {
     readonly shopId: string;
     readonly shopDomain: string;
     readonly primaryDomain: string;
+    readonly logoUrl?: string;
     readonly locationId: string;
     readonly locationName: string;
     readonly address: string;

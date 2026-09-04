@@ -110,6 +110,17 @@ export async function liveblocksRoomPermission(
   };
 }
 
+export async function grantLiveblocksWorkspaceProviderAccess(
+  roomId: string,
+  userId: string,
+): Promise<void> {
+  if (!liveblocksConfigured()) return;
+  await roomWithCurrentAccessModel(roomId);
+  await getLiveblocks().updateRoom(roomId, {
+    usersAccesses: { [userId]: ['*:write'] },
+  });
+}
+
 export function collaborativeDraft(workspace: AttuneWorkspace): AttuneCollaborativeDraft {
   return {
     intent: 'Create and manufacture the exact shared design revision.',

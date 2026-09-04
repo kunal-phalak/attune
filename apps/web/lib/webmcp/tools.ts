@@ -165,7 +165,7 @@ export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<st
   if (operation === 'update_recipe_parameters') {
     exact(
       value,
-      ['operation', 'source_ref', 'expected_version', 'changes'],
+      ['operation', 'source_ref', 'expected_version', 'changes', 'placement'],
       'update_recipe_parameters input',
     );
     return {
@@ -175,6 +175,7 @@ export function parseModifyGeometryToolInput(input: unknown): Readonly<Record<st
         ? { expectedVersion: finite(value.expected_version, 'expected_version') }
         : {}),
       changes: object(value.changes, 'changes'),
+      ...(value.placement !== undefined ? { placement: object(value.placement, 'placement') } : {}),
     };
   }
   if (operation === 'set_radius') {

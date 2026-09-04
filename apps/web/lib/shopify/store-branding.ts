@@ -1,15 +1,12 @@
-const STOREFRONT_ICON_SERVICE = 'https://www.google.com/s2/favicons';
-
-export function shopifyStoreLogoUrl(primaryDomain: string): string | undefined {
-  const candidate = primaryDomain.trim().toLowerCase();
+export function shopifyStoreLogoUrl(storefrontLogoUrl?: string | null): string | undefined {
+  const candidate = storefrontLogoUrl?.trim();
   if (!candidate) return undefined;
   try {
-    const url = new URL(candidate.includes('://') ? candidate : `https://${candidate}`);
+    const url = new URL(candidate);
     if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.port) {
       return undefined;
     }
-    const parameters = new URLSearchParams({ domain_url: url.origin, sz: '128' });
-    return `${STOREFRONT_ICON_SERVICE}?${parameters}`;
+    return url.toString();
   } catch {
     return undefined;
   }

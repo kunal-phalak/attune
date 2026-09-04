@@ -41,6 +41,7 @@ export type SketchCommand =
       readonly sourceRef: string;
       readonly expectedVersion?: number;
       readonly changes: RecipeParameterValues;
+      readonly placement?: RecipePlacement;
     }
   | {
       readonly type: 'set_radius';
@@ -357,7 +358,7 @@ function footprintReferences(document: SketchDocument, command: SketchCommand) {
               sourceRef: root.sourceRef.sourceRef,
               recipe: root.sourceRef.recipeId,
               parameters: mergeRecipeParameterChanges(root.sourceRef.parameters, command.changes),
-              placement: root.sourceRef.placement,
+              placement: command.placement ?? root.sourceRef.placement,
               ...(root.sourceRef.designRequest
                 ? { designRequest: root.sourceRef.designRequest }
                 : {}),
@@ -598,7 +599,7 @@ export function commandFootprint(
         sourceRef: root.sourceRef.sourceRef,
         recipe: root.sourceRef.recipeId,
         parameters: mergeRecipeParameterChanges(root.sourceRef.parameters, command.changes),
-        placement: root.sourceRef.placement,
+        placement: command.placement ?? root.sourceRef.placement,
         ...(root.sourceRef.designRequest ? { designRequest: root.sourceRef.designRequest } : {}),
         status: 'regenerated',
       }).document;
@@ -941,7 +942,7 @@ export function applySketchCommand(
         sourceRef: root.sourceRef.sourceRef,
         recipe: root.sourceRef.recipeId,
         parameters: mergeRecipeParameterChanges(root.sourceRef.parameters, command.changes),
-        placement: root.sourceRef.placement,
+        placement: command.placement ?? root.sourceRef.placement,
         ...(root.sourceRef.designRequest ? { designRequest: root.sourceRef.designRequest } : {}),
         status: 'regenerated',
       }).document;

@@ -125,6 +125,7 @@ export function shopifyProviderProfile(
       shopId: connection.shop.id,
       shopDomain: connection.shop.myshopifyDomain,
       primaryDomain: connection.shop.primaryDomain.host,
+      ...(connection.shop.logoUrl ? { logoUrl: connection.shop.logoUrl } : {}),
       locationId: location.id,
       locationName: location.name,
       address: formattedShopifyAddress(location),

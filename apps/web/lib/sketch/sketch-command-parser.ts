@@ -483,7 +483,7 @@ export function parseSketchCommand(value: Record<string, unknown>): AttuneComman
     case 'update_recipe_parameters':
       exact(
         value,
-        ['type', 'sourceRef', 'expectedVersion', 'changes'],
+        ['type', 'sourceRef', 'expectedVersion', 'changes', 'placement'],
         'update_recipe_parameters command',
       );
       return {
@@ -493,6 +493,7 @@ export function parseSketchCommand(value: Record<string, unknown>): AttuneComman
           ? { expectedVersion: nonNegativeInteger(value.expectedVersion, 'expectedVersion') }
           : {}),
         changes: recipeParameters(value.changes, 'changes'),
+        ...(value.placement !== undefined ? { placement: recipePlacement(value.placement) } : {}),
       };
     case 'set_radius':
       exact(value, ['type', 'target', 'radius'], 'set_radius command');

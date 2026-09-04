@@ -1627,6 +1627,64 @@ export async function grantShopifyMakerAuthority(userId: string): Promise<void> 
   for (const workspaceId of workspaceIds) identities?.delete(`${workspaceId}\u0000${userId}`);
 }
 
+export async function grantWorkspaceProviderAuthority(
+  workspaceId: string,
+  userId: string,
+): Promise<{
+  readonly changed: boolean;
+  readonly liveblocksRoomId: string;
+  readonly workspace: AttuneWorkspace;
+}> {
+  const result = await getDatabase().transaction(async (transaction) => {
+    const workspaceRows = await transaction
+      .select({
+        liveblocksRoomId: workspaces.liveblocksRoomId,
+        workspace: workspaces.currentSpecification,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .for('update')
+      .limit(1);
+    const row = workspaceRows[0];
+    if (!row) throw new Error(`Attune workspace ${workspaceId} was not found.`);
+    const membershipRows = await transaction
+      .select({ roles: workspaceMemberships.roles })
+      .from(workspaceMemberships)
+      .where(
+        and(
+          eq(workspaceMemberships.workspaceId, workspaceId),
+          eq(workspaceMemberships.userId, userId),
+        ),
+      )
+      .limit(1);
+    const roles = membershipRows[0]?.roles ?? [];
+    if (roles.includes('provider')) {
+      return {
+        changed: false,
+        liveblocksRoomId: row.liveblocksRoomId,
+        workspace: workspaceWithCurrentContract(row.workspace),
+      };
+    }
+    const nextRoles = [...roles, 'provider' as const];
+    await transaction
+      .insert(workspaceMemberships)
+      .values({ workspaceId, userId, roles: nextRoles, canComment: true })
+      .onConflictDoUpdate({
+        target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
+        set: { roles: nextRoles, canComment: true },
+      });
+    const current = workspaceWithCurrentContract(row.workspace);
+    const workspace = { ...current, authorityEpoch: current.authorityEpoch + 1 };
+    await transaction
+      .update(workspaces)
+      .set({ currentSpecification: workspace, updatedAt: new Date().toISOString() })
+      .where(eq(workspaces.id, workspaceId));
+    return { changed: true, liveblocksRoomId: row.liveblocksRoomId, workspace };
+  });
+  repositoryGlobal().attuneWorkspaceIdentities?.delete(`${workspaceId}\u0000${userId}`);
+  return immutableCopy(result);
+}
+
 export async function canCreateProjectsForUser(userId: string): Promise<boolean> {
   const rows = await getDatabase()
     .select({ organizationId: organizationMemberships.organizationId })

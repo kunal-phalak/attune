@@ -38,7 +38,7 @@ export function publicShopifyInstallation(installation: ShopifyInstallation) {
     shopDomain: installation.shopDomain,
     shopName: installation.shopName,
     primaryDomain: installation.primaryDomain,
-    logoUrl: shopifyStoreLogoUrl(installation.primaryDomain),
+    logoUrl: shopifyStoreLogoUrl(installation.makerProfile?.shopify?.logoUrl),
     currencyCode: installation.currencyCode,
     grantedScopes: installation.grantedScopes,
     missingCoreScopes,
